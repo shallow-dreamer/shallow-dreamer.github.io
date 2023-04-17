@@ -3,7 +3,7 @@
     "title": "Shallow Dreamer Blog",
     "version": "1.0.0",
     "homepage": "https://shallow-dreamer.github.io/ShallowDreamer-Blog/",
-    "author": "Hux",
+    "author": "Shallow Dreamer",
     "devDependencies": {
         "grunt": "~0.4.5",
         "grunt-contrib-less": "~0.11.4",
