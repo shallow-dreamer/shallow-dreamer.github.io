@@ -64,15 +64,15 @@ header-img: "img/about-bg.jpg"
 
 
 
-{% if site.duoshuo_username %}
+[% if site.duoshuo_username %]
 <!-- 多说评论框 start -->
 <div class="comment">
     <div class="ds-thread"
-    {% if site.duoshuo_username == "huxblog" %}
+    [% if site.duoshuo_username == "huxblog" %]
         data-thread-id="1187623191091085319"
-    {% else %}
+    [% else %]
         data-thread-key="{{site.duoshuo_username}}/about"
-    {% endif %}
+    [% endif %]
 
     data-title="{{page.title}}"
     data-url="{{site.url}}/about/"></div>
@@ -98,10 +98,10 @@ header-img: "img/about-bg.jpg"
     })();
 </script>
 <!-- 多说公共JS代码 end -->
-{% endif %}
+[% endif %]
 
 
-{% if site.disqus_username %}
+[% if site.disqus_username %]
 <!-- disqus 评论框 start -->
 <div class="comment">
     <div id="disqus_thread" class="disqus-thread">
@@ -124,4 +124,4 @@ header-img: "img/about-bg.jpg"
     })();
 </script>
 <!-- disqus 公共JS代码 end -->
-{% endif %}
+[% endif %]
