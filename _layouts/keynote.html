@@ -4,12 +4,12 @@ layout: default
 
 <!-- Image to hack wechat -->
 <!-- <img src="/img/icon_wechat.png" width="0" height="0"> -->
-<!-- <img src="{{ site.baseurl }}/[% if page.header-img %]{{ page.header-img }}[% else %]{{ site.header-img }}[% endif %]" width="0" height="0"> -->
+<!-- <img src="{{ site.baseurl }}/{%- if page.header-img -%}{{ page.header-img }}{%- else -%}{{ site.header-img }}{%- endif -%}" width="0" height="0"> -->
 
 <!-- Post Header -->
 <style type="text/css">
     header.intro-header{
-        /*background-image: url('{{ site.baseurl }}/[% if page.header-img %]{{ page.header-img }}[% else %]{{ site.header-img }}[% endif %]')*/
+        /*background-image: url('{{ site.baseurl }}/{%- if page.header-img -%}{{ page.header-img }}{%- else -%}{{ site.header-img }}{%- endif -%}')*/
         height: 500px;
         overflow: hidden;
     }
@@ -26,18 +26,18 @@ layout: default
                 <div class="col-lg-8 col-lg-offset-2 col-md-10 col-md-offset-1">
                     <div class="post-heading">
                         <div class="tags">
-                            [% for tag in page.tags %]
+                            {%- for tag in page.tags -%}
                             <a class="tag" href="{{ site.baseurl }}/tags/#{{ tag }}" title="{{ tag }}">{{ tag }}</a>
-                            [% endfor %]
+                            {%- endfor -%}
                         </div>
                         <h1>{{ page.title }}</h1>
-                        [% comment %]
+                        {%- comment -%}
                             always create a h2 for keeping the margin , Hux
-                        [% endcomment %]
-                        [% comment %] if page.subtitle [% endcomment %]
+                        {%- endcomment -%}
+                        {%- comment -%} if page.subtitle {%- endcomment -%}
                         <h2 class="subheading">{{ page.subtitle }}</h2>
-                        [% comment %] endif [% endcomment %]
-                        <span class="meta">Posted by [% if page.author %]{{ page.author }}[% else %]{{ site.title }}[% endif %] on {{ page.date | date: "%B %-d, %Y" }}</span>
+                        {%- comment -%} endif {%- endcomment -%}
+                        <span class="meta">Posted by {%- if page.author -%}{{ page.author }}{%- else -%}{{ site.title }}{%- endif -%} on {{ page.date | date: "%B %-d, %Y" }}</span>
                     </div>
                 </div>
             </div>
@@ -59,13 +59,13 @@ layout: default
 
                 <hr>
 
-                [% if site.duoshuo_share && site.duoshuo_username %]
+                {%- if site.duoshuo_share && site.duoshuo_username -%}
                 <!-- 多说 Share start -->
                 </style>
                 <div class="ds-share"
                     style="text-align: right"
                     data-thread-key="{{page.id}}" data-title="{{page.title}}"
-                    data-images="{{ site.url }}{{site.baseurl}}/[% if page.header-img %]{{ page.header-img }}[% else %]{{ site.header-img }}[% endif %]"
+                    data-images="{{ site.url }}{{site.baseurl}}/{%- if page.header-img -%}{{ page.header-img }}{%- else -%}{{ site.header-img }}{%- endif -%}"
                     data-content="{{ content | strip_html | truncate:80 }} | Hux Blog，@Hux黄玄 的个人博客"
                     data-url="{{site.url}}{{site.baseurl}}{{page.url}}">
                     <div class="ds-share-inline">
@@ -81,24 +81,24 @@ layout: default
                 <hr>
                 </div>
                 <!-- 多少 Share end-->
-                [% endif %]
+                {%- endif -%}
 
 
                 <ul class="pager">
-                    [% if page.previous.url %]
+                    {%- if page.previous.url -%}
                     <li class="previous">
                         <a href="{{ page.previous.url | prepend: site.baseurl | replace: '//', '/' }}" data-toggle="tooltip" data-placement="top" title="{{page.previous.title}}">&larr; Previous Post</a>
                     </li>
-                    [% endif %]
-                    [% if page.next.url %]
+                    {%- endif -%}
+                    {%- if page.next.url -%}
                     <li class="next">
                         <a href="{{ page.next.url | prepend: site.baseurl | replace: '//', '/' }}" data-toggle="tooltip" data-placement="top" title="{{page.next.title}}">Next Post &rarr;</a>
                     </li>
-                    [% endif %]
+                    {%- endif -%}
                 </ul>
 
 
-                [% if site.duoshuo_username %]
+                {%- if site.duoshuo_username -%}
                 <!-- 多说评论框 start -->
                 <div class="comment">
                     <div class="ds-thread"
@@ -108,9 +108,9 @@ layout: default
                     </div>
                 </div>
                 <!-- 多说评论框 end -->
-                [% endif %]
+                {%- endif -%}
 
-                [% if site.disqus_username %]
+                {%- if site.disqus_username -%}
                 <!-- disqus 评论框 start -->
                 <div class="comment">
                     <div id="disqus_thread" class="disqus-thread">
@@ -118,7 +118,7 @@ layout: default
                     </div>
                 </div>
                 <!-- disqus 评论框 end -->
-                [% endif %]
+                {%- endif -%}
 
             </div>
 
@@ -128,32 +128,32 @@ layout: default
                 col-md-10 col-md-offset-1 ">
 
                 <!-- Featured Tags -->
-                [% if site.featured-tags %]
+                {%- if site.featured-tags -%}
                 <section>
                     <hr class="hidden-sm hidden-xs">
                     <h5><a href="/tags/">FEATURED TAGS</a></h5>
                     <div class="tags">
-                        [% for tag in site.tags %]
-                            [% if tag[1].size > {{site.featured-condition-size}} %]
+                        {%- for tag in site.tags -%}
+                            {%- if tag[1].size > {{site.featured-condition-size}} -%}
                                 <a href="{{ site.baseurl }}/tags/#{{ tag[0] }}" title="{{ tag[0] }}" rel="{{ tag[1].size }}">
                                     {{ tag[0] }}
                                 </a>
-                            [% endif %]
-                        [% endfor %]
+                            {%- endif -%}
+                        {%- endfor -%}
                     </div>
                 </section>
-                [% endif %]
+                {%- endif -%}
 
                 <!-- Friends Blog -->
-                [% if site.friends %]
+                {%- if site.friends -%}
                 <hr>
                 <h5>FRIENDS</h5>
                 <ul class="list-inline">
-                    [% for friend in site.friends %]
+                    {%- for friend in site.friends -%}
                         <li><a href="{{friend.href}}">{{friend.title}}</a></li>
-                    [% endfor %]
+                    {%- endfor -%}
                 </ul>
-                [% endif %]
+                {%- endif -%}
             </div>
         </div>
     </div>
@@ -182,7 +182,7 @@ layout: default
     resize();
 </script>
 
-[% if site.duoshuo_username %]
+{%- if site.duoshuo_username -%}
 <!-- 多说公共JS代码 start (一个网页只需插入一次) -->
 <script type="text/javascript">
     // dynamic User by Hux
@@ -200,10 +200,10 @@ layout: default
     })();
 </script>
 <!-- 多说公共JS代码 end -->
-[% endif %]
+{%- endif -%}
 
 
-[% if site.disqus_username %]
+{%- if site.disqus_username -%}
 <!-- disqus 公共JS代码 start (一个网页只需插入一次) -->
 <script type="text/javascript">
     /* * * CONFIGURATION VARIABLES * * */
@@ -218,10 +218,10 @@ layout: default
     })();
 </script>
 <!-- disqus 公共JS代码 end -->
-[% endif %]
+{%- endif -%}
 
 
-[% if site.anchorjs %]
+{%- if site.anchorjs -%}
 <!-- async load function -->
 <script>
     function async(u, c) {
@@ -255,4 +255,4 @@ layout: default
         }
     }
 </style>
-[% endif %]
+{%- endif -%}

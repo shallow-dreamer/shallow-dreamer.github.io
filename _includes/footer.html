@@ -4,7 +4,7 @@
         <div class="row">
             <div class="col-lg-8 col-lg-offset-2 col-md-10 col-md-offset-1">
                 <ul class="list-inline text-center">
-                    [% if site.RSS %]
+                    {%- if site.RSS -%}
                     <li>
                         <a href="{{ "/feed.xml" | prepend: site.baseurl }}">
                             <span class="fa-stack fa-lg">
@@ -13,8 +13,8 @@
                             </span>
                         </a>
                     </li>
-                    [% endif %]
-                    [% if site.twitter_username %]
+                    {%- endif -%}
+                    {%- if site.twitter_username -%}
                     <li>
                         <a href="https://twitter.com/{{ site.twitter_username }}">
                             <span class="fa-stack fa-lg">
@@ -23,10 +23,10 @@
                             </span>
                         </a>
                     </li>
-                    [% endif %]
+                    {%- endif -%}
 
                     <!-- add Weibo, Zhihu by Hux, add target = "_blank" to <a> by Hux -->
-                    [% if site.zhihu_username %]
+                    {%- if site.zhihu_username -%}
                     <li>
                         <a target="_blank" href="https://www.zhihu.com/people/{{ site.zhihu_username }}">
                             <span class="fa-stack fa-lg">
@@ -35,8 +35,8 @@
                             </span>
                         </a>
                     </li>
-                    [% endif %]
-                    [% if site.weibo_username %]
+                    {%- endif -%}
+                    {%- if site.weibo_username -%}
                     <li>
                         <a target="_blank" href="http://weibo.com/{{ site.weibo_username }}">
                             <span class="fa-stack fa-lg">
@@ -45,10 +45,10 @@
                             </span>
                         </a>
                     </li>
-                    [% endif %]
+                    {%- endif -%}
 
 
-                    [% if site.facebook_username %]
+                    {%- if site.facebook_username -%}
                     <li>
                         <a target="_blank" href="https://www.facebook.com/{{ site.facebook_username }}">
                             <span class="fa-stack fa-lg">
@@ -57,8 +57,8 @@
                             </span>
                         </a>
                     </li>
-                    [% endif %]
-                    [% if site.github_username %]
+                    {%- endif -%}
+                    {%- if site.github_username -%}
                     <li>
                         <a target="_blank" href="https://github.com/{{ site.github_username }}">
                             <span class="fa-stack fa-lg">
@@ -67,7 +67,7 @@
                             </span>
                         </a>
                     </li>
-                    [% endif %]
+                    {%- endif -%}
                 </ul>
                 <p class="copyright text-muted">
                     Copyright &copy; {{ site.title }} {{ site.time | date: '%Y' }}
@@ -149,7 +149,7 @@
 
 
 <!-- Google Analytics -->
-[% if site.ga_track_id %]
+{%- if site.ga_track_id -%}
 <script>
     // dynamic User by Hux
     var _gaId = '{{ site.ga_track_id }}';
@@ -164,11 +164,11 @@
     ga('create', _gaId, _gaDomain);
     ga('send', 'pageview');
 </script>
-[% endif %]
+{%- endif -%}
 
 
 <!-- Baidu Tongji -->
-[% if site.ba_track_id %]
+{%- if site.ba_track_id -%}
 <script>
     // dynamic User by Hux
     var _baId = '{{ site.ba_track_id }}';
@@ -182,4 +182,4 @@
       s.parentNode.insertBefore(hm, s);
     })();
 </script>
-[% endif %]
+{%- endif -%}

@@ -3,12 +3,12 @@ layout: default
 ---
 
 <!-- Page Header -->
-<header class="intro-header" style="background-image: url('{{ site.baseurl }}/[% if page.header-img %]{{ page.header-img }}[% else %]{{ site.header-img }}[% endif %]')">
+<header class="intro-header" style="background-image: url('{{ site.baseurl }}/{%- if page.header-img -%}{{ page.header-img }}{%- else -%}{{ site.header-img }}{%- endif -%}')">
     <div class="container">
         <div class="row">
             <div class="col-lg-8 col-lg-offset-2 col-md-10 col-md-offset-1 ">
                 <div class="site-heading">
-                    <h1>[% if page.title %]{{ page.title }}[% else %]{{ site.title }}[% endif %]</h1>
+                    <h1>{%- if page.title -%}{{ page.title }}{%- else -%}{{ site.title }}{%- endif -%}</h1>
                     <!--<hr class="small">-->
                     <span class="subheading">{{ page.description }}</span>
                 </div>
@@ -20,7 +20,7 @@ layout: default
 <!-- Main Content -->
 <div class="container">
 	<div class="row">
-        [% if site.sidebar == false %]
+        {%- if site.sidebar == false -%}
 <!-- NO SIDEBAR -->
     <!-- Post Container -->
             <div class="col-lg-8 col-lg-offset-2 col-md-10 col-md-offset-1 post-container">
@@ -33,34 +33,34 @@ layout: default
                 sidebar-container">
 
                 <!-- Featured Tags -->
-                [% if site.featured-tags %]
+                {%- if site.featured-tags -%}
                 <section>
                     <!-- no hr -->
                     <h5><a href="{{'/tags/' | prepend: site.baseurl }}">FEATURED TAGS</a></h5>
                     <div class="tags">
-        				[% for tag in site.tags %]
-                            [% if tag[1].size > {{site.featured-condition-size}} %]
+        				{%- for tag in site.tags -%}
+                            {%- if tag[1].size > {{site.featured-condition-size}} -%}
                 				<a href="{{ site.baseurl }}/tags/#{{ tag[0] }}" title="{{ tag[0] }}" rel="{{ tag[1].size }}">
                                     {{ tag[0] }}
                                 </a>
-                            [% endif %]
-        				[% endfor %]
+                            {%- endif -%}
+        				{%- endfor -%}
         			</div>
                 </section>
-                [% endif %]
+                {%- endif -%}
 
                 <!-- Friends Blog -->
-                [% if site.friends %]
+                {%- if site.friends -%}
                 <hr>
                 <h5>FRIENDS</h5>
                 <ul class="list-inline">
-                    [% for friend in site.friends %]
+                    {%- for friend in site.friends -%}
                         <li><a href="{{friend.href}}">{{friend.title}}</a></li>
-                    [% endfor %]
+                    {%- endfor -%}
                 </ul>
-                [% endif %]
+                {%- endif -%}
             </div>
-        [% else %]
+        {%- else -%}
 
 <!-- USE SIDEBAR -->
     <!-- Post Container -->
@@ -82,35 +82,35 @@ layout: default
                 sidebar-container
             ">
                 <!-- Featured Tags -->
-                [% if site.featured-tags %]
+                {%- if site.featured-tags -%}
                 <section>
                     <hr class="hidden-sm hidden-xs">
                     <h5><a href="{{'/tags/' | prepend: site.baseurl }}">FEATURED TAGS</a></h5>
                     <div class="tags">
-                        [% for tag in site.tags %]
-                            [% if tag[1].size > {{site.featured-condition-size}} %]
+                        {%- for tag in site.tags -%}
+                            {%- if tag[1].size > {{site.featured-condition-size}} -%}
                                 <a href="{{ site.baseurl }}/tags/#{{ tag[0] }}" title="{{ tag[0] }}" rel="{{ tag[1].size }}">
                                     {{ tag[0] }}
                                 </a>
-                            [% endif %]
-                        [% endfor %]
+                            {%- endif -%}
+                        {%- endfor -%}
                     </div>
                 </section>
-                [% endif %]
+                {%- endif -%}
 
                 <!-- Short About -->
                 <section class="visible-md visible-lg">
                     <hr><h5><a href="{{'/about/' | prepend: site.baseurl }}">ABOUT ME</a></h5>
                     <div class="short-about">
-                        [% if site.sidebar-avatar %]
+                        {%- if site.sidebar-avatar -%}
                             <img src="{{site.sidebar-avatar}}" />
-                        [% endif %]
-                        [% if site.sidebar-about-description %]
+                        {%- endif -%}
+                        {%- if site.sidebar-about-description -%}
                             <p>{{site.sidebar-about-description}}</p>
-                        [% endif %]
+                        {%- endif -%}
                         <!-- SNS Link -->
                         <ul class="list-inline">
-                            [% if site.RSS %]
+                            {%- if site.RSS -%}
                             <li>
                                 <a href="{{ "/feed.xml" | prepend: site.baseurl }}">
                                     <span class="fa-stack fa-lg">
@@ -119,8 +119,8 @@ layout: default
                                     </span>
                                 </a>
                             </li>
-                            [% endif %]
-                            [% if site.twitter_username %]
+                            {%- endif -%}
+                            {%- if site.twitter_username -%}
                             <li>
                                 <a href="https://twitter.com/{{ site.twitter_username }}">
                                     <span class="fa-stack fa-lg">
@@ -129,8 +129,8 @@ layout: default
                                     </span>
                                 </a>
                             </li>
-                            [% endif %]
-                            [% if site.zhihu_username %]
+                            {%- endif -%}
+                            {%- if site.zhihu_username -%}
                             <li>
                                 <a target="_blank" href="https://www.zhihu.com/people/{{ site.zhihu_username }}">
                                     <span class="fa-stack fa-lg">
@@ -139,8 +139,8 @@ layout: default
                                     </span>
                                 </a>
                             </li>
-                            [% endif %]
-                            [% if site.weibo_username %]
+                            {%- endif -%}
+                            {%- if site.weibo_username -%}
                             <li>
                                 <a target="_blank" href="http://weibo.com/{{ site.weibo_username }}">
                                     <span class="fa-stack fa-lg">
@@ -149,8 +149,8 @@ layout: default
                                     </span>
                                 </a>
                             </li>
-                            [% endif %]
-                            [% if site.facebook_username %]
+                            {%- endif -%}
+                            {%- if site.facebook_username -%}
                             <li>
                                 <a target="_blank" href="https://www.facebook.com/{{ site.facebook_username }}">
                                     <span class="fa-stack fa-lg">
@@ -159,8 +159,8 @@ layout: default
                                     </span>
                                 </a>
                             </li>
-                            [% endif %]
-                            [% if site.github_username %]
+                            {%- endif -%}
+                            {%- if site.github_username -%}
                             <li>
                                 <a target="_blank" href="https://github.com/{{ site.github_username }}">
                                     <span class="fa-stack fa-lg">
@@ -169,21 +169,21 @@ layout: default
                                     </span>
                                 </a>
                             </li>
-                            [% endif %]
+                            {%- endif -%}
                         </ul>
                     </div>
                 </section>
                 <!-- Friends Blog -->
-                [% if site.friends %]
+                {%- if site.friends -%}
                 <hr>
                 <h5>FRIENDS</h5>
                 <ul class="list-inline">
-                    [% for friend in site.friends %]
+                    {%- for friend in site.friends -%}
                         <li><a href="{{friend.href}}">{{friend.title}}</a></li>
-                    [% endfor %]
+                    {%- endfor -%}
                 </ul>
-                [% endif %]
+                {%- endif -%}
     		</div>
-        [% endif %]
+        {%- endif -%}
 	</div>
 </div>

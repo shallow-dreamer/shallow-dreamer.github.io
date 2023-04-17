@@ -5530,7 +5530,7 @@ function defaultDisplay( nodeName ) {
 }
 var rmargin = (/^margin/);
 
-var rnumnonpx = new RegExp( "^(" + pnum + ")(?!px)[a-z%]+$", "i" );
+var rnumnonpx = new RegExp( "^(" + pnum + ")(?!px)[a-z-%}+$", "i" );
 
 var getStyles = function( elem ) {
 		// Support: IE<=11+, Firefox<=30+ (#15098, #14150)
@@ -6263,7 +6263,7 @@ jQuery.fx.step = {};
 var
 	fxNow, timerId,
 	rfxtypes = /^(?:toggle|show|hide)$/,
-	rfxnum = new RegExp( "^(?:([+-])=|)(" + pnum + ")([a-z%]*)$", "i" ),
+	rfxnum = new RegExp( "^(?:([+-])=|)(" + pnum + ")([a-z-%}*)$", "i" ),
 	rrun = /queueHooks$/,
 	animationPrefilters = [ defaultPrefilter ],
 	tweeners = {
