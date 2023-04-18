@@ -6,7 +6,7 @@ date:       2023-04-18 22:00:00
 author:     "Shallow Dreamer"
 header-img: "img/post-bg-2023.jpg"
 tags:
-    - hello world!!!
+    - hello world
 ---
 
 > “Yeah It's on. ”
