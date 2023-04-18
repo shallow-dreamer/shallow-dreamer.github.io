@@ -3,10 +3,14 @@
     "title": "Hux Blog",
     "version": "1.0.0",
 <<<<<<< HEAD
+<<<<<<< HEAD
     "homepage": "http://huxpro.github.io",
 =======
     "homepage": "https://shallow-dreamer.github.io/ShallowDreamer-Blog/",
 >>>>>>> parent of 506555b (master)
+=======
+    "homepage": "http://huxpro.github.io",
+>>>>>>> parent of 722c56d (master)
     "author": "Hux",
     "devDependencies": {
         "grunt": "~0.4.5",
