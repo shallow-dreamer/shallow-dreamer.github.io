@@ -3,7 +3,7 @@ layout:     post
 title:      "Welcome to Shallow Dreamer Blog"
 subtitle:   " \"Hello World, Hello Blog\""
 date:       2023-04-18
-author:     "Shallow Dreamer"
+author:     " Shallow Dreamer "
 header-img: "img/post-bg-2023.jpg"
 tags:
     - hello world

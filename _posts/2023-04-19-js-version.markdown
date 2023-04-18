@@ -2,8 +2,8 @@
 layout:     post
 title:      "Example Post"
 subtitle:   "ES5, ES6, ES2016, ES.Next: What's going on with JavaScript versioning?"
-date:       2023-04-19
-author:     "Shallow Dreamer"
+date:       2023-04-18
+author:     " Shallow Dreamer "
 header-img: "img/post-bg-js-version.jpg"
 tags:
     - 前端开发
