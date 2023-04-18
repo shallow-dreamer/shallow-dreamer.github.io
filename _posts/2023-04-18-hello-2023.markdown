@@ -1,0 +1,17 @@
+---
+layout:     post
+title:      "Welcome to Shallow Dreamer Blog"
+subtitle:   " \"Hello World, Hello Blog\""
+date:       2023-04-18 22:00:00
+author:     "Shallow Dreamer"
+header-img: "img/post-bg-2023.jpg"
+tags:
+    - hello world!!!
+---
+
+> “Yeah It's on. ”
+
+
+## 前言
+
+Shallow Dreamer 的 Blog 就这么开通了。
