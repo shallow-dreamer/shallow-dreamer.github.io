@@ -1,27 +1,15 @@
 {
-    "name": "hux-blog",
-    "title": "Hux Blog",
+    "name": "Shallow Dreamer Blog",
+    "title": "Shallow Dreamer Blog",
     "version": "1.0.0",
-<<<<<<< HEAD
-<<<<<<< HEAD
-    "homepage": "http://huxpro.github.io",
-=======
     "homepage": "https://shallow-dreamer.github.io/ShallowDreamer-Blog/",
->>>>>>> parent of 506555b (master)
-=======
-    "homepage": "http://huxpro.github.io",
->>>>>>> parent of 722c56d (master)
-    "author": "Hux",
+    "author": "ShallowDreamer",
     "devDependencies": {
         "grunt": "~0.4.5",
         "grunt-contrib-less": "~0.11.4",
         "grunt-contrib-watch": "~0.6.1",
         "grunt-banner": "~0.2.3",
         "grunt-contrib-uglify": "~0.5.1"
-    },
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/Huxpro/huxpro.github.io"
     },
     "scripts": {
         "preview": "cd _site; python -m SimpleHTTPServer 8020",
