@@ -1,0 +1,191 @@
+---
+layout:     post
+title:      "计算数据区域密集度"
+subtitle:   "使用python和js"
+date:       2023-04-19
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+    - js
+---
+
+目的是计算数据区域密集度，网格大小决定密集度的准确度
+
+1、使用python实现
+
+```python
+# 格网算法计算数据集区域数据密集度
+import time
+import random
+import numpy as np
+import pandas as pd
+
+# 模拟数据集
+def create_data():
+    data_x = []
+    data_y = []
+    data = []
+    for i in range(300000):
+        x = random.randrange(0, 300000)
+        y = random.randrange(-1500, 1500)
+        data_x.append(x)
+        data_y.append(y)
+        data.append([x, y])
+    return data_x, data_y, data
+
+# 计算网格数据密集度
+def calculate_density(gridSize, bounds):
+    data_x, data_y, data = create_data()
+
+    # 计算网格边界
+    x = np.arange(bounds[0][0],
+                  bounds[1][0] + gridSize,
+                  gridSize)
+    y = np.arange(bounds[0][1],
+                  bounds[1][1] + gridSize,
+                  gridSize)
+
+    # 使用pandas构建网格
+    grid = pd.DataFrame(0, index=x[:-1], columns=y[:-1])
+
+    # 将数据分配到网格中
+    for point in data:
+        if point[0] < bounds[0][0] \
+            or point[0] > bounds[1][0] \
+            or point[1] < bounds[0][1] \
+            or point[1] > bounds[1][1]:
+            continue
+
+        # 计算数据在那个网格内
+        x_index = int((point[0] - bounds[0][0]) // gridSize)
+        y_index = int((point[1] - bounds[0][1]) // gridSize)
+
+        # 将网格计数 +1
+        grid.iloc[x_index, y_index] += 1
+
+    # 计算每个网格的密度
+    densities = grid.to_numpy() / (gridSize * gridSize)
+
+    # 将密度添加到数据中
+    for point in data:
+        if point[0] < bounds[0][0] \
+            or point[0] > bounds[1][0] \
+            or point[1] < bounds[0][1] \
+            or point[1] > bounds[1][1]:
+            continue
+
+        # 计算数据在那个网格内
+        x_index = int((point[0] - bounds[0][0]) // gridSize)
+        y_index = int((point[1] - bounds[0][1]) // gridSize)
+
+        point.append(densities[x_index, y_index])
+
+    return densities, data
+
+if __name__ == "__main__":
+    start_time = time.time()
+    densities, data = calculate_density(100,
+                                  [[0, -1500], [300000, 1500]])
+    end_time = time.time()
+    print("消耗的时间:", end_time - start_time)
+    print(densities)
+```
+2、使用js实现
+
+```JavaScript
+// 生成模拟数据集
+function createData() {
+    let data = []
+    for (i = 0; i < 10000; i++) {
+        let data_y = (Math.random() - Math.random())
+        let data_x = i
+        data.push([data_x, data_y])
+    }
+    return data
+}
+
+// 计算最大值
+function getMax(data){
+    let len = data.length
+    let max = -Infinity
+
+    while(len--){
+        max = data[len] > max ? data[len] : max
+    }
+    return max
+}
+
+// 计算最小值
+function getMin(data){
+    let len = data.length
+    let min = Infinity
+
+    while(len--){
+        min = data[len] < min ? data[len] : min
+    }
+    return min
+}
+
+// 计算区域数据密集度
+function calculateDensity(gridSize){
+    let data = createData()
+    let x = data.map(v => v[0])
+    let y = data.map(v => v[1])
+    // 计算数据极值
+    // min和max在数据量大时崩溃，125519
+    // let min_x = Math.min(...x)
+    // let max_x = Math.max(...x)
+    // let min_y = Math.min(...y)
+    // let max_y = Math.max(...y)
+
+    let min_x = getMin(x)
+    let max_x = getMax(x)
+    let min_y = getMin(y)
+    let max_y = getMax(y)
+
+
+    // 计算数据区域范围
+    let width = max_x - min_x
+    let height = max_y - min_y
+
+    // 计算宽高的分段数
+    let x_count = data.length / 100
+    let y_count = 100
+
+    let x_gridSize = width / (x_count - 1)
+    let y_gridSize = height / (y_count - 1)
+
+    // 创建嵌套数组模拟二维数组构建网格
+    let counts = Array.from(Array(x_count), () => Array.from(Array(y_count), () => new Array(3).fill(0)))
+
+    console.log(counts)
+
+    data.forEach((v) => {
+        if(v[0] < min_x || v[0] > max_x || v[1] < min_y || v[1] > max_y){
+            return
+        }
+
+        // 计算数据所在的区域坐标
+        let x_index = Math.floor((v[0] - min_x) / x_gridSize)
+        let y_index = Math.floor((v[1] - min_y) / y_gridSize)
+
+        counts[x_index][y_index][2] += 1
+    })
+
+    let densities = counts.map((count, x_index) => count.map((v, y_index) => {
+        v[2] /= gridSize
+        v[0] = x_index
+        v[1] = y_index
+        return v
+    }))
+
+    console.log(densities)
+    return densities
+}
+
+let start_time = Date.now()
+calculateDensity(10)
+let end_time = Date.now()
+console.log('消耗的时间:', end_time - start_time)
+```
