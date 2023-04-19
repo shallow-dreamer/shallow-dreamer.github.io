@@ -1,0 +1,101 @@
+---
+layout:     post
+title:      "实现文字滚动"
+subtitle:   "使用html和css完成"
+date:       2023-04-19
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - html
+    - css
+---
+
+1、主要采用css的@keyframes关键帧和animation动画
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+        .content {
+            width: 200px;
+            height: 36px;
+            color: aquamarine;
+        }
+        .main {
+            font-size: 16px;
+            animation: 5s wordloop linear infinite;
+        }
+        .main >div {
+            white-space: nowrap;
+            padding-bottom: 10px;
+        }
+
+        .main:hover {
+            animation: 5s wordloop linear infinite paused;
+        }
+
+        @keyframes wordloop {
+            0% {
+                transform: translateY(0%);
+            }
+            100% {
+                transform: translateY(-100%);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="content">
+        <div class="main">
+            <div>前端版本</div>
+            <div>后端版本</div>
+        </div>
+    </div>
+</body>
+
+</html>
+```
+2、主要采用html的marquee标签
+```html
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+        .content {
+            width: 200px;
+            height: 36px;
+            color: aquamarine;
+        }
+        .main {
+            font-size: 16px;
+        }
+        .main >div {
+            white-space: nowrap;
+            padding-bottom: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="content">
+        <marquee class="content" behavior="scroll" align="left" direction="up" scrollamount="1" onMouseOut="this.start()" onMouseOver="this.stop()">
+            <div>1</div>
+            <div>1</div>
+        </marquee>
+    </div>
+</body>
+
+</html>
+```
