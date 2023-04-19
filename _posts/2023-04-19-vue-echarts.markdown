@@ -1,7 +1,7 @@
 ---
 layout:     post
-title:      "Example Post"
-subtitle:   "在多个页面中使用多个类似的图表"
+title:      "在多个页面中使用多个类似的图表"
+subtitle:   "项目问题记录"
 date:       2023-04-19
 author:     " Shallow Dreamer "
 header-img: "img/post-bg-js-version.jpg"
