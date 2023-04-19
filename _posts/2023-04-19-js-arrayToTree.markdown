@@ -45,3 +45,26 @@ function arrayToTree(array) {
 ```
 
 在这个代码中，我们假设每个节点的名称都是字符串。如果节点名称不是字符串，我们需要对比较函数进行修改。另外，如果节点具有其他属性或方法，则可以将它们添加到节点对象中。
+
+其他：
+
+```js
+function buildTree(data, rootId) {
+  const tree = [];
+  const lookup = {};
+  data.forEach(node => {
+    lookup[node.id] = node;
+    node.children = [];
+  });
+  data.forEach(node => {
+    if (node.parent_id === rootId) {
+      tree.push(node);
+    } else {
+      const parent = lookup[node.parent_id];
+      parent.children.push(node);
+    }
+  });
+  return tree;
+}
+```
+
