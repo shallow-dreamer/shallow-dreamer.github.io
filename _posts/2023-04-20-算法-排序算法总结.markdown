@@ -1,0 +1,197 @@
+---
+layout:     post
+title:      "排序算法"
+subtitle:   "部分排序算法总结"
+date:       2023-04-20
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - 算法
+    - js
+---
+
+#### 1.冒泡排序
+
+冒泡排序是一种简单的排序算法。它重复地走访过要排序的数列，一次比较两个元素，如果它们的顺序错误就把它们交换过来。走访数列的工作是重复地进行直到没有再需要交换，也就是说该数列已经排序完成。这个算法的名字由来是因为越小的元素会经由交换慢慢“浮”到数列的顶端
+
+思路：
+将相邻的元素进行比较，如果n - 1 > n 交换位置，对每对元素进行同样的工作，完成时最大的数会在最后，然后将进行比较的数组长度缩小 i，重复之前的步骤。可以立flag，当某次没有进行交换时，立刻返回。
+
+时间复杂度为O(n^2)
+
+动图演示：
+
+![img](https://gitee.com/shallow_dreamer/pictures1/raw/master/img/202206010021356.gif)
+
+```js
+nums = [1,2,14,23,15,11,13,36,24,26]
+for(i = 0;i < nums.length;i++){
+    let flag = true
+    for(j = 1;j < nums.length - i;j++){
+        if(nums[j - 1] > nums[j]){
+            //解构赋值
+            [nums[j - 1],nums[j]] = [nums[j],nums[j - 1]]
+            flag = false
+        }
+    }
+    if(flag){
+        break
+    }
+}
+console.log(nums)
+```
+
+#### 2.选择排序
+
+选择排序是一种简单直观的排序算法，无论什么数据进去都是 O(n²) 的时间复杂度。所以用到它的时候，数据规模越小越好。唯一的好处可能是不占用额外的内存空间
+
+思路：
+假设第一个数为最小值min，与后面的数进行比较若大于便交换，左后将min存放到排序序列的起始位置，再从剩余的未排序元素中寻找最小元素添加到已排序序列的末尾，重复直到完成，时间复杂度为O(n^2)
+
+动图演示：
+![img](https://gitee.com/shallow_dreamer/pictures1/raw/master/img/202206010026102.gif)
+
+```js
+nums = [1,2,14,23,15,11,13,36,24,26]
+for(i = 0;i < nums.length - 1;i++){
+    let minindex = i
+    for(j = i + 1;j < nums.length;j++){
+        if(nums[j] < nums[i]){
+            minindex = j
+        }
+    }
+    [nums[i],nums[j]] = [nums[j],nums[i]]
+}
+console.log(nums)
+```
+
+#### 3.插入排序
+
+思路：假设第一个值已经是排好序的，所以从头开始到假设的值为止进行排序，每次都用新的值与前面排好的值对比，小于交换大于结束内循环，直到外循环结束
+
+时间复杂度为O(n^2)
+
+动图演示：
+![img](https://gitee.com/shallow_dreamer/pictures1/raw/master/img/202206010044909.gif)
+
+```js
+nums = [1,2,14,23,15,11,13,36,24,26]
+for(i = 1;i < nums.length;i++){
+    for(j = i;j >= 0;j--){
+        if(nums[j] < nums[j - 1]){
+            [nums[j],nums[j - 1]] = [nums[j - 1],nums[j]]
+        }else{
+            break
+        }
+    }
+}
+console.log(nums)
+//二分插入
+//思路：在已排序序列中找插入位置时采用二分查找
+for(i = 1;i < nums.length;i++){
+    let key = nums[i]
+    let left = 0
+    let right = i - 1
+    while(left <= right){
+        let mid = Math.floor(left + (right -left) / 2)
+        if(nums[mid] > nums[i]){
+            right = mid - 1
+        }else{
+            left = mid + 1
+        }
+    }
+    for(j = i - 1;j >= left;j--){
+        nums[j + 1] = nums[j]
+    }
+    nums[left] = key
+}
+```
+
+#### 4.归并排序
+
+取数组中间的值，遍历数组与其比较，小的放左边，大的放右边，进行递归，直到数组长度为一再回溯拼接
+
+平均时间复杂度为O(nlogn)，最坏为O(n^2)，空间复杂度为O(logn)
+
+动图演示：
+![这里写图片描述](https://gitee.com/shallow_dreamer/pictures1/raw/master/img/202206010111521.gif)
+
+图片示意：
+![img](https://gitee.com/shallow_dreamer/pictures1/raw/master/img/202206010124817.png)
+![在这里插入图片描述](https://gitee.com/shallow_dreamer/pictures1/raw/master/img/202206010125712.png)
+
+```js
+
+```
+
+#### 5.快速排序
+
+取数组中的某个值，遍历数组与其比较，小的放左边，大的放右边，进行递归，直到数组长度为一再回溯拼接
+
+平均时间复杂度为O(nlogn)，最坏为O(n^2)，空间复杂度为O(logn)
+
+ 算法步骤：
+
+1. 从数列中挑出一个元素，称为 "基准"（pivot）;
+2. 重新排序数列，所有元素比基准值小的摆放在基准前面，所有元素比基准值大的摆在基准的后面（相同的数可以到任一边）。在这个分区退出之后，该基准就处于数列的中间位置。这个称为分区（partition）操作；
+3. 递归地（recursive）把小于基准值元素的子数列和大于基准值元素的子数列排序
+
+动图演示：
+![img](https://gitee.com/shallow_dreamer/pictures1/raw/master/img/202206010146335.gif)
+
+```js
+nums = [1,2,14,23,15,11,13,36,24,26]
+var sort = function(nums){
+    if(nums.length <= 1){
+        return nums
+    }
+    let basis = nums.splice(0,1)
+    let left = []
+    let right = []
+    for(i = 0;i < nums.length;i++){
+        if(basis[0] > nums[i]){
+            left.push(nums[i])
+        }else{
+            right.push(nums[i])
+        }
+    }
+    return sort(left).concat(basis,sort(right))
+}
+console.log(sort(nums))
+```
+
+#### 6.希尔排序
+
+希尔排序，也称递减增量排序算法
+
+希尔排序是基于插入排序的以下两点性质而提出改进方法的：
+
+- 插入排序在对几乎已经排好序的数据操作时，效率高，即可以达到线性排序的效率；
+- 但插入排序一般来说是低效的，因为插入排序每次只能将数据移动一位
+
+图片示例：
+![preview](https://gitee.com/shallow_dreamer/pictures1/raw/master/img/202206010122203.jpeg)
+![img](https://gitee.com/shallow_dreamer/pictures1/raw/master/img/202206010123407.jpeg)
+
+```js
+function shellSort(nums) {
+    var len = nums.length,
+        temp,
+        gap = 1;
+    while(gap < len / 3) {          //动态定义间隔序列
+        gap =gap * 3 + 1;
+    }
+    for (gap; gap > 0; gap = Math.floor(gap/3)) {
+        for (var i = gap; i < len; i++) {
+            temp = nums[i];
+            for (var j = i-gap; j >= 0 && nums[j] > temp; j-=gap) {
+                nums[j+gap] = arr[j];
+            }
+            nums[j+gap] = temp;
+        }
+    }
+    return nums;
+}
+nums = [1,2,14,23,15,11,13,36,24,26]
+shellSort(nums)
+```
