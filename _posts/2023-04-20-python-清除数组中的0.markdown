@@ -1,0 +1,20 @@
+---
+layout:     post
+title:      "利用python的numpy库清除数组中的0"
+subtitle:   "使用python"
+date:       2023-04-20
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+代码：
+
+```python
+import numpy as np
+a = [0, 1, 2]
+a = np.array(a)
+a = a[a != 0].tolist()
+print(a)	//a = [1, 2]
+```
