@@ -1,0 +1,67 @@
+---
+layout:     post
+title:      "判断值是否在数组内"
+subtitle:   "使用js的API方法"
+date:       2023-04-21
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - js
+---
+
+###### 法一：利用indexOf 
+
+不存在返回-1，存在返回第一次出现的索引
+
+      // js检查数组中是否包含某个元素
+      // 法一 indexOf
+      var arr = [100,20,50,58,6,69,36,45,78,66,45]
+      if(arr.indexOf(66)==-1){
+            console.log("不存在")
+      }else{
+            console.log("存在,索引是：",arr.indexOf(66))
+      }
+
+######  法二：利用find
+
+它的参数是一个回调函数，所有数组元素依次遍历该回调函数，直到找出第一个返回值为true的元素，然后返回该元素，否则返回undefined。
+
+      var arr = [100,20,50,58,6,69,36,45,78,66,45]
+      arr.find(function(value,index,arr){
+            if(value==45){
+                  console.log("存在",index)    
+            }
+      })
+      console.log(param)
+//查找45，find会找出所有存在的45以及索引
+
+
+
+######  法三：利用some
+
+some方法同样用于检测是否有满足条件的元素，如果有，则不继续检索后面的元素，直接返回true，如果都不符合，则返回一个false。
+
+用法与find相似，只是find是返回满足条件的元素，some返回的是一个Boolean值，从语义化来说，是否包含返回布尔值更贴切。
+
+      let arr = [100,20,50,58,6,69,36,45,78,66,45]
+      // some
+      let result = arr.some(ele => ele === 45) //true
+      if (result) {
+      //do something...
+      };
+      console.log(result)
+
+###### 法四：includes 
+
+ES6新增的数组方法，用于检测数组是否包含某个元素，如果包含返回true，否则返回false，比较厉害的是，能直接检测NaN：
+
+优点 就不用说了，最简单的做法没有之一，不用回调，不用复杂的写法，一个方法直接搞定。
+
+缺点 是低版本浏览器支持不是很友好
+
+      let arr = [100,20,50,58,6,69,36,45,78,66,45,NaN]
+      // 法四
+      let flag = arr.includes(1100)
+      let flag1 = arr.includes(NaN)
+     
+      console.log(flag,flag1)
