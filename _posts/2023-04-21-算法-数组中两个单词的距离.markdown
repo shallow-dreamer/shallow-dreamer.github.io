@@ -1,0 +1,58 @@
+---
+layout:     post
+title:      "数组中两个单词的距离"
+subtitle:   "使用js"
+date:       2023-04-21
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - 算法
+    - js
+    - leetcode
+---
+
+有个内含单词的超大文本文件，给定任意两个不同的单词，找出在这个文件中这两个单词的最短距离(相隔单词数)。如果寻找过程在这个文件中会重复多次，而每次寻找的单词不同，你能对此优化吗?
+
+来源：力扣（LeetCode）
+链接：https://leetcode.cn/problems/find-closest-lcci
+著作权归领扣网络所有。商业转载请联系官方授权，非商业转载请注明出处。
+
+示例：
+
+```
+输入：words = ["I","am","a","student","from","a","university","in","a","city"], word1 = "a", word2 = "student"
+输出：1
+```
+
+------
+
+1. 设置两个变量存储查找到的单词下标，预先假设单词未找到给变量赋值为-1，假设查找到的距离在首尾，为word.length-1(数组长度-1)
+2. 使用循环遍历查找数组words中的word1和word2，并分别使用变量a，b存储对应下标
+3. 如果a，b都不等于-1时，证明word1,word2存在于数组word中，再计算两个下标之间的距离(Math.abs(a-b))由于不能保证word1和word2谁先被找到，故使用Math函数的abs方法取绝对值)
+4. 需要查找的是两个单词之间的最小值，使用Math.min()方法比较res和(Math.abs(a-b))，并将较小值赋给res进行下一轮比较
+5. 如果在查找中res等于1，那么就停止寻找并返回1（因为最短距离的最小值也只是1），否则就直到遍历结束
+
+算法代码：
+
+```js
+var findClosest = function(words, word1, word2) {
+    let a = -1
+    let b = -1
+    let res = words.length
+    for(i = 0;i < words.length; i++){
+        if(words[i] == word1){
+            a = i
+        }
+        if(words[i] == word2){
+            b = i
+        }
+        if(res == 1){
+            return 1
+        }
+        if(a !== -1 && b !== -1){
+            res = Math.min(res,Math.abs(a - b))
+        }
+    }
+    return res
+};
+```
