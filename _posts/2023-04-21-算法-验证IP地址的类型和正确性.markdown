@@ -1,0 +1,134 @@
+---
+layout:     post
+title:      "验证IP地址的类型和正确性"
+subtitle:   "使用js"
+date:       2023-04-21
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - 算法
+    - js
+    - 正则
+    - leetcode
+---
+
+给定一个字符串 queryIP。如果是有效的 IPv4 地址，返回 "IPv4" ；如果是有效的 IPv6 地址，返回 "IPv6" ；如果不是上述类型的 IP 地址，返回 "Neither" 。
+
+有效的IPv4地址 是 “x1.x2.x3.x4” 形式的IP地址。 其中 0 <= xi <= 255 且 xi 不能包含 前导零。例如: “192.168.1.1” 、 “192.168.1.0” 为有效IPv4地址， “192.168.01.1” 为无效IPv4地址; “192.168.1.00” 、 “192.168@1.1” 为无效IPv4地址。
+
+一个有效的IPv6地址 是一个格式为“x1:x2:x3:x4:x5:x6:x7:x8” 的IP地址，其中:
+
+1 <= xi.length <= 4
+xi 是一个 十六进制字符串 ，可以包含数字、小写英文字母( 'a' 到 'f' )和大写英文字母( 'A' 到 'F' )。
+在 xi 中允许前导零。
+例如 "2001:0db8:85a3:0000:0000:8a2e:0370:7334" 和 "2001:db8:85a3:0:0:8A2E:0370:7334" 是有效的 IPv6 地址，而 "2001:0db8:85a3::8A2E:037j:7334" 和 "02001:0db8:85a3:0000:0000:8a2e:0370:7334" 是无效的 IPv6 地址。
+
+来源：力扣（LeetCode）
+链接：https://leetcode.cn/problems/validate-ip-address
+著作权归领扣网络所有。商业转载请联系官方授权，非商业转载请注明出处。
+
+示例：
+
+```
+输入：queryIP = "172.16.254.1"
+输出："IPv4"
+解释：有效的 IPv4 地址，返回 "IPv4"
+
+输入：queryIP = "2001:0db8:85a3:0:0:8A2E:0370:7334"
+输出："IPv6"
+解释：有效的 IPv6 地址，返回 "IPv6"
+
+输入：queryIP = "256.256.256.256"
+输出："Neither"
+解释：既不是 IPv4 地址，又不是 IPv6 地址
+```
+
+#### 解法一
+
+思路：
+
+1. 可以使用正则表达式写出IP地址的通用表达式
+2. IPv4地址为(1-255.)*3+(1-255)：/^((2([0-4]\d | 5[0-5]) | 1\d\d | [1-9]\d | [0-9])\\.){3}(2([0-4]\d | 5[0-5]) | 1\d\d | [1-9]\d | [0-9])\$/；IPv6为/^([\da-fA-F]{1,4}\:){7}[\da-fA-F]\$/
+3. 所以只需判断IP是否符合上面的正则表达式，可以使用test函数测试，符合会返回true，否则false，IPv4.test() ? "IPv4" : IPv6.test() ? "IPv6" : "neither"
+
+代码：
+
+```js
+var ip = function(IP){
+	let IPv4 = /^((2([0-4]\d | 5[0-5]) | 1\d\d | [1-9]\d | \d)\.){3}(2([0-4]\d | 5[0-5]) | 1\d\d | [1-9]\d | \d)$/
+    let IPv6 = /^([\da-fA-F]{4}\:){7}[\da-fA-F]$/
+    return IPv4.test() ? "IPv4" : IPv6.test() ? "IPv6" 
+}
+```
+
+#### 解法二
+
+思路：
+
+1. 边界条件IPv4：每个数都在0-255之间、不能有前导0、中间以"."分隔、共有四组；IPv6：每个数在0-FFFF之间（不区分大小写）、中间以":"分隔、共有8组、可以有前导0
+2. 将IP字符串转为数组进行遍历判断
+
+代码：
+
+```js
+/**
+ * @param {string} queryIP
+ * @return {string}
+ */
+var validIPAddress = function(ip) {
+	//判断是否有"."
+    if(ip.indexOf(".") != -1){
+        //将字符串以"."分隔
+        let arr = ip.split(".")
+        //判断数组长度
+        if(arr.length != 4){
+            return "Neither"
+        }
+        //遍历数组，取出每个参数进行IPv4的特征比较
+        for(i = 0;i < 4;i++){
+            let n = arr[i].length
+            if(arr[i] >= 0 && arr[i] <= 255 && n > 0 && n < 4){
+                //只有一位时可以为0,以上时第一位不能为0
+                if(n == 1 && n >= 0 && n <= 9){
+                    flag = true
+                }else if(Number(arr[i]).toString() === arr[i] && arr[i] >= 0 && arr[i] <= 255 && arr[i][0] != 0){
+                    flag = true
+                }else{
+                    flag = false
+                    break
+                }
+            }else{
+                flag = false
+                break
+            }
+        }
+        if(flag){
+            return "IPv4"
+        }else{
+            return "Neither"
+        }
+    }
+
+    if(ip.indexOf(":") != -1){
+        let arr = ip.split(":")
+        if(arr.length != 8){
+            return "Neither"
+        }
+        for(i = 0;i < 8;i++){
+            let n = arr[i].length
+            if(n <= 4 && n >= 1 && ("0x" + arr[i]) >= 0 && ("0x" + arr[i]) <= 0xFFFF){
+                flag = true
+            }else{
+                flag = false
+                break
+            }
+        }
+        if(flag){
+            return "IPv6"
+        }else{
+            return "Neither"
+        }
+    }
+    return "Neither"
+};
+```
