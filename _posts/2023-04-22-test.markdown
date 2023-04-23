@@ -286,3 +286,166 @@ Vue.prototype.$publicPath = process.env.BASE_URL + 'public/';
 ```
 
 然后，在Vue组件中就可以通过访问`this.$publicPath`来获取public文件夹的路径了。请注意，`process.env.BASE_URL`是Vue项目的根路径，需要根据实际情况来修改。
+
+
+
+要在Vue中读取public中的文件夹中的txt文件内容，可以使用axios库发起HTTP请求，然后将响应数据以字符串形式读取出来。
+
+首先需要确保txt文件已经被部署到public文件夹中。然后，可以在Vue组件的methods属性中定义一个方法来读取txt文件的内容，如下所示：
+
+```javascript
+import axios from 'axios';
+
+export default {
+  methods: {
+    async readTxtFile() {
+      try {
+        const response = await axios.get('/txt-file.txt');
+        const fileContent = response.data;
+        // 处理txt文件内容
+        console.log(fileContent);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+  }
+};
+```
+
+在这个例子中，我们使用了axios库发起GET请求，请求路径为'/txt-file.txt'，这会让请求去访问public文件夹中的txt-file.txt文件。然后，我们读取响应数据的data属性，并将其保存在一个变量中。最后，我们可以对文件内容进行处理，比如将其显示在页面上或将其传递给其他函数。
+
+需要注意的是，由于我们是在Vue组件中进行HTTP请求的，因此需要在Vue组件所在的域名下部署txt文件，否则会出现跨域请求的问题。如果txt文件被部署到了不同的域名下，需要在服务器端配置跨域请求的响应头。
+
+
+
+
+
+
+
+    import os
+    from django.http import JsonResponse, FileResponse
+    from django.views.decorators.csrf import csrf_exempt
+    
+    @csrf_exempt
+    def folder(request, folder_name):
+        folder_path = os.path.join('public', folder_name)
+        if not os.path.exists(folder_path):
+            return JsonResponse({'error': 'Folder does not exist.'})
+    files = []
+    txt_content = ''
+    for file_name in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, file_name)
+        if os.path.isfile(file_path):
+            file_type = os.path.splitext(file_name)[1]
+            is_txt = file_type == '.txt'
+            is_pdf = file_type == '.pdf'
+            files.append({
+                'name': file_name,
+                'link': f'/{folder_name}/{file_name}' if not is_txt else None,
+                'isFolder': False,
+                'isTxt': is_txt,
+                'isPdf': is_pdf
+            })
+            if is_txt:
+                with open(file_path, 'r') as f:
+                    txt_content += f.read()
+        elif os.path.isdir(file_path):
+            files.append({
+                'name': file_name,
+                'link': None,
+                'isFolder': True
+            })
+    
+    return JsonResponse({'files': files, 'txtContent': txt_content})
+
+
+
+
+
+对于这个需求，由于需要从服务器端获取文件夹内的内容并生成相应的链接，因此需要通过Vue的异步请求与后端进行通信。具体步骤如下：
+
+1. 在Vue组件中定义一个data属性，用于存储文件夹的内容列表，如下所示：
+
+```javascript
+data() {
+  return {
+    folderContent: []
+  }
+}
+```
+
+2. 在组件的created钩子函数中，通过Vue的异步请求从后端获取文件夹的内容列表，如下所示：
+
+```javascript
+created() {
+  axios.get('/api/folder/content').then(response => {
+    this.folderContent = response.data;
+  });
+}
+```
+
+3. 在组件的template中，通过v-for指令遍历文件夹的内容列表，并根据文件类型生成相应的链接或展示文件内容，如下所示：
+
+```html
+<ul>
+  <li v-for="item in folderContent" :key="item.name">
+    <span v-if="item.type === 'directory'" class="folder-title">{{ item.name }}</span>
+    <a v-else-if="item.type === 'pdf'" :href="item.path" target="_blank">{{ item.name }}</a>
+    <span v-else-if="item.type === 'txt'" class="text-content">{{ item.content }}</span>
+    <a v-else :href="item.path" download>{{ item.name }}</a>
+  </li>
+</ul>
+```
+
+4. 在后端使用Django框架，定义一个API接口，用于返回指定文件夹内的内容列表，并根据文件类型生成相应的数据，如下所示：
+
+```python
+import os
+from django.http import JsonResponse
+
+def get_folder_content(request):
+    folder_path = os.path.join(os.getcwd(), 'public')
+    folder_content = []
+
+    for item in os.listdir(folder_path):
+        item_path = os.path.join(folder_path, item)
+
+        if os.path.isdir(item_path):
+            folder_content.append({
+                'name': item,
+                'type': 'directory'
+            })
+        elif os.path.isfile(item_path):
+            if item.endswith('.pdf'):
+                folder_content.append({
+                    'name': item,
+                    'path': f'/public/{item}',
+                    'type': 'pdf'
+                })
+            elif item.endswith('.txt'):
+                with open(item_path, 'r') as f:
+                    content = f.read()
+                folder_content.append({
+                    'name': item,
+                    'content': content,
+                    'type': 'txt'
+                })
+            else:
+                folder_content.append({
+                    'name': item,
+                    'path': f'/public/{item}',
+                    'type': 'file'
+                })
+
+    return JsonResponse(folder_content, safe=False)
+```
+
+需要注意的是，需要在Django的settings.py文件中设置静态文件目录：
+
+```python
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'public'),
+]
+```
+
+这样，前端就可以从服务器端获取文件夹的内容，并根据文件类型生成相应的链接或展示文件内容了。
