@@ -1,0 +1,43 @@
+---
+layout:     post
+title:      "js获取图片二进制展示图片"
+subtitle:   "服务器端返回图片二进制流在页面中展示"
+date:       2023-04-21
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - js
+---
+
+从服务器获取二进制流的图片文件，并显示
+
+> 本地的文件信息可以直接fileReader读成base64显示，而后端取得的二进制流blob不一定可以
+> 可以使用createObjectURL来读成临时的url [createObjectURL文档](https://link.segmentfault.com/?enc=O%2FtmC0dgRHcO0tYyWKgjGQ%3D%3D.RFFvXzrFtlkLSOOfBM92XbK5ikcTWHqINVP3Sawd%2BLrTEy7AdgNe88gcw3ma1qZwVoOBtqrAYvHZG1qXyNzA5R4BlbVf9C0wv046TdHKJnU%3D)
+
+```reasonml
+function getImg(param, id) {//这里没有用ajax当时用ajax出现了问题就用了原生发请求
+        var _url;
+        _url = RequestUrl.constructURL("CUSTOMERS", "getimg", param);
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', _url, true);
+        xhr.responseType = "blob";
+        xhr.setRequestHeader("token", sessionStorage.getItem("token"));
+        xhr.onload = function () {
+            if (this.status == 200) {
+                var blob = this.response;
+                。。。//处理业务逻辑
+                var img = document.getElementById(id);
+                img.onload = function (e) {// 元素的onload 事件触发后将销毁URL对象, 释放内存。
+                    window.URL.revokeObjectURL(img.src);
+                };
+                // 浏览器允许使用URL.createObjectURL()方法，针对 Blob 对象生成一个临时 URL。
+                  // 这个 URL 以blob:开头,表明对应一个 Blob 对象。
+                img.src = window.URL.createObjectURL(blob);
+            }
+        };
+        xhr.send();
+    };
+```
+
+​                                             
+
