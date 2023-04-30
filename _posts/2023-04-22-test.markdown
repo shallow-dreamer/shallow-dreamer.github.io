@@ -2,7 +2,7 @@
 layout:     post
 title:      "获取public文件"
 subtitle:   "vue"
-date:       2023-04-21
+date:       2023-04-22
 author:     " Shallow Dreamer "
 header-img: "img/post-bg-js-version.jpg"
 tags:

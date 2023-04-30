@@ -2,7 +2,7 @@
 layout:     post
 title:      "js获取图片二进制展示图片"
 subtitle:   "服务器端返回图片二进制流在页面中展示"
-date:       2023-04-21
+date:       2023-04-27
 author:     " Shallow Dreamer "
 header-img: "img/post-bg-js-version.jpg"
 tags:

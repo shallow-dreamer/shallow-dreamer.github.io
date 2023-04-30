@@ -2,7 +2,7 @@
 layout:     post
 title:      "celery的self问题"
 subtitle:   "celery传参时参数为self时的问题"
-date:       2023-04-21
+date:       2023-04-27
 author:     " Shallow Dreamer "
 header-img: "img/post-bg-js-version.jpg"
 tags:
