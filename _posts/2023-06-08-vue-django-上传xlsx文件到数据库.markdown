@@ -13,7 +13,7 @@ tags:
     - mysql
 ---
 
-当然！下面是一个使用Vue 3、Element Plus、Django 和 MySQL 的示例代码，可以实现上传 XLSX 文件并将其内容导入到数据库中。
+当然！下面是一个使用Vue 3、Element Plus、Django 和 MySQL 的示例代码，可以实现上传 XLSX 文件并将其内容导入到数据库中。 
 
 前端代码（Vue 3 + Element Plus）：
 
