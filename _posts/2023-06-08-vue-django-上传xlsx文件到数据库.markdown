@@ -7,9 +7,7 @@ author:     " Shallow Dreamer "
 header-img: "img/post-bg-js-version.jpg"
 tags:
     - python
-    - django
     - vue
-    - elementPlus
     - mysql
 ---
 
