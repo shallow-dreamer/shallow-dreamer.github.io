@@ -1,8 +1,8 @@
 ---
 layout:     post
-title:      "上传xlsx文件内容到数据库"
-subtitle:   "python、mysql"
-date:       2023-06-09
+title:      "上传xlsx文件并将其内数据导入到数据库"
+subtitle:   ""
+date:       2023-06-10
 author:     " Shallow Dreamer "
 header-img: "img/post-bg-js-version.jpg"
 tags:
