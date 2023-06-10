@@ -263,3 +263,65 @@ urlpatterns = [
 完成以上步骤后，你可以启动Django开发服务器，然后在浏览器中访问`http://localhost:8000/upload/`，上传XLSX文件，并将文件内容导入到数据库中。
 
 请注意，上述示例仅涵盖了基本的文件上传和数据导入逻辑。在实际应用中，你可能需要进行更多的数据验证和错误处理，并根据实际需求对模型、视图和模板进行调整。
+
+以下是使用 Python 编写的一个接受 xlsx 文件并将其中内容导入到数据库的示例代码，该代码在导入时先创建一个临时数据表存储数据，在导入成功后将原数据表改名，再将临时数据表改为原数据表名，最后删除原数据表。如果导入出错，可将 xlsx 文件中导入出错的单元格及其出错原因返回。
+
+```python
+import openpyxl
+import sqlite3
+import os
+
+# 打开 xlsx 文件
+wb = openpyxl.load_workbook('example.xlsx')
+sheet = wb.active
+
+# 连接数据库
+conn = sqlite3.connect('mydatabase.db')
+cursor = conn.cursor()
+
+# 创建临时表格
+cursor.execute("""CREATE TABLE mytable_temp 
+                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                   name TEXT, age INTEGER, email TEXT)""")
+
+# 读取数据并插入临时表格
+error_list = []
+for row in sheet.iter_rows(min_row=2, values_only=True):
+    try:
+        name, age, email = row
+        cursor.execute("INSERT INTO mytable_temp (name, age, email) VALUES (?, ?, ?)", (name, age, email))
+    except Exception as e:
+        error_list.append((row[0], row[1], row[2], str(e)))   # 记录错误信息
+
+if error_list:
+    conn.rollback()   # 回滚事务
+    print("以下行数据导入出错：")
+    for error in error_list:
+        print(f"姓名：{error[0]}，年龄：{error[1]}，邮箱：{error[2]}，错误原因：{error[3]}")
+    conn.close()
+else:
+    # 更改表格名称
+    cursor.execute("ALTER TABLE mytable RENAME TO mytable_old")
+    cursor.execute("ALTER TABLE mytable_temp RENAME TO mytable")
+
+    # 删除原表格
+    cursor.execute("DROP TABLE IF EXISTS mytable_old")
+
+    # 提交更改并关闭连接
+    conn.commit()
+    conn.close()
+
+    print("导入成功")
+```
+
+在上述代码中，与前一个示例相比，增加了以下步骤：
+
+1. 在数据库中创建临时数据表 mytable_temp。
+2. 将 xlsx 文件中的数据插入到临时数据表 mytable_temp 中。
+3. 判断是否有导入出错的数据，如果有，则回滚事务，输出错误信息，并关闭连接；如果没有，则进行以下操作。
+4. 更改原数据表 mytable 的名称为 mytable_old。
+5. 更改临时数据表 mytable_temp 的名称为 mytable。
+6. 删除原数据表 mytable_old。
+7. 提交更改并关闭连接，输出“导入成功”的提示信息。
+
+注意：在实际使用中需要根据具体情况进行修改，如更改文件路径、数据库名称、数据表名称等。同时还需要根据实际情况处理异常情况。
