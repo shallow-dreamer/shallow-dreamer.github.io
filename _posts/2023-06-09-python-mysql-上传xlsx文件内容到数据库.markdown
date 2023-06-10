@@ -1,7 +1,7 @@
 ---
 layout:     post
 title:      "上传xlsx文件内容到数据库"
-subtitle:   ""
+subtitle:   "python、mysql"
 date:       2023-06-09
 author:     " Shallow Dreamer "
 header-img: "img/post-bg-js-version.jpg"
