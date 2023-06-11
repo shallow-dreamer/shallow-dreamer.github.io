@@ -325,3 +325,197 @@ else:
 7. 提交更改并关闭连接，输出“导入成功”的提示信息。
 
 注意：在实际使用中需要根据具体情况进行修改，如更改文件路径、数据库名称、数据表名称等。同时还需要根据实际情况处理异常情况。
+
+要读取XLSX文件并将数据导入到数据库，并返回错误的单元格位置，你可以使用以下步骤：
+
+1. 安装所需的库：
+   - 使用`pip`安装`pandas`库：`pip install pandas`
+   - 使用`pip`安装`openpyxl`库：`pip install openpyxl`
+   - 使用`pip`安装适合你数据库类型的库（例如，如果你使用MySQL，可以安装`mysql-connector-python`库：`pip install mysql-connector-python`）
+
+2. 导入所需的库：
+   ```python
+   import pandas as pd
+   import mysql.connector
+   ```
+
+3. 读取XLSX文件并处理错误：
+   ```python
+   try:
+       df = pd.read_excel('your_file.xlsx')
+   except Exception as e:
+       # 处理文件读取错误
+       print("读取文件时发生错误:", str(e))
+       return
+   
+   # 检查数据的完整性
+   errors = []
+   for column in df.columns:
+       for index, value in df[column].items():
+           if pd.isnull(value):
+               errors.append((column, index))
+   
+   if errors:
+       # 处理数据错误
+       print("以下单元格存在错误:")
+       for error in errors:
+           print("列:", error[0], "行:", error[1])
+       return
+   ```
+
+4. 连接到数据库：
+   ```python
+   cnx = mysql.connector.connect(
+       host='your_host',
+       user='your_user',
+       password='your_password',
+       database='your_database'
+   )
+   ```
+
+5. 创建一个游标对象：
+   ```python
+   cursor = cnx.cursor()
+   ```
+
+6. 将数据导入数据库：
+   ```python
+   for row in df.itertuples():
+       query = "INSERT INTO your_table (column1, column2, ...) VALUES (%s, %s, ...)"
+       values = (row.column1, row.column2, ...)
+       try:
+           cursor.execute(query, values)
+       except Exception as e:
+           # 处理插入错误
+           print("插入数据时发生错误:", str(e))
+           print("行:", row.Index)
+           break
+   
+   cnx.commit()
+   ```
+
+7. 关闭游标和数据库连接：
+   ```python
+   cursor.close()
+   cnx.close()
+   ```
+
+这些步骤将帮助你将XLSX文件的数据导入到数据库中，并返回错误的单元格位置。请根据你的数据库类型（例如MySQL、PostgreSQL等）进行适当的更改，并根据你的实际情况修改连接参数和SQL查询。如果读取文件或插入数据时发生错误，将在控制台打印错误信息，并返回错误的单元格位置。
+
+要读取XLSX文件并将数据导入到数据库，并将数据错误的单元格位置用XLSX列标和行标返回，你可以使用以下步骤：
+
+1. 安装所需的库：
+   - 使用`pip`安装`pandas`库：`pip install pandas`
+   - 使用`pip`安装`openpyxl`库：`pip install openpyxl`
+   - 使用`pip`安装适合你数据库类型的库（例如，如果你使用MySQL，可以安装`mysql-connector-python`库：`pip install mysql-connector-python`）
+
+2. 导入所需的库：
+   ```python
+   import pandas as pd
+   import mysql.connector
+   import openpyxl
+   from openpyxl.utils import get_column_letter
+   ```
+
+3. 读取XLSX文件并处理错误：
+   ```python
+   try:
+       df = pd.read_excel('your_file.xlsx')
+   except Exception as e:
+       # 处理文件读取错误
+       print("读取文件时发生错误:", str(e))
+       return
+   
+   # 检查数据的完整性
+   errors = []
+   for column in df.columns:
+       for index, value in df[column].items():
+           if pd.isnull(value):
+               column_letter = get_column_letter(column + 1)
+               errors.append((column_letter, index + 2))  # +2 是因为索引从0开始，而行标从1开始
+   
+   if errors:
+       # 处理数据错误
+       print("以下单元格存在错误:")
+       for error in errors:
+           print("列:", error[0], "行:", error[1])
+       return
+   ```
+
+4. 连接到数据库：
+   ```python
+   cnx = mysql.connector.connect(
+       host='your_host',
+       user='your_user',
+       password='your_password',
+       database='your_database'
+   )
+   ```
+
+5. 创建一个游标对象：
+   ```python
+   cursor = cnx.cursor()
+   ```
+
+6. 将数据导入数据库：
+   ```python
+   for row in df.itertuples():
+       query = "INSERT INTO your_table (column1, column2, ...) VALUES (%s, %s, ...)"
+       values = (row.column1, row.column2, ...)
+       try:
+           cursor.execute(query, values)
+       except Exception as e:
+           # 处理插入错误
+           print("插入数据时发生错误:", str(e))
+           print("单元格位置:", row[0])
+           break
+   
+   cnx.commit()
+   ```
+
+7. 关闭游标和数据库连接：
+   ```python
+   cursor.close()
+   cnx.close()
+   ```
+
+这些步骤将帮助你将XLSX文件的数据导入到数据库中，并将数据错误的单元格位置用XLSX列标和行标返回。请根据你的数据库类型（例如MySQL、PostgreSQL等）进行适当的更改，并根据你的实际情况修改连接参数和SQL查询。如果读取文件或插入数据时发生错误，将在控制台打印错误信息，并返回错误的单元格位置。
+
+如果在XLSX文件的第一行中有字符串作为标记，并且你想获取下面的数据，可以使用以下方法：
+
+1. 读取XLSX文件：
+   ```python
+   try:
+       df = pd.read_excel('your_file.xlsx')
+   except Exception as e:
+       # 处理文件读取错误
+       print("读取文件时发生错误:", str(e))
+       return
+   ```
+
+2. 获取标记所在列的索引：
+   ```python
+   marker = 'YourMarker'  # 将'YourMarker'替换为你实际的标记字符串
+   marker_col = None
+   for col in df.columns:
+       if df[col].iloc[0] == marker:
+           marker_col = col
+           break
+   
+   if marker_col is None:
+       # 处理未找到标记的情况
+       print("未找到标记:", marker)
+       return
+   ```
+
+3. 获取标记下方的数据：
+   ```python
+   data_df = df.iloc[1:, [marker_col]]
+   ```
+
+   这将创建一个新的DataFrame `data_df`，其中包含标记下方的所有数据。
+
+4. 处理数据：
+   现在你可以对`data_df`进行进一步的处理，例如将数据导入到数据库或进行其他操作。
+
+请注意，在上述代码中，假设XLSX文件的第一行是标记行，并且标记字符串在该行中是唯一的。你需要将`'YourMarker'`替换为你实际的标记字符串。此代码还假设你使用了pandas库进行文件读取和处理。
