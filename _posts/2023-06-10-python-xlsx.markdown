@@ -1,14 +1,111 @@
 ---
 layout:     post
-title:      "django-celery"
+title:      "上传xlsx文件并将其内数据导入到数据库"
 subtitle:   ""
-date:       2023-06-04
+date:       2023-06-10
 author:     " Shallow Dreamer "
 header-img: "img/post-bg-js-version.jpg"
 tags:
-    - django
-    - celery
+    - python
+    - mysql
 ---
+
+当然！下面是一个使用Vue 3、Element Plus、Django 和 MySQL 的示例代码，可以实现上传 XLSX 文件并将其内容导入到数据库中。 
+
+前端代码（Vue 3 + Element Plus）：
+
+```html
+<template>
+  <div>
+    <el-upload
+      class="upload-demo"
+      drag
+      action="/api/upload"
+      :on-success="handleUploadSuccess"
+    >
+      <i class="el-icon-upload"></i>
+      <div class="el-upload__text">将文件拖到此处，或<em>点击上传</em></div>
+    </el-upload>
+  </div>
+</template>
+
+<script>
+import { ref } from 'vue';
+
+export default {
+  setup() {
+    const handleUploadSuccess = (response) => {
+      // 处理上传成功的回调
+      console.log(response.data); // 在控制台打印返回的数据
+    };
+
+    return {
+      handleUploadSuccess,
+    };
+  },
+};
+</script>
+```
+
+后端代码（Django）：
+
+```python
+# views.py
+from django.views import View
+from django.http import JsonResponse
+
+class FileUploadView(View):
+    def post(self, request):
+        file = request.FILES.get('file')
+        if file:
+            # 处理上传的文件，将内容导入到数据库中
+            # 这里假设你已经安装了 openpyxl 库用于处理 Excel 文件
+            from openpyxl import load_workbook
+            
+            workbook = load_workbook(file)
+            sheet = workbook.active
+            data = []
+            
+            for row in sheet.iter_rows(values_only=True):
+                # 假设表格有三列，分别是 name、age 和 email
+                name, age, email = row
+                data.append({
+                    'name': name,
+                    'age': age,
+                    'email': email,
+                })
+            
+            # 将数据存入数据库
+            # 这里假设你已经设置好了数据库连接，并创建了对应的模型
+            from .models import YourModel
+            
+            for item in data:
+                YourModel.objects.create(
+                    name=item['name'],
+                    age=item['age'],
+                    email=item['email'],
+                )
+            
+            return JsonResponse({'data': '上传成功'})
+        
+        return JsonResponse({'error': '未找到上传的文件'})
+```
+
+```python
+# urls.py
+from django.urls import path
+from .views import FileUploadView
+
+urlpatterns = [
+    path('upload', FileUploadView.as_view(), name='file-upload'),
+]
+```
+
+请确保已经正确安装并配置了 Vue 3、Element Plus、Django、MySQL 和 openpyxl 库。将前端代码和后端代码分别保存为 `YourComponent.vue` 和 `views.py`，并将 `views.py` 中的路由添加到你的 Django 项目的 `urls.py` 文件中。
+
+这是一个简单的示例，仅供参考。在实际开发中，你可能需要根据自己的需求进行适当的修改和扩展。
+
+当然！我可以帮助您编写一个使用Vue 3、Element Plus、Django和MySQL的示例，以上传XLSX文件并将其内容导入到数据库中。
 
 首先，您需要设置一个Django项目并配置MySQL数据库。确保您已经安装了Django和MySQL，并配置了适当的数据库连接。
 
@@ -232,20 +329,17 @@ else:
 要读取XLSX文件并将数据导入到数据库，并返回错误的单元格位置，你可以使用以下步骤：
 
 1. 安装所需的库：
-
    - 使用`pip`安装`pandas`库：`pip install pandas`
    - 使用`pip`安装`openpyxl`库：`pip install openpyxl`
    - 使用`pip`安装适合你数据库类型的库（例如，如果你使用MySQL，可以安装`mysql-connector-python`库：`pip install mysql-connector-python`）
 
 2. 导入所需的库：
-
    ```python
    import pandas as pd
    import mysql.connector
    ```
 
 3. 读取XLSX文件并处理错误：
-
    ```python
    try:
        df = pd.read_excel('your_file.xlsx')
@@ -270,7 +364,6 @@ else:
    ```
 
 4. 连接到数据库：
-
    ```python
    cnx = mysql.connector.connect(
        host='your_host',
@@ -281,13 +374,11 @@ else:
    ```
 
 5. 创建一个游标对象：
-
    ```python
    cursor = cnx.cursor()
    ```
 
 6. 将数据导入数据库：
-
    ```python
    for row in df.itertuples():
        query = "INSERT INTO your_table (column1, column2, ...) VALUES (%s, %s, ...)"
@@ -304,7 +395,6 @@ else:
    ```
 
 7. 关闭游标和数据库连接：
-
    ```python
    cursor.close()
    cnx.close()
@@ -315,13 +405,11 @@ else:
 要读取XLSX文件并将数据导入到数据库，并将数据错误的单元格位置用XLSX列标和行标返回，你可以使用以下步骤：
 
 1. 安装所需的库：
-
    - 使用`pip`安装`pandas`库：`pip install pandas`
    - 使用`pip`安装`openpyxl`库：`pip install openpyxl`
    - 使用`pip`安装适合你数据库类型的库（例如，如果你使用MySQL，可以安装`mysql-connector-python`库：`pip install mysql-connector-python`）
 
 2. 导入所需的库：
-
    ```python
    import pandas as pd
    import mysql.connector
@@ -330,7 +418,6 @@ else:
    ```
 
 3. 读取XLSX文件并处理错误：
-
    ```python
    try:
        df = pd.read_excel('your_file.xlsx')
@@ -356,7 +443,6 @@ else:
    ```
 
 4. 连接到数据库：
-
    ```python
    cnx = mysql.connector.connect(
        host='your_host',
@@ -367,13 +453,11 @@ else:
    ```
 
 5. 创建一个游标对象：
-
    ```python
    cursor = cnx.cursor()
    ```
 
 6. 将数据导入数据库：
-
    ```python
    for row in df.itertuples():
        query = "INSERT INTO your_table (column1, column2, ...) VALUES (%s, %s, ...)"
@@ -390,7 +474,6 @@ else:
    ```
 
 7. 关闭游标和数据库连接：
-
    ```python
    cursor.close()
    cnx.close()
@@ -401,7 +484,6 @@ else:
 如果在XLSX文件的第一行中有字符串作为标记，并且你想获取下面的数据，可以使用以下方法：
 
 1. 读取XLSX文件：
-
    ```python
    try:
        df = pd.read_excel('your_file.xlsx')
@@ -412,7 +494,6 @@ else:
    ```
 
 2. 获取标记所在列的索引：
-
    ```python
    marker = 'YourMarker'  # 将'YourMarker'替换为你实际的标记字符串
    marker_col = None
@@ -428,7 +509,6 @@ else:
    ```
 
 3. 获取标记下方的数据：
-
    ```python
    data_df = df.iloc[1:, [marker_col]]
    ```
