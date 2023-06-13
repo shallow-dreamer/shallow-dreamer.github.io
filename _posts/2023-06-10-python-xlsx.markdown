@@ -519,3 +519,77 @@ else:
    现在你可以对`data_df`进行进一步的处理，例如将数据导入到数据库或进行其他操作。
 
 请注意，在上述代码中，假设XLSX文件的第一行是标记行，并且标记字符串在该行中是唯一的。你需要将`'YourMarker'`替换为你实际的标记字符串。此代码还假设你使用了pandas库进行文件读取和处理。
+
+以下是使用Python读取xlsx文件的多级表头和合并表头，并将数据导入到对应的数据库库字段中的示例代码，需要安装openpyxl、pandas和pymysql库。请先确保已连接到数据库。
+
+```python
+import openpyxl
+import pandas as pd
+from sqlalchemy import create_engine
+
+# 连接数据库
+engine = create_engine('mysql+pymysql://username:password@localhost:3306/database')
+
+# 读取Excel文件
+wb = openpyxl.load_workbook('example.xlsx')
+ws = wb['Sheet1']
+
+# 获取多级表头和合并单元格信息
+merged_cells = ws.merged_cells
+headers = []
+for row in ws.iter_rows(min_row=1, max_row=2):
+    for i, cell in enumerate(row):
+        if merged_cells.__contains__(cell.coordinate):
+            headers.append(row[i-1].value + '_' + cell.value)
+        else:
+            headers.append(cell.value)
+
+# 将Excel数据转换为Pandas DataFrame
+df = pd.DataFrame(ws.values)
+df.columns = headers
+df = df.drop(df.index[0:2])
+
+# 将数据导入到数据库
+df.to_sql(name='table_name', con=engine, if_exists='append', index=False)
+```
+
+在这个示例代码中，我们首先读取了一个名为example.xlsx的Excel文件，然后获取它的第一个工作表Sheet1。接下来，我们使用openpyxl库获取Excel表格的多级表头和合并单元格信息。然后，我们通过pandas库将Excel数据转换为DataFrame，并使用解析得到的表头信息对列标签进行命名。最后，我们删除前两行表头，因为它们已经被用作列标签，然后使用SQLAlchemy库将DataFrame数据导入到MySQL数据库中。需要根据实际情况修改数据库连接信息和Excel文件名。
+
+以下是使用Python读取xlsx文件的多级表头和合并表头，并将数据导入到对应的数据库英文字段中的示例代码，需要安装openpyxl、pandas和pymysql库。请先确保已连接到数据库。
+
+```python
+import openpyxl
+import pandas as pd
+from sqlalchemy import create_engine
+
+# 连接数据库
+engine = create_engine('mysql+pymysql://username:password@localhost:3306/database')
+
+# 读取Excel文件
+wb = openpyxl.load_workbook('example.xlsx')
+ws = wb['Sheet1']
+
+# 获取多级表头和合并单元格信息
+merged_cells = ws.merged_cells
+headers = []
+for row in ws.iter_rows(min_row=1, max_row=2):
+    for i, cell in enumerate(row):
+        if merged_cells.__contains__(cell.coordinate):
+            headers.append(row[i-1].value + '_' + cell.value)
+        else:
+            headers.append(cell.value)
+
+# 将中文表头转换为英文表头
+header_dict = {'中文一级表头': 'english_first_header', '中文二级表头': 'english_second_header'}
+headers = [header_dict.get(header, header) for header in headers]
+
+# 将Excel数据转换为Pandas DataFrame
+df = pd.DataFrame(ws.values)
+df.columns = headers
+df = df.drop(df.index[0:2])
+
+# 将数据导入到数据库
+df.to_sql(name='table_name', con=engine, if_exists='append', index=False)
+```
+
+在这个示例代码中，我们首先读取了一个名为example.xlsx的Excel文件，然后获取它的第一个工作表Sheet1。接下来，我们使用openpyxl库获取Excel表格的多级表头和合并单元格信息。然后，我们将中文表头转换为英文表头，并使用解析得到的表头信息对列标签进行命名。最后，我们删除前两行表头，因为它们已经被用作列标签，然后使用SQLAlchemy库将DataFrame数据导入到MySQL数据库中。需要根据实际情况修改数据库连接信息、Excel文件名和中英文表头映射关系字典。
