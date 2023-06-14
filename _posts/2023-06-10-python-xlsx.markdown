@@ -593,3 +593,177 @@ df.to_sql(name='table_name', con=engine, if_exists='append', index=False)
 ```
 
 在这个示例代码中，我们首先读取了一个名为example.xlsx的Excel文件，然后获取它的第一个工作表Sheet1。接下来，我们使用openpyxl库获取Excel表格的多级表头和合并单元格信息。然后，我们将中文表头转换为英文表头，并使用解析得到的表头信息对列标签进行命名。最后，我们删除前两行表头，因为它们已经被用作列标签，然后使用SQLAlchemy库将DataFrame数据导入到MySQL数据库中。需要根据实际情况修改数据库连接信息、Excel文件名和中英文表头映射关系字典。
+
+以下是一个基于 `pandas` 和 `openpyxl` 的代码示例，用于读取 Excel 文件，并将数据导入到 MySQL 数据库中。
+
+```python
+import pandas as pd
+from openpyxl import load_workbook
+import mysql.connector as mysql
+
+# 读取 Excel 文件
+df = pd.read_excel('filename.xlsx', header=[0, 1])
+header = list(df.columns)
+
+# 处理表头（将中文表头转换为英文表头）
+new_header = []
+for col in header:
+    if isinstance(col, tuple):
+        new_col = ""
+        for subcol in col:
+            if isinstance(subcol, str):
+                new_col += subcol
+            else:
+                new_col += new_header[-1][subcol[0]:subcol[1]+1]
+        new_header[-1] = new_col
+    else:
+        new_header.append(col)
+df.columns = new_header
+
+# 处理数据类型
+dtypes = {
+    '英文字段1': '数据类型1',
+    '英文字段2': '数据类型2',
+    # ...
+}
+df = df.astype(dtypes)
+
+# 连接数据库
+db = mysql.connect(
+    host="localhost",
+    user="yourusername",
+    passwd="yourpassword",
+    database="yourdatabase"
+)
+cursor = db.cursor()
+
+# 导入数据
+for index, row in df.iterrows():
+    values = tuple(row.values)
+    sql = f"""INSERT INTO yourtable ({','.join(new_header)}) 
+              VALUES {values};"""
+    cursor.execute(sql)
+db.commit()
+db.close()
+```
+
+其中，需要替换的部分包括：
+
+- `'filename.xlsx'`: Excel 文件名
+- `header`: 中文表头列表
+- `new_header`: 英文表头列表
+- `dtypes`: 字段名及对应数据类型的字典
+- `'localhost'`, `'yourusername'`, `'yourpassword'`, `'yourdatabase'`: 数据库连接信息
+- `'yourtable'`: 目标表名
+
+请注意，在运行代码之前需要确保已经安装了所需的依赖库。在此示例中，需要安装 `pandas` 和 `mysql-connector-python` 两个库。
+
+以下是一个基本的代码框架，供参考：
+
+```python
+import pandas as pd
+from sqlalchemy import create_engine, Table, Column, Integer, String, Float
+
+# 读取 Excel 文件
+df = pd.read_excel('filename.xlsx', header=[0, 1])
+
+# 处理表头
+header = list(df.columns)
+# TODO: 将中文表头转换为英文表头，并解决合并单元格的问题
+
+# 处理数据类型
+dtypes = {
+    '英文字段1': Float,
+    '英文字段2': String(255),
+    # ...
+}
+df = df.astype(dtypes)
+
+# 连接数据库
+engine = create_engine('postgresql://username:password@host:port/database')
+conn = engine.connect()
+
+# 创建数据表
+metadata = MetaData()
+table = Table(
+    'tablename', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('英文字段1', Float),
+    Column('英文字段2', String(255)),
+    # ...
+)
+metadata.create_all(engine)
+
+# 导入数据
+for index, row in df.iterrows():
+    values = {
+        '英文字段1': row['英文字段1'],
+        '英文字段2': row['英文字段2'],
+        # ...
+    }
+    statement = table.insert().values(**values)
+    conn.execute(statement)
+```
+
+具体实现需要根据实际情况进行调整。在处理中文表头时，可以考虑使用 `pandas` 中的 `MultiIndex` 类型来表示多级表头，然后将其转换为英文表头。在处理合并单元格时，可以使用 `openpyxl` 等库来操作 Excel 文件。在创建数据表时，需要根据字段类型和数据库类型进行对应。在导入数据时，可以使用 `pandas` 中的 `DataFrame.iterrows()` 方法来逐行遍历数据，并使用 `SQLAlchemy` 中的 `Table.insert()` 方法来插入数据。
+
+以下是一个基本的代码框架，供参考：
+
+```python
+import pandas as pd
+from sqlalchemy import create_engine, Table, Column, Integer, String, Float
+
+# 读取 Excel 文件
+df = pd.read_excel('filename.xlsx', header=[0, 1])
+
+# 处理表头
+header = list(df.columns)
+# TODO: 将中文表头转换为英文表头，并解决合并单元格的问题
+
+# 处理数据类型
+dtypes = {
+    '英文字段1': Float,
+    '英文字段2': String(255),
+    # ...
+}
+df = df.astype(dtypes)
+
+# 连接数据库
+engine = create_engine('postgresql://username:password@host:port/database')
+conn = engine.connect()
+
+# 创建临时表
+metadata = MetaData()
+temp_table = Table(
+    'temp_tablename', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('英文字段1', Float),
+    Column('英文字段2', String(255)),
+    # ...
+)
+metadata.create_all(engine)
+
+# 导入数据到临时表
+for index, row in df.iterrows():
+    values = {
+        '英文字段1': row['英文字段1'],
+        '英文字段2': row['英文字段2'],
+        # ...
+    }
+    statement = temp_table.insert().values(**values)
+    conn.execute(statement)
+
+# 验证数据是否全部导入成功
+result = conn.execute(temp_table.select())
+if result.rowcount != len(df):
+    raise Exception('导入数据失败')
+
+# 修改表名
+conn.execute(f'ALTER TABLE tablename RENAME TO old_tablename;')
+conn.execute(f'ALTER TABLE temp_tablename RENAME TO tablename;')
+
+# 删除旧表
+conn.execute(f'DROP TABLE IF EXISTS old_tablename;')
+```
+
+具体实现需要根据实际情况进行调整。在处理中文表头时，可以考虑使用 `pandas` 中的 `MultiIndex` 类型来表示多级表头，然后将其转换为英文表头。在处理合并单元格时，可以使用 `openpyxl` 等库来操作 Excel 文件。在创建临时表和创建数据表时，需要根据字段类型和数据库类型进行对应。在导入数据时，可以使用 `pandas` 中的 `DataFrame.iterrows()` 方法来逐行遍历数据，并使用 `SQLAlchemy` 中的 `Table.insert()` 方法来插入数据。在验证数据是否全部导入成功后，如果失败则抛出异常，否则修改表名并删除旧表。
