@@ -1,0 +1,87 @@
+---
+layout:     post
+title:      "exe方式调用py文件"
+subtitle:   ""
+date:       2023-07-02
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+要将 Python 模块转换为可执行的 .exe 文件并获取结果，你可以使用 PyInstaller 或 cx_Freeze 这样的工具来打包和构建你的代码。以下是一个基本的步骤：
+
+1. 首先，确保你已经安装了 PyInstaller 或 cx_Freeze。你可以使用以下命令之一进行安装：
+- 对于 PyInstaller：`pip install pyinstaller`
+- 对于 cx_Freeze：`pip install cx_Freeze`
+
+2. 创建一个名为 `setup.py` 的文件，并编写以下内容：
+```python
+from cx_Freeze import setup, Executable
+
+setup(
+    name="YourScript",
+    version="1.0",
+    executables=[Executable("your_script.py")],
+)
+```
+或者对于 PyInstaller，创建一个名为 `specfile.spec` 的文件，并编写以下内容：
+```python
+# -*- mode: python ; coding: utf-8 -*-
+
+block_cipher = None
+
+a = Analysis(['your_script.py'],
+             pathex=['path/to/your/script_directory'],
+             binaries=[],
+             datas=[],
+             hiddenimports=[],
+             hookspath=[],
+             runtime_hooks=[],
+             excludes=[],
+             win_no_prefer_redirects=False,
+             win_private_assemblies=False,
+             cipher=block_cipher,
+             noarchive=False)
+a.datas = []
+pyz = PYZ(a.pure, a.zipped_data,
+             cipher=block_cipher)
+exe = EXE(pyz,
+          a.scripts,
+          exclude_binaries=True,
+          name='YourScript',
+          debug=False,
+          bootloader_ignore_signals=False,
+          strip=False,
+          upx=True,
+          upx_exclude=[],
+          runtime_tmpdir=None,
+          console=False )
+coll = COLLECT(exe,
+               a.binaries,
+               a.zipfiles,
+               a.datas,
+               strip=False,
+               upx=True,
+               upx_exclude=[],
+               name='YourScript')
+```
+确保将 `your_script.py` 替换为你实际的 Python 脚本文件名。
+
+3. 在终端中，导航到包含 `setup.py` 或 `specfile.spec` 的目录，并运行以下命令来构建 .exe 文件：
+- 对于 cx_Freeze：`python setup.py build`
+- 对于 PyInstaller：`pyinstaller specfile.spec`
+
+4. 完成构建后，将生成的 .exe 文件移动到你希望保存它的目标位置。
+
+5. 使用 `subprocess.run()` 方法调用 .exe 文件，并捕获其输出。例如：
+```python
+import subprocess
+
+result = subprocess.run('path/to/your/exe', capture_output=True, text=True)
+```
+其中，`path/to/your/exe` 是你的 .exe 文件的路径。
+
+6. 调用完毕后，你可以通过 `result.stdout` 属性来获取标准输出的结果，通过 `result.stderr` 属性来获取标准错误的结果。
+
+这样，你就可以将 Python 模块转换为可执行的 .exe 文件，并以调用 .exe 文件的方式运行并获取结果了。
