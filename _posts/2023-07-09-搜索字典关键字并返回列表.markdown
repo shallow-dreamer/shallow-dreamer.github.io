@@ -1,0 +1,78 @@
+---
+layout:     post
+title:      "根据关键字搜索字典并返回列表"
+subtitle:   ""
+date:       2023-07-09
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+功能是为了找到关键字并返回关键字路径，当然只适用于字典中关键字是唯一的
+
+第一种：关键字作为字典的键
+
+```python
+"""字典格式：
+{
+	"a": "",
+	"b": {
+		"b1": ""
+	}
+}
+"""
+def search(theDict: dict, theKey: str):
+    for key in theDict.keys():
+    	if key == theKey:
+    		return [key]
+    	else:
+    		subDict: dict = theDict[key]
+    		if len(subDict.keys()) > 0:
+    			keyList = search(subDict, theKey)
+    			if keyList is not None:
+    				return [key] + keyList
+   			else:
+    			pass
+    return None
+```
+
+第二种：关键字作为字典的值
+
+```python
+"""
+字典格式：
+{
+	"name": "a",
+	"chidren": {
+		"name": "a1"
+	}
+}
+数据格式
+[
+	{
+		"name": "a",
+		"children"" [{
+			"name": "a1"
+		}]
+	},
+	{
+		"name": "b",
+		"chidren": []
+	}
+]
+"""
+def search(theList: list, theKey: str):
+    for i in range(len(theList)):
+        # 获取子字典
+        children = theList[i].get("children")
+        if theList[i].get("name") == theKey:
+            return [theList[i].get("name")]
+        elif children is not None:
+            subList = search(children, theKey)
+            return [theList[i].get("name")] + subList
+        else:
+            pass
+    return None
+```
+
