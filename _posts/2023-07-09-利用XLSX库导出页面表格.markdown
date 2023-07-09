@@ -19,6 +19,10 @@ js
 
 ```js
 import * as XLSX from 'xlsx'
+/**
+	* 导出表格为xlsx文件
+	* @param { string } id 表格dom的id
+*/
 async function exportTable(id, fileName){
     let wb = XLSX.utils.table_to_book(document.getElementById(id))
     let wbout = XLSX.write(wb, {
