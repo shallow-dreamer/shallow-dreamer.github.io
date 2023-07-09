@@ -1,0 +1,37 @@
+---
+layout:     post
+title:      "利用xlsx库导出页面表格为xlsx文件"
+subtitle:   ""
+date:       2023-07-09
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - js
+---
+
+html
+
+```vue
+<el-table id="table"></el-table>
+```
+
+js
+
+```js
+import * as XLSX from 'xlsx'
+async function exportTable(id, fileName){
+    let wb = XLSX.utils.table_to_book(document.getElementById(id))
+    let wbout = XLSX.write(wb, {
+        bookType: 'xlsx',
+		bookSST: true,
+        type: 'array'
+    })
+    try{
+        XLSX.utils.book_append__sheet(wb, wbout)
+        XLSX.writeFile(wb, `${fileName}.xlsx`)
+    }catch(e){
+        console.log(e)
+    }
+}
+```
+
