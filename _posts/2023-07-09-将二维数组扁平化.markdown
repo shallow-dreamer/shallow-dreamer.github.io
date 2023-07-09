@@ -1,0 +1,30 @@
+---
+layout:     post
+title:      "将二维数组扁平化，或者说变成一维数组"
+subtitle:   ""
+date:       2023-07-09
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+    - numpy
+---
+
+代码：
+
+```python
+a = [[1, 2], [3, 4]]
+# 扁平化
+b = [i for item in a for i in item]
+# 或
+import numpy as np
+npa = np.arrary(a)
+b = npa.ravel()
+# and
+b = npa.flatten()
+```
+
+ravel和flatten的区别在于使用ravel形成的数据在修改后会影响np.array的源数据
+
+上面的代码使用ravel后修改b的值npa也会变化
+
