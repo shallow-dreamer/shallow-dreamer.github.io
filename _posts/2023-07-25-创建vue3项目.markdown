@@ -1,0 +1,956 @@
+---
+layout:     post
+title:      "tree"
+subtitle:   ""
+date:       2023-07-25
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue3
+    - elementPlus
+---
+
+好的，下面是完整的Vue 3和Element Plus代码，包含所需的功能和数据。
+
+首先，我们需要创建一个Vue实例并添加所需的数据和方法：
+
+```html
+<template>
+  <div class="department-management">
+    <!-- 左侧部门树形结构 -->
+    <div class="left-panel">
+      <el-tree
+        :data="departments"
+        @node-click="handleNodeClick"
+        show-checkbox
+        accordion
+        node-key="id"
+      ></el-tree>
+    </div>
+
+    <!-- 右侧部门员工信息 -->
+    <div class="right-panel">
+      <div class="top-section">
+        <!-- 当前点击的部门名称和搜索员工表单 -->
+        <div class="department-info">
+          <h3>{{ selectedDepartment.name }}</h3>
+          <el-input
+            v-model="searchKeyword"
+            placeholder="搜索员工"
+            @input="handleSearch"
+          ></el-input>
+        </div>
+
+        <!-- 当前部门员工表格 -->
+        <el-table :data="filteredEmployees" style="width: 100%">
+          <el-table-column type="index" label="序号"></el-table-column>
+          <el-table-column prop="name" label="员工姓名"></el-table-column>
+          <el-table-column prop="department" label="所在部门"></el-table-column>
+          <el-table-column label="操作">
+            <template v-slot="{ row }">
+              <el-button @click="deleteEmployee(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!-- 添加员工按钮 -->
+        <el-button @click="showAddEmployeeDialog" class="add-employee-btn">
+          添加员工
+        </el-button>
+      </div>
+
+      <!-- 右侧审批流程 -->
+      <div class="approval-section">
+        <el-tabs v-model="activeTab">
+          <el-tab-pane label="已审批" name="approved">
+            <div v-for="data in approvalData.approved" :key="data.id">
+              {{ data }}
+            </div>
+          </el-tab-pane>
+          <el-tab-pane label="待审批" name="pending">
+            <div v-for="data in approvalData.pending" :key="data.id">
+              {{ data }}
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+    </div>
+
+    <!-- 添加员工弹窗 -->
+    <el-dialog :visible.sync="addEmployeeDialogVisible">
+      <h3>添加员工</h3>
+      <el-form :model="newEmployee">
+        <el-form-item label="员工姓名">
+          <el-input v-model="newEmployee.name"></el-input>
+        </el-form-item>
+        <el-form-item label="所在部门">
+          <el-input v-model="newEmployee.department"></el-input>
+        </el-form-item>
+      </el-form>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="addEmployeeDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="addEmployee">确认添加</el-button>
+      </span>
+    </el-dialog>
+  </div>
+</template>
+
+<script>
+import { ref, reactive } from 'vue';
+
+export default {
+  data() {
+    return {
+      departments: [
+        // 示例部门数据，根据实际情况填充
+        {
+          id: 1,
+          name: '部门1',
+          children: [
+            {
+              id: 11,
+              name: '部门1-1',
+              children: [
+                { id: 111, name: '部门1-1-1', children: [] },
+                { id: 112, name: '部门1-1-2', children: [] },
+              ],
+            },
+            {
+              id: 12,
+              name: '部门1-2',
+              children: [
+                { id: 121, name: '部门1-2-1', children: [] },
+                { id: 122, name: '部门1-2-2', children: [] },
+              ],
+            },
+          ],
+        },
+        {
+          id: 2,
+          name: '部门2',
+          children: [
+            { id: 21, name: '部门2-1', children: [] },
+            { id: 22, name: '部门2-2', children: [] },
+          ],
+        },
+      ],
+      selectedDepartment: {}, // 当前选中的部门
+      searchKeyword: '', // 搜索员工关键字
+      employees: [
+        // 示例员工数据，根据实际情况填充
+        { id: 1, name: '员工1', department: '部门1-1-1' },
+        { id: 2, name: '员工2', department: '部门1-1-1' },
+        { id: 3, name: '员工3', department: '部门1-1-2' },
+        { id: 4, name: '员工4', department: '部门1-2-1' },
+        { id: 5, name: '员工5', department: '部门1-2-2' },
+        { id: 6, name: '员工6', department: '部门2-1' },
+        { id: 7, name: '员工7', department: '部门2-1' },
+        { id: 8, name: '员工8', department: '部门2-2' },
+      ],
+      addEmployeeDialogVisible: false, // 控制添加员工弹窗显示
+      newEmployee: {
+        name: '',
+        department: '',
+      },
+      approvalData: {
+        // 示例审批数据，根据实际情况填充
+        approved: [{ id: 1, name: '审批1' }, { id: 2, name: '审批2' }],
+        pending: [{ id: 3, name: '待审批1' }, { id: 4, name: '待审批2' }],
+      },
+      activeTab: 'approved', // 默认显示已审批数据
+    };
+  },
+  computed: {
+    // 根据搜索关键字过滤员工
+    filteredEmployees() {
+      if (!this.searchKeyword) {
+        return this.employees;
+      }
+      return this.employees.filter((employee) =>
+        employee.name.toLowerCase().includes(this.searchKeyword.toLowerCase())
+      );
+    },
+  },
+  methods: {
+    // 处理树节点点击事件
+    handleNodeClick(data) {
+      this.selectedDepartment = data;
+    },
+    // 处理搜索员工
+    handleSearch() {
+      // 可以根据需要进行其他操作，比如请求后端数据
+    },
+    //
+```
+
+下面是一个完整的示例代码，使用Vue 3和Element Plus实现您所需的页面功能。为了简化示例，部分数据和逻辑可能是假设的。
+
+```html
+<template>
+  <div class="department-management">
+    <!-- 左侧部门树形结构 -->
+    <div class="left-panel">
+      <el-tree
+        :data="departments"
+        @node-click="handleNodeClick"
+        show-checkbox
+        accordion
+        node-key="id"
+      ></el-tree>
+    </div>
+
+    <!-- 右侧部门员工信息 -->
+    <div class="right-panel">
+      <div class="top-section">
+        <!-- 当前点击的部门名称和搜索员工表单 -->
+        <div class="department-info">
+          <h3>{{ selectedDepartment.name }}</h3>
+          <el-input
+            v-model="searchKeyword"
+            placeholder="搜索员工"
+            @input="handleSearch"
+          ></el-input>
+        </div>
+
+        <!-- 当前部门员工表格 -->
+        <el-table :data="filteredEmployees" style="width: 100%">
+          <el-table-column type="index" label="序号"></el-table-column>
+          <el-table-column prop="name" label="员工姓名"></el-table-column>
+          <el-table-column prop="department" label="所在部门"></el-table-column>
+          <el-table-column label="操作">
+            <template v-slot="{ row }">
+              <el-button @click="deleteEmployee(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!-- 添加员工按钮 -->
+        <el-button @click="showAddEmployeeDialog" class="add-employee-btn">
+          添加员工
+        </el-button>
+      </div>
+
+      <!-- 右侧审批流程 -->
+      <div class="approval-section">
+        <el-tabs v-model="activeTab">
+          <el-tab-pane label="已审批" name="approved">
+            <!-- 显示已审批数据 -->
+            <div v-for="data in approvalData.approved" :key="data.id">
+              {{ data }}
+            </div>
+          </el-tab-pane>
+          <el-tab-pane label="待审批" name="pending">
+            <!-- 显示待审批数据 -->
+            <div v-for="data in approvalData.pending" :key="data.id">
+              {{ data }}
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+    </div>
+
+    <!-- 添加员工弹窗 -->
+    <el-dialog :visible.sync="addEmployeeDialogVisible">
+      <h3>添加员工</h3>
+      <el-form :model="newEmployee">
+        <el-form-item label="员工姓名">
+          <el-input v-model="newEmployee.name"></el-input>
+        </el-form-item>
+        <el-form-item label="所在部门">
+          <el-input v-model="newEmployee.department"></el-input>
+        </el-form-item>
+      </el-form>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="addEmployeeDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="addEmployee">确认添加</el-button>
+      </span>
+    </el-dialog>
+  </div>
+</template>
+
+<script>
+import { ref, reactive, computed } from 'vue';
+
+export default {
+  data() {
+    return {
+      departments: [
+        {
+          id: 1,
+          name: '部门1',
+          children: [
+            {
+              id: 2,
+              name: '部门1-1',
+              children: [
+                { id: 3, name: '部门1-1-1', children: [] },
+                { id: 4, name: '部门1-1-2', children: [] },
+              ],
+            },
+            { id: 5, name: '部门1-2', children: [] },
+          ],
+        },
+        // Add more department data here
+      ],
+      selectedDepartment: {}, // 当前选中的部门
+      searchKeyword: '', // 搜索员工关键字
+      employees: [
+        { id: 1, name: '张三', department: '部门1-1-1' },
+        { id: 2, name: '李四', department: '部门1-1-1' },
+        { id: 3, name: '王五', department: '部门1-1-2' },
+        // Add more employee data here
+      ],
+      addEmployeeDialogVisible: false, // 控制添加员工弹窗显示
+      newEmployee: {
+        name: '',
+        department: '',
+      },
+      approvalData: {
+        approved: [
+          { id: 1, name: '审批1已通过' },
+          { id: 2, name: '审批2已通过' },
+          // Add more approved data here
+        ],
+        pending: [
+          { id: 3, name: '待审批1' },
+          { id: 4, name: '待审批2' },
+          // Add more pending data here
+        ],
+      },
+      activeTab: 'approved', // 默认显示已审批数据
+    };
+  },
+  computed: {
+    // 根据搜索关键字过滤员工
+    filteredEmployees() {
+      if (!this.searchKeyword) {
+        return this.employees;
+      }
+      return this.employees.filter((employee) =>
+        employee.name.toLowerCase().includes(this.searchKeyword.toLowerCase())
+      );
+    },
+  },
+  methods: {
+    // 处理树节点点击事件
+    handleNodeClick(data) {
+      this.selectedDepartment = data;
+    },
+    // 处理搜索员工
+    handleSearch() {
+      // 可以根据需要进行其他操作，比如请求后端数据
+    },
+    // 删除员工
+    deleteEmployee(row) {
+      const index = this.employees.findIndex((employee) => employee.id === row.id);
+      if (index !== -1) {
+        this.employees.splice(index, 1);
+      }
+    },
+    // 显示添加员工弹窗
+    showAddEmployeeDialog() {
+      this.addEmployeeDialogVisible = true;
+    },
+    // 添加员工
+    addEmployee() {
+      // 生成唯一的员工账号，这里简化处理
+      const employeeId = this.employees.length + 1;
+      const newEmployee = {
+        id: employeeId,
+        name: this.newEmployee.name,
+        department: this.newEmployee.department,
+      };
+      this.employees.push(newEmployee);
+
+      // 清空输入框
+      this.newEmployee.name = '';
+      this.newEmployee.department = '';
+
+      // 关闭弹窗
+      this.addEmployeeDialogVisible = false;
+    },
+  },
+};
+</script>
+
+<style>
+/* 添加样式以美化页面 */
+.department-management {
+  display: flex
+```
+
+好的，我将为您提供一个完整的Vue 3和Element Plus代码示例，满足您的所有要求。请注意，由于数据来源和登录机制不可直接在这里实现，因此我们会使用一些虚拟数据来展示页面的功能。
+
+首先，安装Vue和Element Plus，并创建一个Vue项目。然后，您可以按照以下代码示例编写组件。
+
+```html
+<template>
+  <div class="department-management">
+    <!-- 左侧部门树形结构 -->
+    <div class="left-panel">
+      <el-tree
+        :data="departments"
+        :props="treeProps"
+        @node-click="handleNodeClick"
+        show-checkbox
+        accordion
+        :expand-on-click-node="false"
+        node-key="id"
+      ></el-tree>
+    </div>
+
+    <!-- 右侧部门员工信息 -->
+    <div class="right-panel">
+      <!-- 左侧部分 -->
+      <div class="left-section">
+        <div class="department-info">
+          <h3>{{ selectedDepartment.name }}</h3>
+          <el-input
+            v-model="searchKeyword"
+            placeholder="搜索员工"
+            @input="handleSearch"
+          ></el-input>
+        </div>
+        <el-table :data="filteredEmployees" style="width: 100%">
+          <el-table-column type="index" label="序号"></el-table-column>
+          <el-table-column prop="name" label="员工姓名"></el-table-column>
+          <el-table-column prop="department" label="所在部门"></el-table-column>
+          <el-table-column label="操作">
+            <template v-slot="{ row }">
+              <el-button @click="deleteEmployee(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-button @click="showAddEmployeeDialog" class="add-employee-btn">
+          添加员工
+        </el-button>
+      </div>
+
+      <!-- 右侧部分 -->
+      <div class="right-section">
+        <el-tabs v-model="activeTab">
+          <el-tab-pane label="审批流程" name="approval">
+            <!-- 审批流程信息 -->
+            <div>
+              <!-- 这里展示审批流程相关数据 -->
+            </div>
+          </el-tab-pane>
+          <el-tab-pane label="已审批" name="approved">
+            <!-- 已审批数据 -->
+            <div v-for="data in approvalData.approved" :key="data.id">
+              {{ data }}
+            </div>
+          </el-tab-pane>
+          <el-tab-pane label="待审批" name="pending">
+            <!-- 待审批数据 -->
+            <div v-for="data in approvalData.pending" :key="data.id">
+              {{ data }}
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+    </div>
+
+    <!-- 添加员工弹窗 -->
+    <el-dialog :visible.sync="addEmployeeDialogVisible">
+      <h3>添加员工</h3>
+      <el-form :model="newEmployee">
+        <el-form-item label="员工姓名">
+          <el-input v-model="newEmployee.name"></el-input>
+        </el-form-item>
+        <el-form-item label="所在部门">
+          <el-input v-model="newEmployee.department"></el-input>
+        </el-form-item>
+      </el-form>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="addEmployeeDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="addEmployee">确认添加</el-button>
+      </span>
+    </el-dialog>
+  </div>
+</template>
+
+<script>
+import { ref, reactive } from 'vue';
+
+export default {
+  data() {
+    return {
+      // 假设有一个虚拟的用户登录信息和部门数据
+      userAccount: 'user123',
+      departments: [
+        // 假设这里是您的部门数据
+        // 请根据实际情况自行填充
+      ],
+      treeProps: {
+        // 部门树形结构的配置
+        children: 'children',
+        label: 'name',
+      },
+      selectedDepartment: {}, // 当前选中的部门
+      searchKeyword: '', // 搜索员工关键字
+      employees: [
+        // 假设这里是您的员工数据
+        // 请根据实际情况自行填充
+      ],
+      addEmployeeDialogVisible: false, // 控制添加员工弹窗显示
+      newEmployee: {
+        name: '',
+        department: '',
+      },
+      approvalData: {
+        approved: [
+          // 假设这里是已审批数据
+          // 请根据实际情况自行填充
+        ],
+        pending: [
+          // 假设这里是待审批数据
+          // 请根据实际情况自行填充
+        ],
+      },
+      activeTab: 'approved', // 默认显示已审批数据
+    };
+  },
+  computed: {
+    // 根据搜索关键字过滤员工
+    filteredEmployees() {
+      if (!this.searchKeyword) {
+        return this.employees;
+      }
+      return this.employees.filter((employee) =>
+        employee.name.toLowerCase().includes(this.searchKeyword.toLowerCase())
+      );
+    },
+  },
+  methods: {
+    // 处理树节点点击事件
+    handleNodeClick(data) {
+      this.selectedDepartment = data;
+    },
+    // 处理搜索员工
+    handleSearch() {
+      // 可以根据需要进行其他操作，比如请求后端数据
+    },
+    // 删除员工
+    deleteEmployee(row) {
+      // 可以根据需要进行其他操作，比如请求后端数据
+    },
+    // 显示添加员工弹窗
+    showAddEmployeeDialog() {
+      this.addEmployeeDialogVisible = true;
+    },
+    // 添加员工
+    addEmployee() {
+      // 可以根据需要进行其他操作，比如请求后端数据
+      // 将新员工添加到 employees 数组中
+      this.employees.push({
+        id: this.employees.length + 1,
+        name: this.newEmployee.name,
+        department: this.newEmployee.department,
+      });
+
+      // 清空输入框
+      this.newEmployee.name = '';
+      this.newEmployee.department = '';
+
+      // 关闭弹窗
+      this.addEmployeeDialogVisible = false;
+    },
+  },
+};
+</script>
+
+<style>
+/* 添加样式以美化页面 */
+.department-management {
+  display: flex;
+}
+
+.left-panel {
+  flex: 1;
+}
+
+.right-panel {
+  flex:
+```
+
+好的，我将为您提供完整的Vue 3和Element Plus代码示例，包括数据和页面组件。请注意，由于篇幅限制，我将只提供一个简单的前端示例，实际应用中，您需要结合后端处理数据和登录等功能。
+
+首先，创建一个名为`DepartmentManagement.vue`的组件文件，其中包含左侧部门树形结构和右侧员工数据展示和审批流程：
+
+```html
+<template>
+  <div class="department-management">
+    <!-- 左侧部门树形结构 -->
+    <div class="left-panel">
+      <el-tree
+        :data="departments"
+        @node-click="handleNodeClick"
+        show-checkbox
+        accordion
+        node-key="id"
+      ></el-tree>
+    </div>
+
+    <!-- 右侧部门员工信息和审批流程 -->
+    <div class="right-panel">
+      <div class="top-section">
+        <!-- 当前点击的部门名称和搜索员工表单 -->
+        <div class="department-info">
+          <h3>{{ selectedDepartment.name }}</h3>
+          <el-input
+            v-model="searchKeyword"
+            placeholder="搜索员工"
+            @input="handleSearch"
+          ></el-input>
+        </div>
+
+        <!-- 当前部门员工表格 -->
+        <el-table :data="filteredEmployees" style="width: 100%">
+          <el-table-column type="index" label="序号"></el-table-column>
+          <el-table-column prop="name" label="员工姓名"></el-table-column>
+          <el-table-column prop="department" label="所在部门"></el-table-column>
+          <el-table-column label="操作">
+            <template v-slot="{ row }">
+              <el-button @click="deleteEmployee(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!-- 添加员工按钮 -->
+        <el-button @click="showAddEmployeeDialog" class="add-employee-btn">
+          添加员工
+        </el-button>
+      </div>
+
+      <!-- 右侧审批流程 -->
+      <div class="approval-section">
+        <el-tabs v-model="activeTab">
+          <el-tab-pane label="已审批" name="approved">
+            <!-- 显示已审批数据 -->
+            <div v-for="data in approvalData.approved" :key="data.id">
+              {{ data }}
+            </div>
+          </el-tab-pane>
+          <el-tab-pane label="待审批" name="pending">
+            <!-- 显示待审批数据 -->
+            <div v-for="data in approvalData.pending" :key="data.id">
+              {{ data }}
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+    </div>
+
+    <!-- 添加员工弹窗 -->
+    <el-dialog :visible.sync="addEmployeeDialogVisible">
+      <h3>添加员工</h3>
+      <el-form :model="newEmployee">
+        <el-form-item label="员工姓名">
+          <el-input v-model="newEmployee.name"></el-input>
+        </el-form-item>
+        <el-form-item label="所在部门">
+          <el-input v-model="newEmployee.department"></el-input>
+        </el-form-item>
+      </el-form>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="addEmployeeDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="addEmployee">确认添加</el-button>
+      </span>
+    </el-dialog>
+  </div>
+</template>
+
+<script>
+import { ref, reactive } from 'vue';
+
+export default {
+  data() {
+    return {
+      departments: [
+        // 假设您已有部门数据，这里仅做示例
+        { id: 1, name: '部门1', children: [...] },
+        // ...
+      ],
+      selectedDepartment: {}, // 当前选中的部门
+      searchKeyword: '', // 搜索员工关键字
+      employees: [
+        // 假设您已有员工数据，这里仅做示例
+        { id: 1, name: '员工1', department: '部门1' },
+        // ...
+      ],
+      addEmployeeDialogVisible: false, // 控制添加员工弹窗显示
+      newEmployee: {
+        name: '',
+        department: '',
+      },
+      approvalData: {
+        approved: [
+          // 假设您已有审批数据，这里仅做示例
+          { id: 1, content: '已审批1' },
+          // ...
+        ],
+        pending: [
+          // 假设您已有待审批数据，这里仅做示例
+          { id: 1, content: '待审批1' },
+          // ...
+        ],
+      },
+      activeTab: 'approved', // 默认显示已审批数据
+    };
+  },
+  computed: {
+    // 根据搜索关键字过滤员工
+    filteredEmployees() {
+      if (!this.searchKeyword) {
+        return this.employees;
+      }
+      return this.employees.filter((employee) =>
+        employee.name.toLowerCase().includes(this.searchKeyword.toLowerCase())
+      );
+    },
+  },
+  methods: {
+    // 处理树节点点击事件
+    handleNodeClick(data) {
+      this.selectedDepartment = data;
+    },
+    // 处理搜索员工
+    handleSearch() {
+      // 可以根据需要进行其他操作，比如请求后端数据
+    },
+    // 删除员工
+    deleteEmployee(row) {
+      // 可以根据需要进行其他操作，比如请求后端数据
+    },
+    // 显示添加员工弹窗
+    showAddEmployeeDialog() {
+      this.addEmployeeDialogVisible = true;
+    },
+    // 添加员工
+    addEmployee() {
+      // 可以根据需要进行其他操作，比如请求后端数据
+      // 假设自动生成员工账号逻辑，这里仅做示例
+      const newEmployeeAccount = 'EMP' + Math.floor(Math.random() * 1000);
+      
+      // 将新员工添加到 employees 数组中
+      this.employees.push({
+        id: this.employees.length + 1,
+        name: this.newEmployee.name,
+        department: this.newEmployee.department,
+        account: newEmployeeAccount,
+      });
+
+      // 清空输入框
+      this.newEmployee.name = '';
+      this.newEmployee.department = '';
+
+      // 关闭弹窗
+      this.addEmployeeDialogVisible = false;
+    },
+  },
+};
+</script>
+
+<style>
+/* 添加样式以美化页面 */
+.department-management {
+  display: flex;
+}
+
+.left-panel
+```
+
+理解您的需求，我将为您提供一个完整的Vue 3和Element Plus页面示例代码。由于包含了完整的代码和数据，我将以代码块的形式提供，以保持整洁性。请确保您已经正确安装了Vue 3和Element Plus，然后可以将以下代码复制到您的Vue项目中的组件中。
+
+```html
+<template>
+  <div class="department-management">
+    <!-- 左侧部门树形结构 -->
+    <div class="left-panel">
+      <el-tree
+        :data="departments"
+        @node-click="handleNodeClick"
+        show-checkbox
+        accordion
+        node-key="id"
+      ></el-tree>
+    </div>
+
+    <!-- 右侧部门员工信息 -->
+    <div class="right-panel">
+      <div class="top-section">
+        <!-- 当前点击的部门名称和搜索员工表单 -->
+        <div class="department-info">
+          <h3>{{ selectedDepartment.name }}</h3>
+          <el-input
+            v-model="searchKeyword"
+            placeholder="搜索员工"
+            @input="handleSearch"
+          ></el-input>
+        </div>
+
+        <!-- 当前部门员工表格 -->
+        <el-table :data="filteredEmployees" style="width: 100%">
+          <el-table-column type="index" label="序号"></el-table-column>
+          <el-table-column prop="name" label="员工姓名"></el-table-column>
+          <el-table-column prop="department" label="所在部门"></el-table-column>
+          <el-table-column label="操作">
+            <template v-slot="{ row }">
+              <el-button @click="deleteEmployee(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!-- 添加员工按钮 -->
+        <el-button @click="showAddEmployeeDialog" class="add-employee-btn">
+          添加员工
+        </el-button>
+      </div>
+
+      <!-- 右侧审批流程 -->
+      <div class="approval-section">
+        <el-tabs v-model="activeTab">
+          <el-tab-pane label="已审批" name="approved">
+            <div v-for="data in approvalData.approved" :key="data.id">
+              {{ data }}
+            </div>
+          </el-tab-pane>
+          <el-tab-pane label="待审批" name="pending">
+            <div v-for="data in approvalData.pending" :key="data.id">
+              {{ data }}
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+    </div>
+
+    <!-- 添加员工弹窗 -->
+    <el-dialog :visible.sync="addEmployeeDialogVisible">
+      <h3>添加员工</h3>
+      <el-form :model="newEmployee">
+        <el-form-item label="员工姓名">
+          <el-input v-model="newEmployee.name"></el-input>
+        </el-form-item>
+        <el-form-item label="所在部门">
+          <el-input v-model="newEmployee.department"></el-input>
+        </el-form-item>
+      </el-form>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="addEmployeeDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="addEmployee">确认添加</el-button>
+      </span>
+    </el-dialog>
+  </div>
+</template>
+
+<script>
+import { ref, reactive } from 'vue';
+
+export default {
+  data() {
+    return {
+      departments: [
+        // 假设您的部门数据如下，根据实际情况填充
+        {
+          id: 1,
+          name: '部门1',
+          children: [
+            {
+              id: 11,
+              name: '子部门1-1',
+              children: [
+                {
+                  id: 111,
+                  name: '子部门1-1-1',
+                  children: [
+                    {
+                      id: 1111,
+                      name: '子部门1-1-1-1',
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              id: 12,
+              name: '子部门1-2',
+            },
+          ],
+        },
+        // 其他部门数据...
+      ],
+      selectedDepartment: {}, // 当前选中的部门
+      searchKeyword: '', // 搜索员工关键字
+      employees: [
+        // 假设您的员工数据如下，根据实际情况填充
+        {
+          id: 1,
+          name: '张三',
+          department: '部门1',
+        },
+        // 其他员工数据...
+      ],
+      addEmployeeDialogVisible: false, // 控制添加员工弹窗显示
+      newEmployee: {
+        name: '',
+        department: '',
+      },
+      approvalData: {
+        approved: [
+          // 假设您的已审批数据如下，根据实际情况填充
+          {
+            id: 1,
+            content: '已审批内容1',
+          },
+          // 其他已审批数据...
+        ],
+        pending: [
+          // 假设您的待审批数据如下，根据实际情况填充
+          {
+            id: 1,
+            content: '待审批内容1',
+          },
+          // 其他待审批数据...
+        ],
+      },
+      activeTab: 'approved', // 默认显示已审批数据
+    };
+  },
+  computed: {
+    // 根据搜索关键字过滤员工
+    filteredEmployees() {
+      if (!this.searchKeyword) {
+        return this.employees;
+      }
+      return this.employees.filter((employee) =>
+        employee.name.toLowerCase().includes(this.searchKeyword.toLowerCase())
+      );
+    },
+  },
+  methods: {
+    // 处理树节点点击事件
+    handleNodeClick(data) {
+      this.selectedDepartment = data;
+    },
+    // 处理搜索员工
+    handleSearch() {
+      // 可以根据需要进行其他操作，比如请求后端数据
+    },
+    // 删除员工
+    deleteEmployee(row) {
+      // 可以根据需要进行其他操作，比如请求后端数据
+      const index = this.employees.findIndex((emp) => emp.id === row.id);
+      if (index !== -1) {
+        this.employees.splice(index, 1);
+      }
+    },
+    // 显示添加员工弹窗
+    showAddEmployeeDialog() {
+      this.addEmployeeDialogVisible = true;
+    },
+    // 添加员工
+    addEmployee() {
+      // 可以根据需要进行其他操作，比如请求后端数据
+      // 将新员工添加到 employees 数组中
+      const newEmployee
