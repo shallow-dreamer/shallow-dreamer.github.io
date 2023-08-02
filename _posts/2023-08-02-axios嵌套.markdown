@@ -1,0 +1,189 @@
+---
+layout:     post
+title:      "axios嵌套"
+subtitle:   ""
+date:       2023-08-02
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue3
+    - axios
+---
+
+如果您想为每个项目创建一个 Axios 实例，并在主项目的 Axios 中挂载这些实例，可以使用 Axios 的实例挂载方式来实现。这样，您可以在主项目中方便地管理和使用不同项目的 Axios 实例，而每个实例可以有独立的拦截器和配置。
+
+下面是一个示例代码，展示如何在主项目中挂载每个项目的 Axios 实例：
+
+1. 安装 Axios：
+
+首先，您需要安装 Axios：
+
+```bash
+npm install axios
+```
+
+2. 创建各个项目的 Axios 实例：
+
+在主项目的文件中，创建并配置各个项目的 Axios 实例，并将它们保存到一个对象中：
+
+```javascript
+// projectA.js
+import axios from 'axios';
+
+const instanceA = axios.create({
+  baseURL: 'https://api.projectA.com/',
+});
+
+// 添加拦截器和其他配置到 instanceA
+instanceA.interceptors.request.use(
+  // ...
+);
+
+instanceA.interceptors.response.use(
+  // ...
+);
+
+export default instanceA;
+```
+
+```javascript
+// projectB.js
+import axios from 'axios';
+
+const instanceB = axios.create({
+  baseURL: 'https://api.projectB.com/',
+});
+
+// 添加拦截器和其他配置到 instanceB
+instanceB.interceptors.request.use(
+  // ...
+);
+
+instanceB.interceptors.response.use(
+  // ...
+);
+
+export default instanceB;
+```
+
+3. 主项目中挂载各个项目的 Axios 实例：
+
+在主项目的文件中，导入并挂载各个项目的 Axios 实例：
+
+```javascript
+import projectA from './projectA';
+import projectB from './projectB';
+
+const axiosInstances = {
+  projectA,
+  projectB,
+};
+
+export default axiosInstances;
+```
+
+4. 在主项目中使用项目的 Axios 实例：
+
+现在，您可以在主项目的其他文件中使用项目的 Axios 实例，例如：
+
+```javascript
+import axiosInstances from './axiosInstances';
+
+// 使用 projectA 的实例
+axiosInstances.projectA.get('/endpointA')
+  .then((response) => {
+    // 处理项目 A 的响应数据
+  })
+  .catch((error) => {
+    // 处理项目 A 的错误
+  });
+
+// 使用 projectB 的实例
+axiosInstances.projectB.get('/endpointB')
+  .then((response) => {
+    // 处理项目 B 的响应数据
+  })
+  .catch((error) => {
+    // 处理项目 B 的错误
+  });
+```
+
+通过以上方法，您可以为每个项目创建独立的 Axios 实例，并在主项目中挂载，从而方便地管理和使用不同项目的 Axios 实例，同时可以为每个实例单独设置拦截器和配置。
+
+当需要为每个项目创建独立的 Axios 实例并将它们挂载到主项目的 Axios 实例时，您可以这样做：
+
+1. 在每个子项目中创建独立的 Axios 实例：
+
+在每个子项目的文件中创建独立的 Axios 实例，并配置相应的拦截器和默认配置。例如，假设您有两个子项目，Project A 和 Project B：
+
+```javascript
+// projectAApi.js
+import axios from 'axios';
+
+const axiosInstanceA = axios.create({
+  baseURL: 'https://api.projectA.com/',
+});
+
+axiosInstanceA.interceptors.request.use(
+  // 请求拦截器逻辑
+);
+
+axiosInstanceA.interceptors.response.use(
+  // 响应拦截器逻辑
+);
+
+export default axiosInstanceA;
+```
+
+```javascript
+// projectBApi.js
+import axios from 'axios';
+
+const axiosInstanceB = axios.create({
+  baseURL: 'https://api.projectB.com/',
+});
+
+axiosInstanceB.interceptors.request.use(
+  // 请求拦截器逻辑
+);
+
+axiosInstanceB.interceptors.response.use(
+  // 响应拦截器逻辑
+);
+
+export default axiosInstanceB;
+```
+
+2. 在主项目中挂载子项目的 Axios 实例：
+
+在主项目的主文件中，将子项目的 Axios 实例挂载到主项目的 Axios 实例上，以便于使用和管理。
+
+```javascript
+// mainApp.js
+import axios from 'axios';
+import axiosInstanceA from './projectAApi';
+import axiosInstanceB from './projectBApi';
+
+// 在主项目的 Axios 实例上挂载子项目的实例
+axios.projectA = axiosInstanceA;
+axios.projectB = axiosInstanceB;
+
+// 使用示例
+axios.projectA.get('/endpointA')
+  .then((response) => {
+    // 处理 Project A 的响应数据
+  })
+  .catch((error) => {
+    // 处理 Project A 的错误
+  });
+
+axios.projectB.get('/endpointB')
+  .then((response) => {
+    // 处理 Project B 的响应数据
+  })
+  .catch((error) => {
+    // 处理 Project B 的错误
+  });
+```
+
+通过这种方式，您可以在主项目中管理多个子项目的 Axios 实例，并在使用时通过 `axios.projectA` 和 `axios.projectB` 来访问它们。这样可以保持子项目的独立性，并能更好地组织和维护项目代码。请根据您的实际项目结构和需求进行适当的调整。
