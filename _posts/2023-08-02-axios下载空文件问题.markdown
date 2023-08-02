@@ -1,0 +1,58 @@
+---
+layout:     post
+title:      "axios下载空文件问题"
+subtitle:   ""
+date:       2023-08-02
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue3
+    - axios
+---
+
+在使用 Axios 下载文件时，如果服务器返回的文件为空，Axios 会将响应的数据解析为空，导致在处理下载文件时可能会出现错误。为了避免这种情况，您可以对 Axios 的响应进行处理，并在文件为空时进行特殊处理。一种常见的方法是检查响应的 Content-Length 头部，如果文件大小为0，则可以处理为空文件。
+
+以下是一个处理下载文件时空文件的示例代码：
+
+```javascript
+import axios from 'axios';
+
+const downloadFile = (url) => {
+  axios({
+    url,
+    method: 'GET',
+    responseType: 'blob', // 设置响应类型为二进制数据，用于处理文件下载
+  }).then((response) => {
+    // 获取响应头部信息
+    const contentLength = response.headers['content-length'];
+
+    // 检查文件是否为空
+    if (contentLength === '0') {
+      // 处理空文件
+      console.log('文件为空');
+      return;
+    }
+
+    // 创建临时链接，用于下载文件
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+
+    // 创建隐藏的<a>标签并模拟点击，触发下载
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'filename.ext'); // 设置下载的文件名
+    document.body.appendChild(link);
+    link.click();
+
+    // 释放临时链接
+    window.URL.revokeObjectURL(url);
+  }).catch((error) => {
+    // 处理下载错误
+    console.error('下载文件时出现错误：', error);
+  });
+};
+
+// 示例使用：传入文件的下载链接
+downloadFile('https://example.com/file.pdf');
+```
+
+请注意，由于文件下载可能涉及浏览器的安全限制，上述示例代码中的下载方法可能不适用于所有情况。在一些浏览器中，可能会出现弹出阻止下载的弹窗或其他限制。因此，建议根据您的具体使用场景进行适当调整和测试。同时，还可以考虑使用第三方下载库或组件来处理文件下载，这些库通常会处理更多下载相关的细节。
