@@ -1,0 +1,101 @@
+---
+layout:     post
+title:      "前端页面创建节点及页面思路"
+subtitle:   ""
+date:       2023-08-03
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue
+---
+
+在Vue前端项目中使用Element Plus创建一个自定义节点组件，允许用户在前端页面中设计和定制审批节点的页面，您可以按照以下步骤来实现：
+
+1. 安装Element Plus：
+首先，确保您已经安装了Vue和Element Plus。您可以通过npm或yarn安装Element Plus：
+
+```bash
+npm install element-plus --save
+```
+
+2. 创建自定义节点组件：
+在您的Vue项目中创建一个自定义节点组件，用于表示用户设计和定制审批节点的页面。您可以在组件中使用Element Plus的组件和布局来设计节点页面。
+
+```vue
+<template>
+  <div>
+    <!-- 在这里使用Element Plus的组件和布局来设计节点页面 -->
+    <el-form :model="formData" ref="nodeForm">
+      <!-- 添加审批节点的相关表单元素 -->
+      <el-form-item label="节点名称">
+        <el-input v-model="formData.nodeName"></el-input>
+      </el-form-item>
+      <!-- 其他表单元素和布局 -->
+      <!-- ... -->
+      <!-- 保存按钮 -->
+      <el-button type="primary" @click="saveNode">保存</el-button>
+    </el-form>
+  </div>
+</template>
+
+<script>
+export default {
+  data() {
+    return {
+      formData: {
+        nodeName: '', // 节点名称等其他字段
+        // ...
+      },
+    };
+  },
+  methods: {
+    saveNode() {
+      // 在此处将节点数据发送到后端保存
+      // 可以使用axios或其他HTTP库发送POST请求将formData发送到后端
+    },
+  },
+};
+</script>
+```
+
+3. 在父组件中使用动态组件加载自定义节点：
+在父组件中，使用Vue的动态组件特性来加载用户创建的自定义节点组件。可以通过v-if或v-for根据需要动态显示自定义节点组件。
+
+```vue
+<template>
+  <div>
+    <!-- 其他审批流程内容 -->
+    <!-- ... -->
+
+    <!-- 根据需要显示自定义节点组件 -->
+    <component v-if="showCustomNode" :is="customNodeComponent"></component>
+
+    <!-- 显示按钮用于添加自定义节点 -->
+    <el-button @click="addCustomNode">添加自定义节点</el-button>
+  </div>
+</template>
+
+<script>
+import CustomNode from '@/components/CustomNode'; // 导入自定义节点组件
+
+export default {
+  components: {
+    CustomNode,
+  },
+  data() {
+    return {
+      showCustomNode: false,
+    };
+  },
+  methods: {
+    addCustomNode() {
+      this.showCustomNode = true;
+    },
+  },
+};
+</script>
+```
+
+通过上述步骤，您可以在Vue项目中使用Element Plus创建一个自定义节点组件，允许用户在前端页面中设计和定制审批节点的页面。当用户点击“添加自定义节点”按钮时，会动态加载自定义节点组件，并显示允许用户进行节点页面设计。用户可以在组件中填写节点相关信息并点击保存按钮，将节点数据发送到后端进行保存。
+
+请注意，上述代码只是一个简单示例，您可以根据实际需求和业务逻辑进行调整和扩展。
