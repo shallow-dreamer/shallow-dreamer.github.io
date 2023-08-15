@@ -1,0 +1,98 @@
+---
+layout:     post
+title:      "vue3使用全局变量"
+subtitle:   ""
+date:       2023-08-15
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue
+---
+
+在 Vue 3 中，你可以在组件的 `<script>` 中使用在 `main.js` 中设置的全局变量，而不必使用 `provide`。这是因为 Vue 3 的组件之间的通信机制更加灵活，你可以通过不同的方式来访问全局变量。
+
+假设你在 `main.js` 中设置了一个全局变量：
+
+```js
+// main.js
+
+import { createApp } from 'vue';
+import App from './App.vue';
+
+const app = createApp(App);
+
+// 设置全局变量
+app.config.globalProperties.$myGlobalVariable = 'Hello from global!';
+
+app.mount('#app');
+```
+
+然后，在你的组件中，你可以通过 `this.$myGlobalVariable` 来访问这个全局变量：
+
+```vue
+<template>
+  <div>
+    <p>{{ globalText }}</p>
+  </div>
+</template>
+
+<script>
+export default {
+  name: 'MyComponent',
+  computed: {
+    globalText() {
+      return this.$myGlobalVariable;
+    }
+  }
+};
+</script>
+```
+
+这样，你的组件就可以访问在 `main.js` 中设置的全局变量了。不过要注意，这种方式会使你的组件和全局变量紧密耦合，可能会影响组件的可复用性和维护性。
+
+另外，如果你希望在组件之间进行更为结构化和明确的通信，可以考虑使用 Vuex 这样的状态管理库，或者在组件间通过 props 和事件进行数据传递。
+
+在 Vue 3 中，你可以通过全局变量（在 `main.js` 中设置）来在组件的 `<script>` 部分中访问这些变量。这可以通过在 Vue 应用的上下文中定义这些变量来实现。这种方式与使用 `provide` 和 `inject` 不同，因为它不会使用依赖注入的方式传递变量，而是直接在组件中访问全局变量。
+
+下面是一个示例，演示了如何在 Vue 3 组件中使用在 `main.js` 中设置的全局变量：
+
+1. 在 `main.js` 中设置全局变量：
+
+```javascript
+import { createApp } from 'vue';
+import App from './App.vue';
+
+const app = createApp(App);
+
+// 在这里设置全局变量
+app.config.globalProperties.$myGlobalVariable = 'Hello from global variable!';
+
+app.mount('#app');
+```
+
+2. 在组件的 `<script>` 部分中使用全局变量：
+
+```vue
+<template>
+  <div>
+    <h1>Using Global Variable in Vue 3</h1>
+    <p>{{ globalMessage }}</p>
+  </div>
+</template>
+
+<script>
+export default {
+  name: 'MyComponent',
+  computed: {
+    globalMessage() {
+      // 在组件中使用全局变量
+      return this.$myGlobalVariable;
+    },
+  },
+};
+</script>
+```
+
+在上述示例中，我们在 `main.js` 中通过 `app.config.globalProperties` 将一个全局变量 `$myGlobalVariable` 设置为字符串。然后在组件的 `<script>` 部分中，我们使用 `this.$myGlobalVariable` 来访问这个全局变量。
+
+这样，你就可以在 Vue 3 组件中直接使用在 `main.js` 中设置的全局变量，而不是使用 `provide` 和 `inject`。注意，这种方法适用于少量全局变量，如果你需要传递更多的数据或功能，使用 `provide` 和 `inject` 会更有利于代码组织和可维护性。
