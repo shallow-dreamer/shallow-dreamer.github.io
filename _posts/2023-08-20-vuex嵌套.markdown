@@ -1,0 +1,381 @@
+---
+layout:     post
+title:      "vuex嵌套"
+subtitle:   ""
+date:       2023-08-20
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue
+    - vuex
+---
+
+在 Vue 3 中，实现 Vuex 嵌套并为每个模块指定自己的命名空间可以通过以下步骤完成。我将提供一个示例，帮助你理解如何做到这一点。
+
+**步骤一：创建模块**
+
+在你的项目中，首先需要创建一个 Vuex 模块。模块将按照你的命名空间进行嵌套。
+
+1. 在你的项目中创建一个 `store` 文件夹（如果没有的话）。
+2. 在 `store` 文件夹中创建一个 `mainModule.js` 文件，这将是主模块。
+
+```javascript
+// store/mainModule.js
+
+import { createStore } from 'vuex';
+import subModule from './subModule';
+
+export default createStore({
+  modules: {
+    subModule,
+  },
+});
+```
+
+3. 在 `store` 文件夹中再创建一个 `subModule.js` 文件，这将是子模块。
+
+```javascript
+// store/subModule.js
+
+export default {
+  namespaced: true, // 启用命名空间
+  state: {
+    // 子模块的状态
+  },
+  mutations: {
+    // 子模块的变更
+  },
+  actions: {
+    // 子模块的动作
+  },
+  getters: {
+    // 子模块的获取器
+  },
+};
+```
+
+**步骤二：在组件中使用 Vuex 模块**
+
+现在，你可以在组件中使用这些 Vuex 模块，并通过命名空间访问其中的状态、变更、动作和获取器。
+
+1. 在组件中导入并使用 Vuex。
+
+```vue
+<template>
+  <div>
+    <p>Main Module State: {{ mainModuleState }}</p>
+    <p>Sub Module State: {{ subModuleState }}</p>
+  </div>
+</template>
+
+<script>
+import { computed } from 'vue';
+import { useStore } from 'vuex';
+
+export default {
+  setup() {
+    const store = useStore();
+    
+    // 使用命名空间访问模块的状态
+    const mainModuleState = computed(() => store.state.mainModule.someState);
+    const subModuleState = computed(() => store.state.subModule.someState);
+
+    return {
+      mainModuleState,
+      subModuleState,
+    };
+  },
+};
+</script>
+```
+
+这样，你就可以在组件中访问嵌套的 Vuex 模块的状态。注意，在使用命名空间时，你需要通过 `store.state.moduleName` 的方式来访问模块的状态。
+
+需要注意的是，如果你的模块涉及到更多的变更、动作和获取器，你也可以像上面的示例那样导入并使用它们。同时，还可以在模块之间进行相互的调用。
+
+通过这些步骤，你可以在 Vue 3 中实现 Vuex 的嵌套，并为每个模块指定自己的命名空间。
+
+在有命名空间的 Vuex 模块中，你需要使用模块的命名空间来访问状态、mutations、actions 和 getters。在 Vue 组件中，你可以使用以下方法来访问带有命名空间的 Vuex 模块：
+
+1. **使用命名空间前缀：**
+
+在带有命名空间的模块中，你可以通过添加模块的命名空间前缀来访问其状态、mutations、actions 和 getters。前缀的格式为模块名加上斜杠。
+
+```vue
+<script>
+import { mapState, mapMutations, mapActions, mapGetters } from 'vuex';
+
+export default {
+  computed: {
+    ...mapState('moduleName', {
+      someState: state => state.someState,
+    }),
+    ...mapGetters('moduleName', {
+      someGetter: 'someGetter',
+    }),
+  },
+  methods: {
+    ...mapMutations('moduleName', {
+      mutationName: 'mutationName',
+    }),
+    ...mapActions('moduleName', {
+      actionName: 'actionName',
+    }),
+  },
+};
+</script>
+```
+
+2. **使用模块中的辅助函数：**
+
+Vuex 还提供了辅助函数来使用命名空间。你可以使用 `createNamespacedHelpers` 函数创建一个带有命名空间的辅助函数对象，以便在组件中直接访问模块的状态、mutations、actions 和 getters。
+
+```vue
+<script>
+import { createNamespacedHelpers } from 'vuex';
+
+const { mapState, mapGetters, mapMutations, mapActions } = createNamespacedHelpers('moduleName');
+
+export default {
+  computed: {
+    ...mapState({
+      someState: state => state.someState,
+    }),
+    ...mapGetters({
+      someGetter: 'someGetter',
+    }),
+  },
+  methods: {
+    ...mapMutations({
+      mutationName: 'mutationName',
+    }),
+    ...mapActions({
+      actionName: 'actionName',
+    }),
+  },
+};
+</script>
+```
+
+确保将 `'moduleName'` 替换为实际的模块名。这样，你就可以在组件中使用命名空间来访问 Vuex 模块的内容了。
+
+在 Vuex 中使用命名空间的模块时，你需要在访问状态、提交 mutations、分发 actions 和获取 getters 时指定命名空间。以下是在具有命名空间的 Vuex 模块中如何访问这些内容的示例：
+
+假设你有一个名为 `user` 的模块，它使用了命名空间：
+
+```javascript
+// src/store/modules/user.js
+export default {
+  namespaced: true, // 启用命名空间
+  state: {
+    name: 'John Doe',
+  },
+  mutations: {
+    setName(state, newName) {
+      state.name = newName;
+    },
+  },
+  actions: {
+    updateName({ commit }, newName) {
+      commit('setName', newName);
+    },
+  },
+  getters: {
+    fullName(state) {
+      return `User: ${state.name}`;
+    },
+  },
+};
+```
+
+**在组件中访问状态：**
+
+```vue
+<template>
+  <div>
+    <p>{{ user.name }}</p>
+  </div>
+</template>
+
+<script>
+import { mapState } from 'vuex';
+
+export default {
+  computed: {
+    ...mapState('user', ['name']),
+  },
+};
+</script>
+```
+
+**在组件中提交 mutations：**
+
+```vue
+<template>
+  <div>
+    <button @click="updateUserName">Update Name</button>
+  </div>
+</template>
+
+<script>
+import { mapMutations } from 'vuex';
+
+export default {
+  methods: {
+    ...mapMutations('user', ['setName']),
+    updateUserName() {
+      this.setName('New Name');
+    },
+  },
+};
+</script>
+```
+
+**在组件中分发 actions：**
+
+```vue
+<template>
+  <div>
+    <button @click="updateUser">Update User</button>
+  </div>
+</template>
+
+<script>
+import { mapActions } from 'vuex';
+
+export default {
+  methods: {
+    ...mapActions('user', ['updateName']),
+    updateUser() {
+      this.updateName('New User Name');
+    },
+  },
+};
+</script>
+```
+
+**在组件中获取 getters：**
+
+```vue
+<template>
+  <div>
+    <p>{{ userFullName }}</p>
+  </div>
+</template>
+
+<script>
+import { mapGetters } from 'vuex';
+
+export default {
+  computed: {
+    ...mapGetters('user', ['fullName']),
+  },
+};
+</script>
+```
+
+这样，你可以在组件中正确访问具有命名空间的 Vuex 模块的状态、mutations、actions 和 getters。通过在 `mapState`、`mapMutations`、`mapActions` 和 `mapGetters` 函数中指定模块的命名空间（例如，'user'），你可以确保不同模块之间的属性和方法不会产生冲突。
+
+在 Vue 3 中，你可以使用 Vuex 来实现嵌套的状态管理，并为每个模块指定自己的命名空间。以下是如何实现这一点的步骤：
+
+**步骤一：安装 Vuex**
+
+确保你已经安装了 Vuex。如果没有安装，可以通过以下命令进行安装：
+
+```bash
+npm install vuex
+```
+
+**步骤二：设置 Vuex 模块**
+
+1. 在你的项目中创建一个 `store` 文件夹，然后在其中创建一个主 Vuex 模块文件（例如 `index.js`）：
+
+```javascript
+// store/index.js
+
+import { createStore } from 'vuex';
+
+const store = createStore({
+  state: {
+    // 全局状态
+  },
+  mutations: {
+    // 全局变更
+  },
+  actions: {
+    // 全局行动
+  },
+  modules: {
+    // 在这里嵌套子模块
+  },
+});
+
+export default store;
+```
+
+2. 在 `store` 文件夹中创建一个子模块文件夹，比如 `submodule`，然后在其中创建一个子模块文件（例如 `submodule.js`）：
+
+```javascript
+// store/submodule/submodule.js
+
+export default {
+  namespaced: true, // 启用命名空间
+  state: {
+    // 子模块状态
+  },
+  mutations: {
+    // 子模块变更
+  },
+  actions: {
+    // 子模块行动
+  },
+};
+```
+
+**步骤三：在主 Vuex 模块中引入子模块**
+
+在主 Vuex 模块的 `modules` 中引入子模块：
+
+```javascript
+// store/index.js
+
+import { createStore } from 'vuex';
+import submodule from './submodule/submodule';
+
+const store = createStore({
+  // ...其他配置
+  modules: {
+    submodule, // 引入子模块
+  },
+});
+
+export default store;
+```
+
+**步骤四：在组件中使用 Vuex 模块**
+
+在组件中访问带有命名空间的 Vuex 模块时，你需要在模块名称前加上命名空间，使用 `moduleName/actionName` 或 `moduleName/mutationName` 的方式来访问。
+
+```vue
+<template>
+  <div>
+    <p>子模块状态：{{ submoduleState }}</p>
+    <button @click="incrementSubmodule">增加子模块计数</button>
+  </div>
+</template>
+
+<script>
+import { mapState, mapActions } from 'vuex';
+
+export default {
+  computed: {
+    ...mapState('submodule', ['submoduleState']),
+  },
+  methods: {
+    ...mapActions('submodule', ['incrementSubmodule']),
+  },
+};
+</script>
+```
+
+这就是在 Vue 3 中实现 Vuex 嵌套并具有自己的命名空间的方法。在子模块中使用 `namespaced: true` 可以确保模块的状态、变更和行动都会在命名空间内生效，避免命名冲突问题。
