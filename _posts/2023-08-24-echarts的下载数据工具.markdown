@@ -1,0 +1,568 @@
+---
+layout:     post
+title:      "echarts的下载数据工具"
+subtitle:   ""
+date:       2023-08-24
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue
+    - echarts
+---
+
+当您在页面上使用 ECharts 来展示图表数据时，要实现将当前显示的图线数据下载并挂载到 ECharts 工具盒上，您可以使用 JavaScript 来编写一个函数。以下是一个示例函数，该函数可以满足您的需求：
+
+```javascript
+// 假设您已经引入了 ECharts 的相关库并创建了图表实例 myChart
+
+function addDownloadButtonToToolbox(chartInstance) {
+  // 获取已经显示的图线索引
+  const displayedSeriesIndices = chartInstance.getOption().legend[0].selected;
+
+  // 生成要下载的图线数据
+  const downloadData = {
+    series: chartInstance.getOption().series.filter((series, index) => displayedSeriesIndices[series.name]),
+  };
+
+  // 创建下载按钮
+  const downloadButton = {
+    show: true,
+    title: '下载图线数据',
+    icon: 'image:///path/to/download-icon.png', // 替换为您自己的下载图标路径
+    onclick: function () {
+      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(downloadData));
+      const anchor = document.createElement('a');
+      anchor.setAttribute('href', dataStr);
+      anchor.setAttribute('download', 'chart_data.json');
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+    },
+  };
+
+  // 更新工具盒配置
+  const toolbox = chartInstance.getOption().toolbox || {};
+  toolbox.feature = toolbox.feature || {};
+  toolbox.feature.myDownload = downloadButton;
+
+  // 更新图表配置
+  chartInstance.setOption({
+    toolbox: toolbox,
+  });
+}
+
+// 将函数应用于您的图表实例
+addDownloadButtonToToolbox(myChart);
+```
+
+请注意，上述代码仅为示例，您需要根据实际情况进行适当的修改。确保替换示例中的图标路径和其他相关配置以匹配您的项目。
+
+此函数的基本思路是获取当前图表的选项，找出哪些图线是已显示的，然后生成一个仅包含显示图线数据的下载对象。接着，它创建一个下载按钮，并将点击事件附加到该按钮，使用户点击按钮时可以下载图线数据。最后，函数将更新工具盒的配置，将新创建的下载按钮添加到工具盒中。
+
+请注意，ECharts 可能在不同版本之间具有不同的 API，因此根据您实际使用的 ECharts 版本，可能需要对上述示例代码进行一些调整。
+
+要实现你描述的功能，你需要使用 JavaScript 编写一个函数，该函数从 ECharts 实例中获取当前显示的图线数据，然后将其添加到 ECharts 工具盒中，以便下载。以下是一个可能的实现：
+
+```javascript
+// 假设你已经有了 ECharts 实例 myChart
+
+// 定义一个函数来获取当前显示的图线数据
+function getDisplayedSeriesData(chart) {
+  const displayedSeriesData = [];
+
+  const option = chart.getOption();
+  const legendSelected = option.legend[0].selected;
+
+  option.series.forEach((series) => {
+    if (legendSelected[series.name]) {
+      displayedSeriesData.push(series);
+    }
+  });
+
+  return displayedSeriesData;
+}
+
+// 将获取到的数据添加到 ECharts 工具盒中
+function addDownloadButton(chart) {
+  const toolbox = chart.getOption().toolbox;
+  const newFeature = {
+    show: true,
+    title: '下载显示的图线数据',
+    icon: 'image://data:image/png;base64,iVBORw0KG...',
+    onclick: function () {
+      const displayedSeriesData = getDisplayedSeriesData(chart);
+      // 这里你可以根据需要处理 displayedSeriesData，比如下载为文件
+      console.log('下载显示的图线数据', displayedSeriesData);
+    },
+  };
+  toolbox.feature.myDownload = newFeature;
+
+  // 更新 ECharts 实例的配置
+  chart.setOption({ toolbox });
+}
+
+// 调用函数将下载按钮添加到工具盒中
+addDownloadButton(myChart);
+```
+
+请注意，上述代码中的 `getDisplayedSeriesData` 函数用于获取当前显示的图线数据，它首先通过检查 legend 的状态来判断哪些图线是显示的。然后，`addDownloadButton` 函数会将一个新的工具按钮添加到 ECharts 工具盒中，点击该按钮会触发下载操作，下载的数据就是当前显示的图线数据。
+
+你需要将代码中的图标 Base64 编码部分替换为你想要使用的图标。另外，根据你的实际需求，你可能需要进一步处理获取的图线数据，例如将其转换为特定格式的文件并提供下载链接。
+
+要实现将 ECharts 图表中显示的图线数据下载，并将其挂载到 ECharts 工具箱（toolbox）上，您需要使用 ECharts 提供的 API 来完成。以下是一个可能的 JavaScript 函数示例，演示了如何实现这一功能：
+
+```javascript
+// 假设您已经有一个 ECharts 实例，命名为 myChart
+// 假设您有一个装载下载图标的 DOM 元素，命名为 downloadButton
+
+// 获取显示的图线索引
+function getVisibleSeriesIndices(chart) {
+  const indices = [];
+  const series = chart.getOption().series;
+  
+  for (let i = 0; i < series.length; i++) {
+    if (series[i].visible !== false) {
+      indices.push(i);
+    }
+  }
+  
+  return indices;
+}
+
+// 获取显示的图线数据
+function getVisibleSeriesData(chart, indices) {
+  const visibleData = [];
+  
+  indices.forEach(index => {
+    const series = chart.getOption().series[index];
+    visibleData.push(series.data);
+  });
+  
+  return visibleData;
+}
+
+// 创建下载链接
+function createDownloadLink(chart, button, filename, data) {
+  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  
+  button.href = url;
+  button.download = filename;
+}
+
+// 主函数
+function setupDownloadButton(chart, buttonId, filename) {
+  const downloadButton = document.getElementById(buttonId);
+  
+  downloadButton.addEventListener('click', () => {
+    const visibleSeriesIndices = getVisibleSeriesIndices(chart);
+    const visibleSeriesData = getVisibleSeriesData(chart, visibleSeriesIndices);
+    
+    createDownloadLink(chart, downloadButton, filename, visibleSeriesData);
+  });
+}
+
+// 在页面加载完毕后调用
+document.addEventListener('DOMContentLoaded', () => {
+  const myChart = echarts.init(document.getElementById('chart'));
+  const downloadButtonId = 'downloadButton';
+  const filename = 'chart_data.json';
+  
+  setupDownloadButton(myChart, downloadButtonId, filename);
+  
+  // 配置 ECharts 实例和图表数据...
+});
+```
+
+这个示例代码假设您已经有一个 ECharts 实例，并且在页面上有一个用于下载的按钮元素。您需要根据您的实际情况进行适当的调整和修改。请确保正确引入了 ECharts 库，并将代码放置在适当的位置。此代码的核心思想是获取显示的图线数据并生成一个 JSON 文件供下载。
+
+要实现将 ECharts 图表中显示的图线数据下载并挂载到 ECharts 工具盒上，你可以使用 JavaScript 编写一个函数。以下是一个示例函数，假设你已经在 HTML 页面中引入了 ECharts 库：
+
+```javascript
+function exportVisibleSeriesChart(chartInstance) {
+    // 获取图表实例
+    var chart = echarts.getInstanceByDom(chartInstance);
+
+    // 获取当前显示的图线索引
+    var visibleSeriesIndices = chart.getOption().legend[0].selected;
+
+    // 过滤出当前显示的图线数据
+    var visibleSeriesData = chart.getOption().series.filter(function (series, index) {
+        return visibleSeriesIndices[series.name];
+    });
+
+    // 创建一个新的 ECharts 实例，只包含显示的图线数据
+    var exportChart = echarts.init(document.createElement('div'));
+    exportChart.setOption({
+        legend: chart.getOption().legend,
+        tooltip: chart.getOption().tooltip,
+        xAxis: chart.getOption().xAxis,
+        yAxis: chart.getOption().yAxis,
+        series: visibleSeriesData
+    });
+
+    // 将导出的图表实例挂载到 ECharts 工具盒上
+    echarts.registerMap(chart.id + '_exported_chart', exportChart);
+    
+    // 返回导出的图表实例，以备需要
+    return exportChart;
+}
+```
+
+使用方法：
+
+1. 在你的 HTML 文件中，确保已经引入了 ECharts 库。
+2. 在你的 JavaScript 代码中，调用 `exportVisibleSeriesChart` 函数并传入 ECharts 图表实例。示例代码：
+
+```javascript
+var myChart = echarts.init(document.getElementById('chart')); // 替换 'chart' 为你的图表容器的 ID
+var exportedChart = exportVisibleSeriesChart(myChart);
+```
+
+这将会将当前图表中显示的图线数据提取出来，并创建一个新的 ECharts 实例，仅包含显示的图线数据。然后，将这个导出的图表实例挂载到 ECharts 工具盒上，可以在需要的时候进行查看或下载。请注意，这只是一个简单的示例，你可能需要根据实际情况进行调整和扩展。
+
+在Vue 3中，你可以通过以下步骤创建一个函数来实现你所描述的功能：下载显示的图线数据，并将其挂载到 ECharts 工具栏上。
+
+首先，确保你已经安装了 ECharts（可以使用 `echarts` 包），然后按照以下步骤操作：
+
+1. 安装 echarts：
+
+```bash
+npm install echarts
+```
+
+2. 在需要使用 ECharts 的组件中，首先导入 echarts 和工具箱插件：
+
+```javascript
+import * as echarts from 'echarts';
+import 'echarts/extension/bmap/bmap'; // 如果使用了百度地图等扩展，也需要导入对应的模块
+import 'echarts-gl'; // 如果使用了 echarts-gl
+
+// 导入工具箱插件
+import 'echarts/lib/component/toolbox';
+import 'echarts/lib/component/toolbox/feature/SaveAsImage';
+```
+
+3. 在组件的 `setup` 函数中创建一个下载显示图线数据的函数，并将其挂载到 ECharts 的工具箱上：
+
+```javascript
+setup() {
+  const chartRef = ref(null); // 用于保存 ECharts 实例的引用
+
+  // 在组件挂载后初始化 ECharts 实例
+  onMounted(() => {
+    const chartInstance = echarts.init(chartRef.value);
+    chartInstance.setOption(/* 设置你的图表配置 */);
+
+    // 将 ECharts 实例保存到引用中
+    chartRef.value = chartInstance;
+
+    // 创建自定义的下载显示图线数据的工具函数
+    const downloadVisibleSeriesData = () => {
+      const visibleSeries = chartInstance.getOption().series.filter(series => {
+        // 假设你的 series 数据中有一个 show 属性表示是否显示
+        return series.hasOwnProperty('show') && series.show === true;
+      });
+
+      // 下载显示图线数据
+      const dataToDownload = visibleSeries.map(series => {
+        return {
+          name: series.name,
+          data: series.data
+        };
+      });
+
+      // 在这里你可以根据需要将 dataToDownload 进行保存或导出
+
+      console.log('Visible Series Data:', dataToDownload);
+    };
+
+    // 在 ECharts 工具箱中添加自定义工具按钮
+    chartInstance.getOption().toolbox.feature = {
+      saveAsImage: {
+        title: '下载显示图线数据',
+        icon: 'path/to/your/icon.png', // 替换为你的图标路径
+        onclick: downloadVisibleSeriesData
+      },
+      // ...其他工具按钮配置
+    };
+
+    // 更新 ECharts 实例的配置
+    chartInstance.setOption(chartInstance.getOption());
+  });
+
+  return {
+    chartRef
+  };
+}
+```
+
+这样，你就创建了一个可以下载显示图线数据的函数，并将其添加到 ECharts 的工具箱中。在上面的代码中，你需要根据你的实际图表数据结构进行调整。注意，假设图线是否显示的属性被命名为 `show`，你需要根据实际情况进行调整。此外，还需要根据你的需求对下载的数据进行保存或导出操作。
+
+当您在 Vue 3 中使用 ECharts 时，可以通过自定义一个函数来实现下载显示的图线数据，并将该函数挂载到 ECharts 工具箱中。以下是一个示例代码，演示了如何完成这个任务：
+
+首先，确保您已经在项目中引入了 Vue 3 和 ECharts 库。然后，您可以在需要使用图表的组件中，通过以下步骤实现所需功能：
+
+1. 在组件中引入 ECharts：
+
+```javascript
+import { ref, onMounted } from 'vue';
+import * as echarts from 'echarts';
+```
+
+2. 创建一个 ref 来存储 ECharts 实例：
+
+```javascript
+const chartRef = ref(null);
+```
+
+3. 在组件的 `setup` 钩子中初始化 ECharts 实例：
+
+```javascript
+onMounted(() => {
+  const chartDom = chartRef.value;
+  if (chartDom) {
+    const chartInstance = echarts.init(chartDom);
+    // 进行图表的配置等操作
+    // 例如：chartInstance.setOption({...});
+  }
+});
+```
+
+4. 创建一个函数来获取显示的图线数据：
+
+```javascript
+function getDisplayedSeriesData() {
+  const chartInstance = echarts.getInstanceByDom(chartRef.value);
+  const option = chartInstance.getOption();
+  const displayedSeries = option.series.filter(series => series.show);
+
+  const displayedSeriesData = displayedSeries.map(series => {
+    return {
+      name: series.name,
+      data: series.data
+    };
+  });
+
+  return displayedSeriesData;
+}
+```
+
+5. 在组件中将该函数挂载到 ECharts 工具箱中：
+
+```javascript
+onMounted(() => {
+  const chartInstance = echarts.getInstanceByDom(chartRef.value);
+
+  // 将函数挂载到 ECharts 工具箱中
+  chartInstance.setOption({
+    toolbox: {
+      feature: {
+        saveAsImage: {
+          title: '下载显示的图线数据',
+          icon: 'image://data:image/png;base64,iVBORw0KG...', // 自定义图标，可使用 base64 编码的图片
+          onclick: () => {
+            const displayedSeriesData = getDisplayedSeriesData();
+            console.log(displayedSeriesData);
+            // 在这里可以将数据导出，或执行其他操作
+          }
+        }
+      }
+    }
+  });
+
+  chartInstance.setOption({...}); // 进行其他图表配置
+});
+```
+
+请注意，上述代码是一个示例，您可能需要根据您的实际项目和需求进行适当的调整。在实际应用中，您可能还需要处理数据的导出或其他相关操作。
+
+另外，为了将图表数据下载功能与 ECharts 工具箱按钮连接起来，您可能需要创建一个自定义的图标，将其编码为 base64，并在 `icon` 属性中使用。同时，确保您在挂载函数时，设置合适的图标和点击事件处理。
+
+要将 ECharts 的数据下载为 xlsx 文件，并在文件中创建一个具有特定单元格样式的表格，您需要使用一些额外的库来处理 Excel 文件和样式。在这个例子中，我将使用 `xlsx` 库来处理 Excel 文件，以及 `exceljs` 库来设置单元格样式。请确保在项目中安装了这些库：
+
+```bash
+npm install xlsx exceljs
+```
+
+下面是一个示例代码，演示了如何将 ECharts 数据下载为 xlsx 文件，并在文件中创建带有特定样式的表格：
+
+```javascript
+import { ref, onMounted } from 'vue';
+import * as echarts from 'echarts';
+import * as XLSX from 'xlsx';
+import * as ExcelJS from 'exceljs';
+
+export default {
+  setup() {
+    const chartRef = ref(null);
+
+    function getDisplayedSeriesData() {
+      const chartInstance = echarts.getInstanceByDom(chartRef.value);
+      const option = chartInstance.getOption();
+      const displayedSeries = option.series.filter(series => series.show);
+
+      const displayedSeriesData = displayedSeries.map(series => {
+        return {
+          name: series.name,
+          data: series.data
+        };
+      });
+
+      return displayedSeriesData;
+    }
+
+    onMounted(() => {
+      const chartInstance = echarts.getInstanceByDom(chartRef.value);
+
+      // ... 初始化图表 ...
+
+      // 创建 xlsx 文件
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Chart Data');
+
+      // 获取图表数据
+      const data = getDisplayedSeriesData();
+
+      // 将数据添加到工作表
+      worksheet.addRow(['', 'X', 'Y']);
+      data.forEach(series => {
+        worksheet.addRow([series.name, ...series.data]);
+      });
+
+      // 设置单元格样式
+      const rowCount = data.length + 1; // +1 是标题行
+      const colCount = data[0].data.length + 1; // +1 是名称列
+      for (let row = 1; row <= rowCount; row++) {
+        for (let col = 1; col <= colCount; col++) {
+          const cell = worksheet.getCell(row, col);
+          if (row === 1 && col === 2) {
+            cell.alignment = {
+              diagonal: 'up',
+              vertical: 'bottom',
+              horizontal: 'right'
+            };
+            cell.border = {
+              diagonal: {
+                up: true,
+                down: true,
+                style: 'thin'
+              }
+            };
+          }
+        }
+      }
+
+      // 将工作簿导出为 xlsx 文件
+      const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const downloadLink = document.createElement('a');
+      downloadLink.href = URL.createObjectURL(blob);
+      downloadLink.download = 'chart_data.xlsx';
+      downloadLink.click();
+    });
+
+    return {
+      chartRef
+    };
+  }
+};
+```
+
+请注意，上述代码是一个示例，可能需要根据您的实际项目和需求进行适当的调整。在实际应用中，您可能还需要处理数据的格式转换、单元格样式调整等。
+
+使用 `xlsx` 库将 ECharts 数据下载为 XLSX 文件，并在第一行第一列的单元格上添加对角线分割的样式，可以通过以下步骤实现：
+
+1. 安装 `xlsx` 库：
+
+首先，确保您已经安装了 `xlsx` 库。如果没有安装，可以使用以下命令进行安装：
+
+```bash
+npm install xlsx
+```
+
+2. 准备数据和样式：
+
+假设您已经有一个名为 `echartsData` 的数组，其中包含要导出的 ECharts 数据。然后，您可以使用 `xlsx` 库来创建工作簿和工作表，并添加样式。
+
+```javascript
+const XLSX = require('xlsx');
+
+// 示例 ECharts 数据
+const echartsData = [
+  [ 'X', 'Series 1', 'Series 2', 'Series 3' ],
+  [ 0, 10, 20, 30 ],
+  [ 1, 15, 25, 35 ],
+  [ 2, 20, 30, 40 ],
+  // ...
+];
+
+// 创建工作簿和工作表
+const workbook = XLSX.utils.book_new();
+const worksheet = XLSX.utils.aoa_to_sheet(echartsData);
+
+// 添加样式
+const cellStyle = {
+  font: { bold: true },
+  fill: { fgColor: { rgb: 'FFFF0000' } }, // 设置背景色
+  alignment: { diagonalUp: true, horizontal: 'right', vertical: 'top' } // 对角线样式
+};
+
+// 将样式应用于第一个单元格（A1）
+const cellAddress = XLSX.utils.encode_cell({ r: 0, c: 0 }); // 第一行第一列
+worksheet[cellAddress].s = cellStyle;
+
+// 将工作表添加到工作簿
+XLSX.utils.book_append_sheet(workbook, worksheet, 'ECharts Data');
+
+// 将工作簿保存为文件
+XLSX.writeFile(workbook, 'echarts_data.xlsx');
+```
+
+在上面的代码中，我们首先创建了一个工作簿和工作表，然后使用 `aoa_to_sheet` 方法将 ECharts 数据数组转换为工作表。接着，我们定义了单元格样式，其中对角线分割样式由 `alignment` 属性设置。最后，我们将样式应用于第一个单元格，并将工作表添加到工作簿中，最终将工作簿保存为 XLSX 文件。
+
+请注意，这只是一个示例代码，您可能需要根据实际数据和样式需求进行调整。要实际运行代码，请确保您已经准备好了 `echartsData` 数据，并根据需要调整单元格样式。
+
+要将 ECharts 数据下载为 XLSX 文件并同时创建一个带有对角线分割样式的单元格，您可以使用 `xlsx` 库创建一个自定义的 XLSX 文件，然后在其中添加带有样式的单元格。
+
+首先，确保您已经安装了 `xlsx` 库。您可以使用 npm 或 yarn 进行安装：
+
+```bash
+npm install xlsx
+# 或者
+yarn add xlsx
+```
+
+接下来，您可以使用以下代码示例将 ECharts 数据下载为 XLSX 文件并添加对角线分割样式：
+
+```javascript
+import XLSX from 'xlsx';
+
+// 假设这是您的 ECharts 数据
+const echartsData = [
+  ['X', 'Y', 'Value'],
+  [1, 2, 10],
+  [2, 3, 20],
+  [3, 4, 30],
+];
+
+// 创建一个工作簿
+const wb = XLSX.utils.book_new();
+
+// 创建一个工作表
+const ws = XLSX.utils.aoa_to_sheet(echartsData);
+
+// 添加对角线分割线样式（右上角为 Y，左上角为 X）
+ws['A1'].s = { diagonalUp: true, diagonalDown: true, diagonalStyle: 'thin' };
+
+// 将工作表添加到工作簿
+XLSX.utils.book_append_sheet(wb, ws, 'ECharts Data');
+
+// 将工作簿保存为 XLSX 文件
+XLSX.writeFile(wb, 'echarts_data.xlsx');
+```
+
+上述代码创建了一个包含 ECharts 数据的工作表，并通过设置 `s` 属性在第一个单元格（A1）上添加了对角线分割线样式。最后，它将工作簿保存为名为 "echarts_data.xlsx" 的 XLSX 文件。
+
+您可以根据需要自定义数据和文件名，以适应您的实际项目。此代码示例使用了默认的对角线样式 ("thin")，您可以根据需要更改为其他样式。有关更多样式选项，请参阅 `xlsx` 文档。
