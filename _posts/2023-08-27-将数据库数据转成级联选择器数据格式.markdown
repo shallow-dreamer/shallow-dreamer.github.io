@@ -1,0 +1,210 @@
+---
+layout:     post
+title:      "将数据库数据转成级联选择器数据格式"
+subtitle:   ""
+date:       2023-08-27
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - mysql
+    - python
+---
+
+当将从数据库查询到的数据转换为 Element Plus 中级联选择器所需的数据格式时，你可以按照以下方式编写一个函数来完成这个任务。假设你的数据库查询结果是一个列表，每个元素都是一个元组，包含部门、人员属性、工号和姓名等信息。你需要将这些信息组织成 Element Plus 级联选择器所需的格式。
+
+下面是一个Python函数的示例代码：
+
+```python
+def convert_to_cascader_data(data):
+    cascader_data = {}  # 用于存储最终的级联选择器数据格式
+    for item in data:
+        department, attribute, emp_id, name = item
+        emp_info = {
+            "value": emp_id + '-' + name,  # 将工号和姓名组合作为唯一标识
+            "label": f"{name} ({emp_id})"   # 显示姓名和工号在标签中
+        }
+        
+        if department not in cascader_data:
+            cascader_data[department] = {"value": department, "label": department, "children": []}
+        
+        if attribute not in [child["value"] for child in cascader_data[department]["children"]]:
+            cascader_data[department]["children"].append({
+                "value": attribute,
+                "label": attribute,
+                "children": []
+            })
+        
+        cascader_data[department]["children"][
+            [child["value"] for child in cascader_data[department]["children"]].index(attribute)
+        ]["children"].append(emp_info)
+    
+    return list(cascader_data.values())
+
+# 示例数据
+database_data = [
+    ("部门A", "属性1", "工号001", "张三"),
+    ("部门A", "属性1", "工号002", "李四"),
+    ("部门A", "属性2", "工号003", "王五"),
+    ("部门B", "属性1", "工号004", "赵六"),
+    ("部门B", "属性2", "工号005", "钱七"),
+]
+
+cascader_data = convert_to_cascader_data(database_data)
+print(cascader_data)
+```
+
+请注意，这只是一个示例函数，你可以根据你的实际情况进行修改和优化。这个函数会将数据库中的数据转换为适用于 Element Plus 级联选择器的数据格式，以便在前端进行展示和使用。
+
+你可以使用Python编写一个函数，将从数据库中查询到的数据格式转换为Element Plus中级联选择器所需的数据格式。Element Plus的级联选择器需要一个嵌套的字典列表，其中每个字典代表一个级联选项，包含label和value字段。以下是一个示例函数：
+
+```python
+def transform_to_element_plus_data(data):
+    # 创建一个空列表，用于存储转换后的数据
+    result = []
+
+    # 创建一个字典，用于将部门映射到其下属的人员属性、工号和姓名
+    department_mapping = {}
+
+    # 遍历数据库查询结果
+    for record in data:
+        department, attribute, job_number, name = record
+
+        # 如果部门尚未添加到映射中，添加它
+        if department not in department_mapping:
+            department_mapping[department] = []
+
+        # 创建人员属性、工号和姓名的字典
+        employee_data = {
+            "label": f"{job_number} - {name}",
+            "value": f"{job_number} - {name}"
+        }
+
+        # 将人员属性、工号和姓名字典添加到部门中
+        department_mapping[department].append(employee_data)
+
+    # 将部门映射转换为Element Plus格式的数据
+    for department, employees in department_mapping.items():
+        department_data = {
+            "label": department,
+            "value": department,
+            "children": employees
+        }
+        result.append(department_data)
+
+    return result
+
+# 示例数据
+data_from_database = [
+    ("部门A", "属性1", "工号001", "张三"),
+    ("部门A", "属性2", "工号002", "李四"),
+    ("部门B", "属性1", "工号003", "王五"),
+    ("部门B", "属性2", "工号004", "赵六"),
+]
+
+# 调用函数进行转换
+element_plus_data = transform_to_element_plus_data(data_from_database)
+
+# 打印转换后的数据
+print(element_plus_data)
+```
+
+这个函数会将数据库中的数据转换为Element Plus级联选择器所需的嵌套字典列表格式。你可以将你的数据库查询结果传递给这个函数，然后使用转换后的数据来填充Element Plus级联选择器。
+
+当你说到 "elementplus 中的级联选择器使用的数据格式"，我理解你指的是类似于级联选择器（Cascader）的数据结构，它是一个多层级的嵌套数组。假设每个层级的数据都是按照部门、人员属性、工号和姓名的顺序排列的，那么你可以使用以下的 Python 函数来将从数据库查询得到的数据转换成 ElementPlus 级联选择器所需的格式：
+
+```python
+def convert_to_cascader_data(data):
+    cascader_data = []
+
+    # Create a dictionary to store department as keys and their corresponding data as values
+    department_dict = {}
+
+    for item in data:
+        department, attribute, employee_id, name = item
+
+        # Check if the department already exists in the dictionary
+        if department not in department_dict:
+            department_dict[department] = {}
+
+        # Check if the attribute exists under the department
+        if attribute not in department_dict[department]:
+            department_dict[department][attribute] = []
+
+        # Append employee data to the attribute
+        department_dict[department][attribute].append({
+            'value': employee_id,
+            'label': name
+        })
+
+    # Convert department_dict to the final cascader_data format
+    for department, attributes in department_dict.items():
+        department_entry = {
+            'value': department,
+            'label': department,
+            'children': []
+        }
+        for attribute, employees in attributes.items():
+            attribute_entry = {
+                'value': attribute,
+                'label': attribute,
+                'children': employees
+            }
+            department_entry['children'].append(attribute_entry)
+        cascader_data.append(department_entry)
+
+    return cascader_data
+
+# Example input data
+input_data = [
+    ('Dept1', 'Attribute1', '001', 'John'),
+    ('Dept1', 'Attribute1', '002', 'Jane'),
+    ('Dept1', 'Attribute2', '003', 'Bob'),
+    ('Dept2', 'Attribute1', '004', 'Alice'),
+    ('Dept2', 'Attribute2', '005', 'Eve')
+]
+
+# Convert and print the cascader data
+cascader_data = convert_to_cascader_data(input_data)
+print(cascader_data)
+```
+
+请注意，这只是一个简单的示例，实际情况中你可能需要根据你的数据结构和需求进行一些调整。这个函数会将输入的数据列表转换成 ElementPlus 级联选择器所需的嵌套数组格式。
+
+你可以使用Python编写一个函数来将从数据库查询到的数据转换成Element Plus级联选择器所需的数据格式。假设你的数据库查询结果是一个列表，其中每个元素是一个包含部门、人员属性、工号和姓名的元组，你可以按以下方式编写这个函数：
+
+```python
+def transform_to_elementplus_data(data):
+    # 创建一个空字典，用于存储转换后的数据
+    transformed_data = {}
+    
+    # 遍历数据库查询结果
+    for item in data:
+        department, attribute, employee_id, name = item
+        
+        # 如果部门不存在于字典中，则创建一个新的部门项
+        if department not in transformed_data:
+            transformed_data[department] = {}
+        
+        # 如果人员属性不存在于部门项中，则创建一个新的人员属性项
+        if attribute not in transformed_data[department]:
+            transformed_data[department][attribute] = []
+        
+        # 添加工号和姓名到人员属性项中
+        transformed_data[department][attribute].append({
+            'employee_id': employee_id,
+            'name': name
+        })
+    
+    return transformed_data
+
+# 示例用法
+database_data = [("部门A", "属性1", "工号1", "姓名1"),
+                 ("部门A", "属性1", "工号2", "姓名2"),
+                 ("部门A", "属性2", "工号3", "姓名3"),
+                 ("部门B", "属性1", "工号4", "姓名4")]
+
+elementplus_data = transform_to_elementplus_data(database_data)
+print(elementplus_data)
+```
+
+这个函数将数据库查询结果转换为一个嵌套字典，其中部门是顶层键，人员属性是次级键，然后将工号和姓名作为值存储在每个人员属性下。你可以根据需要进一步自定义这个函数以适应你的具体需求。
