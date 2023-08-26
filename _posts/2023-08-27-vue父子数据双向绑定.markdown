@@ -1,0 +1,370 @@
+---
+layout:     post
+title:      "vue父子数据双向绑定"
+subtitle:   ""
+date:       2023-08-27
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue
+---
+
+在 Vue 3 中，父子组件之间的参数双向绑定可以通过 `v-model` 指令来实现。这可以在父组件中将数据传递给子组件，并且子组件可以修改这个数据并将修改反馈给父组件。
+
+以下是如何在 Vue 3 中实现父子参数双向绑定的示例：
+
+**父组件：ParentComponent.vue**
+
+```vue
+<template>
+  <div>
+    <p>父组件中的数据：{{ parentData }}</p>
+    <child-component v-model="parentData" />
+  </div>
+</template>
+
+<script>
+import ChildComponent from './ChildComponent.vue';
+
+export default {
+  components: {
+    ChildComponent
+  },
+  data() {
+    return {
+      parentData: 'Hello from parent'
+    };
+  }
+};
+</script>
+```
+
+**子组件：ChildComponent.vue**
+
+```vue
+<template>
+  <div>
+    <p>子组件中的数据：{{ childData }}</p>
+    <input v-model="childData" />
+  </div>
+</template>
+
+<script>
+export default {
+  props: {
+    value: String
+  },
+  emits: ['update:value'], // 声明事件用于更新父组件的值
+  data() {
+    return {
+      childData: this.value
+    };
+  },
+  watch: {
+    childData(newValue) {
+      this.$emit('update:value', newValue); // 触发更新父组件的事件
+    }
+  }
+};
+</script>
+```
+
+在这个示例中，父组件传递数据给子组件，并且子组件通过 `v-model` 指令绑定到一个名为 `childData` 的变量上。当子组件的输入框内容发生变化时，子组件会通过 `$emit` 方法触发名为 `update:value` 的事件，将变化的值发送给父组件。父组件监听这个事件并更新它自己的 `parentData`。
+
+通过这种方式，你可以实现父子组件之间的双向绑定。注意，子组件通过 `props` 接收父组件的数据，并通过 `$emit` 来更新父组件的数据。父组件使用 `v-model` 来同时传递数据到子组件并接收子组件的更新。
+
+在 Vue 3 中，可以使用 `v-model` 指令来实现父子组件之间的参数双向绑定。以下是实现的步骤：
+
+**步骤一：创建父组件**
+
+首先，创建一个父组件，其中包含一个子组件并且通过 `v-model` 来进行双向绑定。
+
+```vue
+<template>
+  <div>
+    <p>父组件：{{ parentValue }}</p>
+    <ChildComponent v-model="parentValue" />
+  </div>
+</template>
+
+<script>
+import { ref } from 'vue';
+import ChildComponent from './ChildComponent.vue';
+
+export default {
+  components: {
+    ChildComponent
+  },
+  setup() {
+    const parentValue = ref('');
+
+    return {
+      parentValue
+    };
+  }
+};
+</script>
+```
+
+**步骤二：创建子组件**
+
+然后，创建一个子组件，接受父组件传递的参数，并使用 `emit` 方法来触发参数的更新。
+
+```vue
+<template>
+  <div>
+    <p>子组件：{{ childValue }}</p>
+    <input v-model="childValue" />
+  </div>
+</template>
+
+<script>
+import { ref, defineEmits } from 'vue';
+
+export default {
+  props: ['modelValue'],
+  emits: ['update:modelValue'], // 声明需要触发的事件
+  setup(props) {
+    const childValue = ref(props.modelValue);
+
+    // 通过 defineEmits 定义 emit 方法，用于触发事件
+    const { emit } = defineEmits();
+
+    return {
+      childValue,
+      // 监听 input 的变化并通过 emit 触发更新
+      onInput(event) {
+        childValue.value = event.target.value;
+        emit('update:modelValue', childValue.value);
+      }
+    };
+  }
+};
+</script>
+```
+
+在这个例子中，父组件使用 `v-model` 将 `parentValue` 双向绑定到子组件的 `modelValue`。子组件通过 `props` 接受 `modelValue` 并使用 `emit` 来触发更新。
+
+通过这种方式，父子组件之间的参数就可以实现双向绑定了。当子组件的输入框值变化时，会更新子组件的 `childValue`，同时通过 `emit` 触发更新事件，将变化传递回父组件的 `parentValue`。
+
+在 Vue 3 中，实现父子组件之间的双向数据绑定稍有不同于 Vue 2，因为 Vue 3 引入了 Composition API，你可以使用 `v-model` 指令来实现这种双向数据绑定。以下是如何在父子组件之间实现双向数据绑定的步骤：
+
+**步骤一：父组件传递 prop 和 v-model**
+
+在父组件中，首先需要传递一个 prop 给子组件，然后使用 `v-model` 指令来进行双向数据绑定。
+
+```vue
+<template>
+  <div>
+    <p>父组件中的值：{{ parentValue }}</p>
+    <ChildComponent v-model="parentValue" />
+  </div>
+</template>
+
+<script>
+import { ref } from 'vue';
+import ChildComponent from './ChildComponent.vue';
+
+export default {
+  components: {
+    ChildComponent,
+  },
+  setup() {
+    const parentValue = ref('Initial value from parent');
+    return {
+      parentValue,
+    };
+  },
+};
+</script>
+```
+
+**步骤二：子组件接收 prop 并触发更新**
+
+在子组件中，你需要接收父组件传递的 prop，并使用 `emit` 函数来触发更新，以便在父组件中进行双向数据绑定。
+
+```vue
+<template>
+  <div>
+    <p>子组件中的值：{{ childValue }}</p>
+    <input v-model="childValue" />
+  </div>
+</template>
+
+<script>
+import { ref, defineProps, defineEmits } from 'vue';
+
+export default {
+  props: {
+    modelValue: String, // 注意：名称需要与父组件中的 v-model 对应
+  },
+  emits: ['update:modelValue'], // 注意：事件名称需要与父组件中的 v-model 对应
+  setup(props) {
+    const childValue = ref(props.modelValue);
+
+    const emit = defineEmits(); // 获取 emit 函数
+
+    // 监听 childValue 变化并触发父组件更新
+    watch(
+      () => childValue.value,
+      (newValue) => {
+        emit('update:modelValue', newValue);
+      }
+    );
+
+    return {
+      childValue,
+    };
+  },
+};
+</script>
+```
+
+在子组件中，我们使用 `props` 来接收父组件传递的 `modelValue`，然后使用 `emit` 函数来触发 `update:modelValue` 事件，从而通知父组件更新。通过 `watch` 监听 `childValue` 变化，并在变化时使用 `emit` 触发父组件更新。
+
+使用以上的步骤，你可以在 Vue 3 中实现父子组件之间的双向数据绑定。记住在子组件中，`props` 和 `emits` 的名称需要与父组件中的 `v-model` 对应。
+
+在 Vue 3 中，可以通过使用`v-model`来实现父子组件之间的参数双向绑定。下面是一个简单的示例来说明如何实现这种绑定。
+
+假设你有一个父组件和一个子组件，你想要在它们之间双向绑定一个变量 `message`。
+
+**父组件：**
+
+```vue
+<template>
+  <div>
+    <h1>父组件</h1>
+    <input v-model="message" />
+    <p>父组件的消息：{{ message }}</p>
+    <ChildComponent v-model="message" />
+  </div>
+</template>
+
+<script>
+import { ref } from 'vue';
+import ChildComponent from './ChildComponent.vue';
+
+export default {
+  components: {
+    ChildComponent,
+  },
+  setup() {
+    const message = ref(''); // 使用ref创建响应式变量
+
+    return {
+      message,
+    };
+  },
+};
+</script>
+```
+
+**子组件（ChildComponent.vue）：**
+
+```vue
+<template>
+  <div>
+    <h2>子组件</h2>
+    <input v-model="message" />
+    <p>子组件的消息：{{ message }}</p>
+  </div>
+</template>
+
+<script>
+import { defineProps, defineEmits } from 'vue';
+
+export default {
+  props: {
+    message: String,
+  },
+  emits: ['update:message'], // 用于双向绑定
+  setup(props) {
+    const { message } = defineProps(props);
+    const emit = defineEmits();
+
+    return {
+      message,
+      // 在需要时触发更新事件
+      updateMessage(newMessage) {
+        emit('update:message', newMessage);
+      },
+    };
+  },
+};
+</script>
+```
+
+在子组件中，我们使用了 `props` 来接收来自父组件的 `message`，并使用 `emits` 来声明一个名为 `update:message` 的事件，该事件用于双向绑定。
+
+在父组件中，我们使用 `v-model` 来将 `message` 变量传递给子组件，并监听子组件的更新事件，以便实现双向绑定。
+
+这样，当你在父组件或子组件中修改 `message` 变量时，它会在另一个组件中同步更新，实现了双向绑定。
+
+在 Vue 3 中，你可以使用 `v-model` 指令来实现父子组件之间的参数双向绑定。这可以让你在父组件中将一个属性绑定到子组件的某个属性，并且子组件对这个属性的变化也会反映到父组件中。
+
+下面是实现父子组件参数双向绑定的步骤：
+
+**步骤一：父组件传递参数到子组件**
+
+在父组件中，通过 `v-model` 指令将一个属性绑定到子组件上，同时定义该属性的值和更新方法。例如：
+
+```vue
+<template>
+  <div>
+    <p>父组件中的数据：{{ parentData }}</p>
+    <child-component v-model="parentData" />
+  </div>
+</template>
+
+<script>
+import { ref } from 'vue';
+import ChildComponent from './ChildComponent.vue';
+
+export default {
+  components: {
+    ChildComponent,
+  },
+  setup() {
+    const parentData = ref('父组件初始值');
+    
+    return {
+      parentData,
+    };
+  },
+};
+</script>
+```
+
+**步骤二：子组件接收并使用父组件的参数**
+
+在子组件中，接收通过 `props` 接收父组件传递的属性，并在组件内部使用它。同时，通过 `$emit` 方法将子组件内部的变化通知父组件。例如：
+
+```vue
+<template>
+  <div>
+    <p>子组件中的数据：{{ childData }}</p>
+    <input type="text" :value="childData" @input="$emit('update:modelValue', $event.target.value)" />
+  </div>
+</template>
+
+<script>
+import { ref, defineProps } from 'vue';
+
+export default {
+  props: {
+    modelValue: String, // 接收父组件传递的属性
+  },
+  setup(props) {
+    const childData = ref(props.modelValue);
+    
+    return {
+      childData,
+    };
+  },
+};
+</script>
+```
+
+在子组件中，`@input="$emit('update:modelValue', $event.target.value)"` 将子组件中的输入变化通过 `update:modelValue` 事件通知到父组件。
+
+这样，当你在父组件中更新 `parentData` 时，子组件的 `childData` 会相应地更新。当在子组件中更新 `childData` 时，父组件中的 `parentData` 也会随之更新，实现了双向绑定。
