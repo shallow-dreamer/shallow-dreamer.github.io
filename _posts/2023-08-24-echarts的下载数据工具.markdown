@@ -566,3 +566,396 @@ XLSX.writeFile(wb, 'echarts_data.xlsx');
 上述代码创建了一个包含 ECharts 数据的工作表，并通过设置 `s` 属性在第一个单元格（A1）上添加了对角线分割线样式。最后，它将工作簿保存为名为 "echarts_data.xlsx" 的 XLSX 文件。
 
 您可以根据需要自定义数据和文件名，以适应您的实际项目。此代码示例使用了默认的对角线样式 ("thin")，您可以根据需要更改为其他样式。有关更多样式选项，请参阅 `xlsx` 文档。
+
+要使用 `xlsx` 库将 ECharts 数据下载为 XLSX 文件，并实现您描述的样式，您需要执行以下步骤：
+
+1. 安装 `xlsx` 库：
+
+确保您已经安装了 `xlsx` 库。如果没有安装，可以通过以下命令安装：
+
+```bash
+npm install xlsx
+```
+
+2. 准备数据：
+
+首先，您需要获取 ECharts 数据，将其整理为适合写入 XLSX 文件的格式。以下示例假设您已经有了 `displayedSeriesData`，即要写入的数据。
+
+3. 创建 XLSX 文件并设置样式：
+
+```javascript
+const XLSX = require('xlsx');
+
+// 创建一个工作簿
+const wb = XLSX.utils.book_new();
+const wsName = 'Sheet1'; // 工作表名称
+const wsData = displayedSeriesData; // 假设这是要写入的数据
+
+// 创建工作表
+const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+// 定义样式
+const style = {
+  font: {
+    color: { rgb: 'FFFFFF' }, // 文字颜色为白色
+    bold: true
+  },
+  alignment: {
+    horizontal: 'center',
+    vertical: 'center'
+  },
+  fill: {
+    patternType: 'solid',
+    fgColor: { rgb: '000000' } // 背景颜色为黑色
+  }
+};
+
+// 设置单元格样式
+ws['A1'].s = style; // 右上文字样式
+ws['B2'].s = style; // 左下文字样式
+ws['A2'].s = style; // 左上角斜线样式
+ws['B1'].s = style; // 上方斜线样式
+
+// 将工作表添加到工作簿
+XLSX.utils.book_append_sheet(wb, ws, wsName);
+
+// 导出文件
+XLSX.writeFile(wb, 'echarts_data.xlsx');
+```
+
+上述代码中，我们使用 `XLSX.utils.aoa_to_sheet` 将数据转换为工作表，并通过设置样式对象 `style` 来定义不同单元格的样式。然后，通过将样式对象分配给特定单元格，我们可以实现您所描述的样式。最后，使用 `XLSX.writeFile` 将工作簿写入 XLSX 文件。
+
+请注意，上述代码中的样式可能需要根据您的实际需求进行微调。另外，由于 ECharts 中的数据格式和您的项目细节可能有所不同，您可能需要根据实际情况对代码进行调整。
+
+要使用 `xlsx` 库将 ECharts 数据下载为 XLSX 文件，并自定义单元格样式，您需要执行以下步骤：
+
+1. 安装 `xlsx` 库，如果尚未安装，可以使用 npm 或 yarn 进行安装：
+
+```bash
+npm install xlsx
+```
+
+2. 创建一个函数来生成 XLSX 文件，并设置单元格样式：
+
+```javascript
+import * as XLSX from 'xlsx';
+
+function generateXLSX(data) {
+  const wb = XLSX.utils.book_new();
+
+  // 创建工作表
+  const ws = XLSX.utils.json_to_sheet(data);
+
+  // 自定义样式
+  const wscols = [{ width: 12 }, { width: 12 }, { width: 12 }];
+  ws['!cols'] = wscols;
+
+  const style = {
+    font: {
+      bold: true,
+      size: 12
+    },
+    alignment: {
+      horizontal: 'center',
+      vertical: 'center'
+    }
+  };
+
+  ws['A1'].s = style; // 样式应用到第一个单元格
+
+  // 合并单元格
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }, // 合并第一行的三列
+  ];
+
+  // 设置合并单元格的值
+  ws['A1'].v = '文件名';
+  ws['A2'].v = 'x';
+  ws['B2'].v = 'y';
+
+  // 将工作表添加到工作簿
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+
+  // 保存文件
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'blob' });
+  const fileName = 'echarts_data.xlsx';
+
+  // 下载文件
+  const url = URL.createObjectURL(wbout);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+```
+
+3. 在 ECharts 组件内，调用该函数来生成并下载 XLSX 文件：
+
+```javascript
+onMounted(() => {
+  const chartInstance = echarts.getInstanceByDom(chartRef.value);
+
+  chartInstance.setOption({
+    toolbox: {
+      feature: {
+        saveAsImage: {
+          title: '下载显示的图线数据',
+          icon: 'image://data:image/png;base64,iVBORw0KG...', // 自定义图标，可使用 base64 编码的图片
+          onclick: () => {
+            const displayedSeriesData = getDisplayedSeriesData();
+            generateXLSX(displayedSeriesData);
+          }
+        }
+      }
+    }
+  });
+
+  chartInstance.setOption({...}); // 进行其他图表配置
+});
+```
+
+上述代码中的 `generateXLSX` 函数创建了一个 XLSX 工作簿，自定义了单元格样式、合并了单元格并设置值，然后将工作簿保存为 XLSX 文件并触发下载。您可以根据需要进一步自定义样式和内容。请注意，`xlsx` 库的 API 和用法可能会因库的版本而有所不同，您可能需要根据最新的库文档进行适当的调整。
+
+要使用 `xlsx` 库将 ECharts 数据下载为 xlsx 文件，并且定制单元格的样式，您可以按照以下步骤进行操作：
+
+1. 首先，确保您已经安装了 `xlsx` 库，您可以使用以下命令安装：
+
+```bash
+npm install xlsx
+```
+
+2. 在需要的组件中，引入 `xlsx` 库和其他必要的模块：
+
+```javascript
+import * as XLSX from 'xlsx';
+import { ref, onMounted } from 'vue';
+import * as echarts from 'echarts';
+```
+
+3. 创建一个函数来生成 Excel 文件：
+
+```javascript
+function generateExcelFile() {
+  const chartInstance = echarts.getInstanceByDom(chartRef.value);
+  const option = chartInstance.getOption();
+
+  // 创建工作簿
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet([]);
+
+  // 设置第一行的样式和内容
+  const firstCell = { t: 's', v: '文件名' };
+  const firstCellRange = { s: { r: 0, c: 0 }, e: { r: 1, c: 1 } };
+  ws['A1'] = firstCell;
+  ws['!merges'] = [firstCellRange];
+
+  // 设置第一列、第一行以外的单元格数据
+  const displayedSeriesData = getDisplayedSeriesData();
+  const dataRows = displayedSeriesData.map(series => [series.name, ...series.data]);
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 1, c: 0 }, e: { r: dataRows.length, c: dataRows[0].length } });
+  dataRows.forEach((rowData, rowIndex) => {
+    XLSX.utils.sheet_add_aoa(ws, [rowData], { origin: -1, originOffset: { r: rowIndex + 1, c: 0 } });
+  });
+
+  // 将工作表添加到工作簿
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+
+  // 自定义样式
+  const style = wb.SS['!style'] || [];
+  style.push({
+    alignment: { horizontal: 'right', vertical: 'top' },
+    font: { sz: 14, bold: true },
+    fill: { fgColor: { rgb: 'FF0000FF' } }
+  });
+  style.push({
+    alignment: { horizontal: 'left', vertical: 'bottom' },
+    font: { sz: 14, bold: true },
+    fill: { fgColor: { rgb: 'FFFF0000' } }
+  });
+
+  ws['!style'] = style;
+
+  // 保存工作簿为 xlsx 文件
+  const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const fileName = 'echarts_data.xlsx';
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+```
+
+4. 在组件的 `setup` 钩子中，类似之前的示例，创建 ECharts 实例并挂载函数到工具箱中：
+
+```javascript
+onMounted(() => {
+  const chartInstance = echarts.init(chartRef.value);
+
+  // 将函数挂载到 ECharts 工具箱中
+  chartInstance.setOption({
+    toolbox: {
+      feature: {
+        saveAsImage: {
+          title: '下载显示的图线数据',
+          icon: 'image://data:image/png;base64,iVBORw0KG...', // 自定义图标，可使用 base64 编码的图片
+          onclick: generateExcelFile // 调用生成 Excel 文件的函数
+        }
+      }
+    }
+  });
+
+  chartInstance.setOption({...}); // 进行其他图表配置
+});
+```
+
+请注意，上述代码中的 `generateExcelFile` 函数是一个示例，您可能需要根据实际需求进行调整。在这个函数中，我们使用 `XLSX` 库来创建工作簿、设置单元格样式和内容，然后将工作簿保存为 xlsx 文件，并提供文件下载功能。
+
+要实现单元格中的斜线分割效果可能会更加复杂，因为 Excel 在单元格内部不直接支持绘制斜线。您可能需要考虑其他方法，例如在单元格中使用特殊字符来模拟斜线分割效果。这可能需要更深入的研究和尝试。
+
+要使用 `xlsx` 库将 ECharts 数据下载为 XLSX 文件，并创建一个包含特定内容的工作表，您可以按照以下步骤进行操作：
+
+1. 安装 `xlsx` 库（如果尚未安装）：
+
+```bash
+npm install xlsx
+```
+
+2. 在需要下载数据的地方，创建一个函数来生成 XLSX 文件，并设置工作表内容以满足您的需求：
+
+```javascript
+import XLSX from 'xlsx';
+
+function downloadEChartsDataToXLSX(chartInstance, fileName, xLabel, yLabel) {
+  // 获取图表数据
+  const option = chartInstance.getOption();
+  const seriesData = option.series;
+
+  // 创建一个工作簿
+  const wb = XLSX.utils.book_new();
+
+  // 创建一个工作表
+  const ws = XLSX.utils.json_to_sheet(seriesData, { header: ['x', 'y'] });
+
+  // 添加文件名、x标签、y标签等内容
+  ws['A1'] = { t: 's', v: fileName };
+  ws['A2'] = { t: 's', v: 'x' };
+  ws['B2'] = { t: 's', v: 'y' };
+
+  // 创建两条斜线
+  ws['A4'] = { t: 's', v: '/', s: { font: { color: { rgb: 'FF0000' } } } };
+  ws['B4'] = { t: 's', v: '\\', s: { font: { color: { rgb: 'FF0000' } } } };
+
+  // 合并单元格（将斜线合并）
+  ws['A4'].s = { ...ws['A4'].s, alignment: { horizontal: 'center' } };
+  ws['B4'].s = { ...ws['B4'].s, alignment: { horizontal: 'center' } };
+  ws['!merges'] = [{ s: { r: 3, c: 0 }, e: { r: 4, c: 1 } }];
+
+  // 将工作表添加到工作簿
+  XLSX.utils.book_append_sheet(wb, ws, 'Data');
+
+  // 将工作簿保存为文件
+  XLSX.writeFile(wb, `${fileName}.xlsx`);
+}
+```
+
+3. 调用这个函数并传入相关参数，以生成并下载 XLSX 文件：
+
+```javascript
+// 传入图表实例，文件名，x标签和y标签
+downloadEChartsDataToXLSX(chartInstance, 'MyData', 'x', 'y');
+```
+
+上述代码会生成一个包含您所描述的内容和样式的 XLSX 文件，其中文件名、x标签、y标签和斜线都位于第一个工作表中。您可以根据需要进行修改和调整，以满足特定的要求和样式。
+
+要使用 `xlsx` 库将 ECharts 数据下载为 XLSX 文件，并在第一行第一列创建包含指定文本和样式的单元格，您可以按照以下步骤进行操作。首先，确保您已经安装了 `xlsx` 库：
+
+```bash
+npm install xlsx
+```
+
+然后，您可以使用以下代码来实现您的需求：
+
+```javascript
+import { ref, onMounted } from 'vue';
+import * as echarts from 'echarts';
+import * as XLSX from 'xlsx';
+
+export default {
+  setup() {
+    const chartRef = ref(null);
+
+    onMounted(() => {
+      const chartInstance = echarts.init(chartRef.value);
+      
+      // 假设您已经配置了图表数据
+      const chartOptions = {
+        // ...
+      };
+
+      chartInstance.setOption(chartOptions);
+
+      // 在 ECharts 工具箱中添加一个按钮来触发下载操作
+      chartInstance.setOption({
+        toolbox: {
+          feature: {
+            saveAsImage: {
+              title: '下载为XLSX',
+              icon: 'image://data:image/png;base64,iVBORw0KG...',
+              onclick: () => {
+                const displayedSeriesData = getDisplayedSeriesData(chartInstance);
+                downloadToXLSX(displayedSeriesData);
+              }
+            }
+          }
+        }
+      });
+    });
+
+    function getDisplayedSeriesData(chartInstance) {
+      const option = chartInstance.getOption();
+      const displayedSeries = option.series.filter(series => series.show);
+
+      const displayedSeriesData = displayedSeries.map(series => {
+        return {
+          name: series.name,
+          data: series.data
+        };
+      });
+
+      return displayedSeriesData;
+    }
+
+    function downloadToXLSX(data) {
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(data);
+
+      // 添加合并的单元格，实现指定样式
+      ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 1, c: 1 } }  // 合并单元格，覆盖第一行第一列和第二行第二列
+      ];
+
+      // 设置合并后的单元格内容和样式
+      ws['A1'].v = '文件名';
+      ws['B2'].v = 'x';
+      ws['C2'].v = 'y';
+      ws['A1'].s = { font: { sz: 14, bold: true }, alignment: { horizontal: 'right', vertical: 'bottom', wrap_text: true, text_rotation: 90 } };
+      ws['B2'].s = { alignment: { horizontal: 'center' } };
+      ws['C2'].s = { alignment: { horizontal: 'center' } };
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+      XLSX.writeFile(wb, 'echarts_data.xlsx');
+    }
+
+    return {
+      chartRef
+    };
+  }
+};
+```
+
+上述代码中，`downloadToXLSX` 函数通过设置 `ws['!merges']` 和 `ws['A1'].s` 等属性，实现了合并单元格和指定样式的功能。这将在生成的 XLSX 文件中创建包含指定文本和样式的单元格。请注意，实际样式的调整可能需要进一步的尝试和调整，以适应您的需求。
