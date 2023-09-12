@@ -1,0 +1,24 @@
+---
+layout:     post
+title:      "js字符串转数组"
+subtitle:   ""
+date:       2023-09-12
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - js
+---
+
+```python
+const str = '[(1,1),[2,3]]';
+
+// 使用正则表达式将字符串中的括号替换为方括号
+const correctedStr = str.replace(/\(/g, "[").replace(/\)/g, "]");
+
+// 使用JSON.parse()将字符串转换为JavaScript数组
+const arr = JSON.parse(correctedStr);
+
+console.log(arr); // 输出 [[1,1], [2,3]]
+
+```
+
