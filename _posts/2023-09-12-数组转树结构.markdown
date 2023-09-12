@@ -1,0 +1,43 @@
+---
+layout:     post
+title:      "数组转树结构"
+subtitle:   ""
+date:       2023-09-12
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+```python
+def build_tree(datalist, proplist):
+    tree = []  # 存储树结构的列表
+
+    for data in datalist:
+        parts = data.split('>->')  # 根据'>->'分割数据
+        label = parts[-1]  # 最后一个部分作为label
+        prop = proplist[datalist.index(data)]
+        # 检查当前部分是否已经在树中
+        node = None
+        for item in tree:
+            if item['label'] == parts[0]:
+                node = item
+                break
+
+        if node is None:
+            # 如果当前部分不在树中，则创建一个新节点
+            node = {'label': parts[0]}
+            tree.append(node)
+
+        # 递归处理子节点
+        if len(parts) > 1:
+            if 'children' not in node:
+                node['children'] = []
+            node['children'].append({'label': label, 'prop': prop})
+        else:
+            node['prop'] = prop
+
+    return tree
+
+```
+
