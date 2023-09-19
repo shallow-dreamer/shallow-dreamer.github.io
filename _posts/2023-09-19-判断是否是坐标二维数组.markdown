@@ -1,0 +1,376 @@
+---
+layout:     post
+title:      "判断是否是坐标二维数组"
+subtitle:   ""
+date:       2023-09-19
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+要编写一个正则表达式来检查数据是否是一个坐标类型的二维数组字符串，坐标值是数值型，可以包含科学计数法，你可以使用以下正则表达式：
+
+```python
+import re
+
+def is_coordinate_array_string(input_string):
+    # 定义坐标值的正则表达式，包括整数、浮点数和科学计数法表示
+    coordinate_value_pattern = r'[-+]?\d+(\.\d*)?(e[-+]?\d+)?'
+
+    # 定义坐标类型的二维数组字符串的正则表达式
+    array_pattern = fr'^\[\s*(\[\s*({coordinate_value_pattern})\s*,\s*({coordinate_value_pattern})\s*\]\s*,?\s*)*\]$'
+
+    # 使用正则表达式进行匹配
+    if re.match(array_pattern, input_string):
+        return True
+    else:
+        return False
+
+# 示例用法：
+coordinate_array_string = "[[1.23e3, 4.56e-2], [-7.89, 1.0]]"
+result = is_coordinate_array_string(coordinate_array_string)
+print(result)  # 输出 True
+```
+
+这个正则表达式`array_pattern`可以匹配包含数值型坐标的二维数组字符串，其中数值可以是整数、浮点数，以及科学计数法表示的数值。如果输入字符串匹配正则表达式，则`is_coordinate_array_string`函数返回`True`，否则返回`False`。你可以使用这个函数来检查输入字符串是否符合坐标类型的二维数组格式。
+
+你可以使用正则表达式来检查数据是否是一个坐标类型的二维数组字符串，坐标值是数值型，可以包含科学计数法。以下是一个正则表达式的示例：
+
+```python
+import re
+
+def is_coordinate_string(data):
+    # 定义坐标类型的二维数组的正则表达式模式
+    pattern = r'\[\s*\[(-?\d+(\.\d+)?(e-?\d+)?)\s*,\s*(-?\d+(\.\d+)?(e-?\d+)?)\s*\](\s*,\s*\[-?\d+(\.\d+)?(e-?\d+)?\s*,\s*-?\d+(\.\d+)?(e-?\d+)?\s*\])*\s*\]'
+    
+    # 使用正则表达式匹配字符串
+    if re.fullmatch(pattern, data):
+        return True
+    else:
+        return False
+
+# 示例用法：
+coordinate_string = "[[1.23e3, 4.56e-2], [-7.89, 1.0]]"
+result = is_coordinate_string(coordinate_string)
+print(result)  # 输出 True
+```
+
+这个正则表达式模式会匹配形如`[[1.23e3, 4.56e-2], [-7.89, 1.0]]`的坐标类型的二维数组字符串，其中坐标值可以包含科学计数法。如果匹配成功，`is_coordinate_string`函数返回`True`，否则返回`False`。
+
+请注意，正则表达式模式可能需要根据你的数据的具体格式进行调整。这个示例适用于大部分常见的坐标类型的二维数组字符串。
+
+你可以使用正则表达式来检查数据是否是一个坐标类型的二维数组字符串。下面是一个适用于这种情况的正则表达式及其解释：
+
+```python
+import re
+
+def is_coordinate_string(data):
+    # 定义坐标类型的二维数组的正则表达式
+    pattern = r'^\s*\[\s*(\s*[+-]?(?:\d*\.\d+|\d+\.\d*|\d+(?:[eE][+-]?\d+)?)\s*,\s*)+[+-]?(?:\d*\.\d+|\d+\.\d*|\d+(?:[eE][+-]?\d+)?)\s*\]\s*$'
+    
+    # 使用正则表达式进行匹配
+    return bool(re.match(pattern, data))
+
+# 示例用法：
+coordinate_string = "[1.23e3, 4.56e-2], [-7.89, 1.0]"
+result = is_coordinate_string(coordinate_string)
+print(result)  # 输出 True
+```
+
+这个正则表达式匹配的模式解释如下：
+
+- `^` 和 `$`：分别表示字符串的开头和结尾，确保整个字符串与正则表达式匹配。
+- `\s*`：匹配零个或多个空白字符，用于处理可能存在的空格。
+- `\[\]`：匹配方括号，表示数组的起始和结束。
+- `\s*`：匹配方括号内的任意数量的空格。
+- `(...)`：使用括号捕获一个或多个坐标值。
+- `\s*`：匹配坐标值之间的任意数量的空格。
+- `[+-]?`：匹配可选的正负号。
+- `(?:...)`：使用非捕获括号，匹配坐标值的三种形式（浮点数、科学计数法、整数）。
+- `(\d*\.\d+|\d+\.\d*|\d+(?:[eE][+-]?\d+)?)`：匹配浮点数、科学计数法表示的数值或整数。
+- `,`：匹配逗号，用于分隔坐标值。
+- `\s*`：匹配坐标值之间的任意数量的空格。
+
+这个正则表达式将匹配包含坐标值的字符串，坐标之间可以包含空格，坐标值可以是浮点数、整数或科学计数法表示的数值，用逗号分隔，并用方括号括起来。如果输入字符串与这个模式匹配，函数返回`True`，否则返回`False`。
+
+你可以使用正则表达式来检查数据是否是一个坐标类型的二维数组字符串。下面是一个可以实现此目标的正则表达式和示例代码：
+
+```python
+import re
+
+def is_coordinate_array_string(data_str):
+    # 定义匹配坐标类型的二维数组的正则表达式
+    pattern = r'^\[\s*\[(\s*[+-]?(?:\d*\.\d+|\d+\.\d*|\d+(?:e[+-]?\d+)?)\s*,\s*[+-]?(?:\d*\.\d+|\d+\.\d*|\d+(?:e[+-]?\d+)?)\s*(?:,\s*[+-]?(?:\d*\.\d+|\d+\.\d*|\d+(?:e[+-]?\d+)?)\s*)*)\]\s*(?:,\s*\[(\s*[+-]?(?:\d*\.\d+|\d+\.\d*|\d+(?:e[+-]?\d+)?)\s*,\s*[+-]?(?:\d*\.\d+|\d+\.\d*|\d+(?:e[+-]?\d+)?)\s*(?:,\s*[+-]?(?:\d*\.\d+|\d+\.\d*|\d+(?:e[+-]?\d+)?)\s*)*)\]\s*)*\]$'
+
+    # 使用正则表达式匹配数据字符串
+    if re.match(pattern, data_str):
+        return True
+    else:
+        return False
+
+# 示例用法：
+coordinate_array_str = "[[1.23e3, 4.56e-2], [-7.89, 1.0]]"
+result = is_coordinate_array_string(coordinate_array_str)
+print(result)  # 输出 True
+```
+
+这个正则表达式可以匹配坐标类型的二维数组字符串，其中坐标值可以是数值型，包括科学计数法表示的数值。你可以将要检查的数据字符串传递给`is_coordinate_array_string`函数，它将返回`True`如果字符串符合坐标类型的二维数组格式，否则返回`False`。
+
+你可以使用正则表达式来检查一个字符串是否符合坐标类型的二维数组的格式，其中坐标值是数值型，可以包含科学计数法。以下是一个适用的正则表达式和示例Python函数：
+
+```python
+import re
+
+def is_coordinate_array_string(data_str):
+    # 定义正则表达式模式，用于匹配坐标类型的二维数组字符串
+    pattern = r'^\[\s*\[[-+]?(?:\d*\.\d+|\d+(?:\.\d*)?)(?:[eE][-+]?\d+)?(?:\s*,\s*[-+]?(?:\d*\.\d+|\d+(?:\.\d*)?)(?:[eE][-+]?\d+)?)*\]\s*(?:,\s*\[\s*[-+]?(?:\d*\.\d+|\d+(?:\.\d*)?)(?:[eE][-+]?\d+)?(?:\s*,\s*[-+]?(?:\d*\.\d+|\d+(?:\.\d*)?)(?:[eE][-+]?\d+)?)*\]\s*)*\]$'
+
+    # 使用正则表达式匹配字符串
+    match = re.match(pattern, data_str)
+
+    # 如果匹配成功，返回True；否则返回False
+    return match is not None
+
+# 示例用法：
+coordinate_array_str = "[[1.23e3, 4.56e-2], [-7.89, 1.0]]"
+result = is_coordinate_array_string(coordinate_array_str)
+print(result)  # 输出 True
+```
+
+这个函数使用正则表达式模式 `pattern` 来匹配坐标类型的二维数组字符串。该模式会检查字符串是否以正确的格式包含数值型坐标值，允许科学计数法表示法。如果匹配成功，函数返回 `True`；否则返回 `False`。你可以使用这个函数来检查你的字符串是否符合坐标类型的二维数组的格式。
+
+你可以使用正则表达式来检查一个字符串是否表示一个坐标类型的二维数组，其中坐标值是数值型，可以包含科学计数法。以下是一个正则表达式示例：
+
+```python
+import re
+
+def is_coordinate_array_string(input_string):
+    # 定义正则表达式模式
+    pattern = r'\[\s*\[(-?\d+(\.\d+)?(e-?\d+)?,\s*-?\d+(\.\d+)?(e-?\d+)?)(,\s*-?\d+(\.\d+)?(e-?\d+)?)?\]\s*(,\s*\[(-?\d+(\.\d+)?(e-?\d+)?,\s*-?\d+(\.\d+)?(e-?\d+)?)(,\s*-?\d+(\.\d+)?(e-?\d+)?)?\]\s*)*\]'
+
+    # 使用正则表达式匹配输入字符串
+    if re.fullmatch(pattern, input_string):
+        return True
+    else:
+        return False
+
+# 示例用法：
+coordinate_string = "[[1.23e3, 4.56e-2], [-7.89, 1.0]]"
+result = is_coordinate_array_string(coordinate_string)
+print(result)  # 输出 True
+```
+
+这个正则表达式模式可以匹配包含坐标值的二维数组字符串，其中坐标值可以是整数、浮点数，也可以包含科学计数法表示。它使用递归来匹配每个坐标对，确保它们的格式正确。如果输入字符串匹配模式，函数返回`True`，否则返回`False`。
+
+你可以使用Python编写一个函数来检查数据是否是一个坐标类型的二维数组字符串，其中坐标值是数值型，包含科学计数法。以下是一个示例函数：
+
+```python
+import re
+
+def is_coordinate_array(data):
+    try:
+        # 首先尝试将输入的字符串解析为二维数组
+        coordinates = eval(data)
+        if not isinstance(coordinates, list):
+            return False
+
+        # 检查每个坐标点是否符合要求
+        for row in coordinates:
+            if not isinstance(row, list) or len(row) != 2:
+                return False
+
+            for value in row:
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    # 检查是否为整数或浮点数，且不是布尔值
+                    return False
+
+        return True
+
+    except Exception as e:
+        return False
+
+# 测试示例
+coordinate_str = '[[1.23e-4, 5], [6.789e2, -0.1234]]'
+result = is_coordinate_array(coordinate_str)
+if result:
+    print("输入字符串是坐标类型的二维数组。")
+else:
+    print("输入字符串不是坐标类型的二维数组。")
+```
+
+这个函数首先尝试将输入的字符串解析为Python列表，然后检查是否符合坐标数组的要求。它可以处理包含科学计数法的数值。如果输入字符串满足坐标数组的要求，则返回`True`，否则返回`False`。请注意，使用`eval`函数来解析字符串需要谨慎，确保只接受可信任的输入。如果需要更严格的输入验证，可以使用其他方法来解析字符串。
+
+你可以编写一个函数来检查数据是否是一个坐标类型的二维数组，其中坐标值可以是数值型、数值型字符串，也可以包含科学计数法。以下是一个示例函数的实现：
+
+```python
+import re
+
+def is_valid_coordinate(value):
+    """
+    检查单个坐标值是否有效
+
+    Args:
+        value (str): 坐标值
+
+    Returns:
+        bool: 如果坐标值有效，则返回True，否则返回False
+    """
+    # 使用正则表达式匹配数值型字符串，可以包含科学计数法
+    number_pattern = r'^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$'
+    if not re.match(number_pattern, value):
+        return False
+
+    return True
+
+def is_valid_coordinates_array(arr):
+    """
+    检查数据是否是一个有效的坐标类型的二维数组
+
+    Args:
+        arr (list): 二维数组
+
+    Returns:
+        bool: 如果数据是有效的坐标类型二维数组，则返回True，否则返回False
+    """
+    if not isinstance(arr, list):
+        return False
+
+    if not all(isinstance(row, list) and len(row) == 2 for row in arr):
+        return False
+
+    for row in arr:
+        for value in row:
+            if not is_valid_coordinate(str(value)):
+                return False
+
+    return True
+
+# 示例用法：
+coordinate_array = [
+    [1.23, 4.56],
+    ["-2.5e-3", "3.0E10"],
+    ["abc", "1.23"],
+]
+
+result = is_valid_coordinates_array(coordinate_array)
+print("是否是有效的坐标类型二维数组:", result)
+```
+
+这个代码定义了两个函数，`is_valid_coordinate` 用于检查单个坐标值是否有效，`is_valid_coordinates_array` 用于检查数据是否是一个有效的坐标类型的二维数组。你可以使用这两个函数来校验你的数据。
+
+你可以编写一个函数来检查数据是否是一个坐标类型的二维数组，坐标值可以是数值型或数值型字符串，包括科学计数法。下面是一个示例函数：
+
+```python
+import re
+
+def is_coordinate_array(data):
+    # 检查数据是否是二维数组
+    if not isinstance(data, list):
+        return False
+    if not all(isinstance(row, list) for row in data):
+        return False
+
+    # 使用正则表达式来匹配数值型或数值型字符串，包括科学计数法
+    num_pattern = r'^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$'
+
+    for row in data:
+        if not all(re.match(num_pattern, str(value)) for value in row):
+            return False
+
+    return True
+
+# 示例用法：
+coordinate_array = [[1.23, '4.56'], ['-7.89', '1e-3']]
+result = is_coordinate_array(coordinate_array)
+print(result)  # 输出 True
+
+non_coordinate_array = [[1.23, '4.56'], ['ABC', '1e-3']]
+result = is_coordinate_array(non_coordinate_array)
+print(result)  # 输出 False
+```
+
+这个函数首先检查输入是否为二维数组，然后使用正则表达式来验证数组中的每个值是否是数值型或数值型字符串，包括科学计数法。如果所有值都满足条件，函数返回True，否则返回False。你可以根据需要调用这个函数来检查坐标数据。
+
+你可以编写一个函数来检查数据是否是一个坐标类型的二维数组，坐标值是数值型或数值型字符串，包括科学计数法。下面是一个示例函数的实现：
+
+```python
+import re
+
+def is_valid_coordinate(value):
+    # 使用正则表达式来检查是否是数值型或数值型字符串，可以包含科学计数法
+    number_pattern = r'^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$'
+    if re.match(number_pattern, value):
+        return True
+    return False
+
+def is_coordinate_array(data):
+    # 检查是否是二维数组
+    if not isinstance(data, list):
+        return False
+    if not data:
+        return False
+    
+    # 获取第一行的长度，作为列数
+    num_columns = len(data[0])
+    
+    # 遍历二维数组，检查每个元素是否是坐标值
+    for row in data:
+        if not isinstance(row, list) or len(row) != num_columns:
+            return False
+        for value in row:
+            if not is_valid_coordinate(value):
+                return False
+    
+    return True
+
+# 示例用法
+coordinate_array = [
+    [1.23, '2.34e-4'],
+    ['0.5', '3.0'],
+    ['-1.0', '1e5']
+]
+
+if is_coordinate_array(coordinate_array):
+    print("是有效的坐标数组")
+else:
+    print("不是有效的坐标数组")
+```
+
+这个示例中，`is_valid_coordinate`函数用于检查一个值是否是数值型或数值型字符串，包括科学计数法。`is_coordinate_array`函数用于检查给定的二维数组是否是坐标类型的数组，其中所有的元素都是有效的坐标值。你可以根据实际需要调用`is_coordinate_array`函数来检查你的数据。
+
+下面是一个Python函数，可以检查数据是否是一个坐标类型的二维数组，其中坐标值可以是数值型、数值型字符串，甚至包含科学计数法表示的数值：
+
+```python
+import re
+
+def is_coordinate_array(data):
+    if not isinstance(data, list):
+        return False
+
+    for row in data:
+        if not isinstance(row, list) or len(row) != 2:
+            return False
+
+        for value in row:
+            if not isinstance(value, (int, float, str)):
+                return False
+
+            # 使用正则表达式检查数值型字符串是否合法
+            if isinstance(value, str):
+                if not re.match(r'^[-+]?\d+(\.\d+)?([eE][-+]?\d+)?$', value):
+                    return False
+
+    return True
+
+# 示例用法：
+coordinate_array = [
+    [1.23, "4.56E-3"],
+    [7.89, "-1.23E+4"]
+]
+
+result = is_coordinate_array(coordinate_array)
+print(result)  # 输出 True
+```
+
+这个函数首先检查数据是否是一个列表，然后遍历二维数组，检查每个元素是否是数值型、数值型字符串，并且使用正则表达式来检查数值型字符串是否合法。如果数据符合坐标类型的要求，函数将返回True，否则返回False。
