@@ -1,0 +1,88 @@
+---
+layout:     post
+title:      "判断是否是坐标二维数组"
+subtitle:   ""
+date:       2023-09-19
+author:     " Shallow Dreamer "
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+你可以使用JavaScript和Python分别编写函数来删除指定路径的数据。以下是JavaScript和Python的示例代码：
+
+JavaScript函数：
+
+```javascript
+function removeDataByLabel(data, labelPath) {
+  for (let i = 0; i < data.length; i++) {
+    const item = data[i];
+    if (item.label === labelPath[0]) {
+      if (labelPath.length === 1) {
+        data.splice(i, 1);
+        i--;
+      } else if (item.children) {
+        removeDataByLabel(item.children, labelPath.slice(1));
+        if (item.children.length === 0) {
+          delete item.children;
+        }
+      }
+    }
+  }
+}
+
+const a = [
+  { label: 1, prop: 1 },
+  {
+    label: 2,
+    children: [
+      { label: 21, prop: 21 },
+      { label: 22, prop: 22 },
+    ],
+  },
+  {
+    label: 3,
+    children: [{ label: 21, prop: 21 }],
+  },
+];
+
+removeDataByLabel(a, [2, 21]);
+console.log(a);
+```
+
+Python函数：
+
+```python
+def remove_data_by_label(data, label_path):
+    i = 0
+    while i < len(data):
+        item = data[i]
+        if item["label"] == label_path[0]:
+            if len(label_path) == 1:
+                data.pop(i)
+            elif "children" in item:
+                remove_data_by_label(item["children"], label_path[1:])
+                if not item["children"]:
+                    del item["children"]
+        i += 1
+
+a = [
+    {"label": 1, "prop": 1},
+    {
+        "label": 2,
+        "children": [
+            {"label": 21, "prop": 21},
+            {"label": 22, "prop": 22},
+        ],
+    },
+    {
+        "label": 3,
+        "children": [{"label": 21, "prop": 21}],
+    },
+]
+
+remove_data_by_label(a, [2, 21])
+print(a)
+```
+
+这两个函数将会移除包含指定路径的数据。在JavaScript中，我们使用递归函数来遍历并删除数据，而在Python中，我们使用迭代方式实现相同的逻辑。
