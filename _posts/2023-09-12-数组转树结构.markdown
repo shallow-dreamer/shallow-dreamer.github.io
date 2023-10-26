@@ -41,3 +41,64 @@ def build_tree(datalist, proplist):
 
 ```
 
+```python
+    def transform_to_nested_dict(labels, props):
+        data = []
+        mapping = {}
+
+        for label, prop in zip(labels, props):
+            parts = label.split('>->')
+            current_level = data
+
+            for part in parts:
+                label_dict = {"label": part}
+                if part not in mapping:
+                    mapping[part] = len(current_level)
+                    current_level.append(label_dict)
+                else:
+                    current_level_index = mapping[part]
+                    label_dict = current_level[current_level_index]
+
+                current_level = label_dict.setdefault("children", [])
+
+            if prop:
+                label_dict["prop"] = prop
+
+        return data
+
+
+    labels = ['1>->11', '2>->21', '2>->22>->221', '3>->31>->311>->3111']
+    props = ['a', 'b', 'c', 'd']
+
+    result = transform_to_nested_dict(labels, props)
+    print(result)
+```
+
+```python
+    def transform_lists_to_structure(list1, list2):
+        result = []
+        mapping = {}
+
+        for item1, item2 in zip(list1, list2):
+            parts1 = item1.split('>->')
+            current_level = result
+            for part in parts1:
+                key = part
+                if key not in mapping:
+                    mapping[key] = {"label": key}
+                    if len(parts1) > 1:
+                        mapping[key]["children"] = []
+                        current_level.append(mapping[key])
+                current_level = mapping[key].get("children", [])
+            mapping[key]["prop"] = item2
+
+        return result
+
+
+    list1 = ['1>->11', '2>->21', '2>->22>->221>->2211', '3>->31>->311']
+    list2 = ['a', 'b', 'c', 'd']
+
+    result = transform_lists_to_structure(list1, list2)
+    print(result)
+```
+
