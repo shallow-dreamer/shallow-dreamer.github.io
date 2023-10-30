@@ -1,12 +1,13 @@
 ---
 layout:     post
-title:      "判断是否是坐标二维数组"
+title:      "删除树结构中符合路径的数据"
 subtitle:   ""
-date:       2023-09-19
+date:       2023-10-09
 author:     " Shallow Dreamer "
 header-img: "img/post-bg-js-version.jpg"
 tags:
     - python
+    - js
 ---
 
 你可以使用JavaScript和Python分别编写函数来删除指定路径的数据。以下是JavaScript和Python的示例代码：
