@@ -103,3 +103,81 @@ tags:
    ```
 
 注意，虽然这些步骤可以减小输出文件的大小和删除未使用的代码，但无法完全防止源代码的泄露。反编译总是可能的，但这些步骤可以增加攻击者获取源代码的难度。
+
+
+
+```javascript
+<template>
+  <div>
+    <!-- 选择器 -->
+    <select v-for="(selector, index) in selectors" :key="index" v-model="selectedData[index]" @change="handleChange(index)">
+      <option v-for="item in filteredSelectorData(index)" :key="item.value" :value="item.value">{{ item.label }}</option>
+    </select>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+
+// 模拟表格数据
+const tableData = ref([
+  { id: 1, value1: 'A', value2: 'X', value3: 'P' },
+  { id: 2, value1: 'B', value2: 'Y', value3: 'Q' },
+  { id: 3, value1: 'C', value2: 'Z', value3: 'R' }
+]);
+
+// 路由和路由参数
+const route = useRoute();
+const router = useRouter();
+
+// 获取路由参数中的选择器数据
+const selectedData = ref(route.query.selectedData ? route.query.selectedData.split(',') : []);
+
+// 选择器配置
+const selectors = [
+  { name: 'value1', label: 'Selector 1' },
+  { name: 'value2', label: 'Selector 2' },
+  { name: 'value3', label: 'Selector 3' }
+];
+
+// 生成选择器数据的计算属性
+const selectorData = computed(() => {
+  return selectors.map(selector => {
+    return {
+      name: selector.name,
+      options: Array.from(new Set(tableData.value.map(item => item[selector.name]))).map(value => ({ value, label: value }))
+    };
+  });
+});
+
+// 生成过滤选择器数据的函数
+const filteredSelectorData = index => {
+  return selectorData.value[index].options.filter(item => {
+    return selectedData.value.every((value, i) => {
+      if (i === index) return true;
+      return tableData.value.some(row => row[selectors[i].name] === value && row[selectorData.value[index].name] === item.value);
+    });
+  });
+};
+
+// 处理选择器改变事件
+const handleChange = index => {
+  // 更新路由参数中的选择器数据
+  const newSelectedData = selectedData.value.slice();
+  newSelectedData[index] = event.target.value;
+  const query = { ...route.query, selectedData: newSelectedData.join(',') };
+  router.push({ query });
+};
+
+// 监听路由变化，在路由变化时更新选择数据
+router.afterEach(() => {
+  selectedData.value = route.query.selectedData ? route.query.selectedData.split(',') : [];
+});
+
+</script>
+
+<style>
+/* 样式代码 */
+</style>
+```
