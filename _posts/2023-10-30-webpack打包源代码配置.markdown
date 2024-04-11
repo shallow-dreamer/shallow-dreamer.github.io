@@ -181,3 +181,112 @@ router.afterEach(() => {
 /* 样式代码 */
 </style>
 ```
+
+```vue
+<template>
+  <div>
+    <!-- 选择器 -->
+    <select v-for="(selector, index) in selectors" :key="index" v-model="selectedData[index]" @change="handleChange(index)">
+      <option v-for="item in filteredSelectorData(index)" :key="item.value" :value="item.value">{{ item.label }}</option>
+    </select>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+
+// 模拟表格数据
+const tableData = ref([
+  { id: 1, value1: 'A', value2: 'X', value3: 'P' },
+  { id: 2, value1: 'B', value2: 'Y', value3: 'Q' },
+  { id: 3, value1: 'C', value2: 'Z', value3: 'R' }
+]);
+
+// 路由和路由参数
+const route = useRoute();
+const router = useRouter();
+
+// 获取路由参数中的选择器数据
+const selectedData = ref(route.query.selectedData ? route.query.selectedData.split(',') : []);
+
+// 记录用户操作顺序的数组
+const operationSequence = ref([]);
+
+// 选择器配置
+const selectors = [
+  { name: 'value1', label: 'Selector 1' },
+  { name: 'value2', label: 'Selector 2' },
+  { name: 'value3', label: 'Selector 3' }
+];
+
+// 生成选择器数据的计算属性
+const selectorData = computed(() => {
+  return selectors.map(selector => {
+    return {
+      name: selector.name,
+      options: Array.from(new Set(tableData.value.map(item => item[selector.name]))).map(value => ({ value, label: value }))
+    };
+  });
+});
+
+// 生成过滤选择器数据的函数
+const filteredSelectorData = index => {
+  return selectorData.value[index].options.filter(item => {
+    return selectedData.value.every((value, i) => {
+      if (i === index) return true;
+      return tableData.value.some(row => row[selectors[i].name] === value && row[selectorData.value[index].name] === item.value);
+    });
+  });
+};
+
+// 处理选择器改变事件
+const handleChange = index => {
+  // 更新路由参数中的选择器数据
+  const newSelectedData = selectedData.value.slice();
+  newSelectedData[index] = event.target.value;
+  const query = { ...route.query, selectedData: newSelectedData.join(',') };
+  router.push({ query });
+
+  // 记录用户的操作顺序
+  operationSequence.value.push(index);
+
+  // 如果当前选择器的数据为空，则前进一位并更新选择器的数据配置
+  if (filteredSelectorData(index).length === 0 && index < selectors.length - 1) {
+    const nextIndex = index + 1;
+    // 前进一位
+    selectedData.value[nextIndex] = '';
+    // 更新选择器的数据配置
+    updateSelectorData(nextIndex);
+  }
+};
+
+// 更新选择器的数据配置
+const updateSelectorData = index => {
+  const nextSelectorName = selectors[index].name;
+  const selectedValues = selectedData.value.slice(0, index);
+  const nextSelectorOptions = Array.from(new Set(tableData.value.filter(item => {
+    return selectedValues.every((value, i) => {
+      return item[selectors[i].name] === value;
+    });
+  }).map(item => item[nextSelectorName]))).map(value => ({ value, label: value }));
+
+  selectorData.value[index] = {
+    name: nextSelectorName,
+    options: nextSelectorOptions
+  };
+};
+
+// 监听路由变化，在路由变化时更新选择数据
+router.afterEach(() => {
+  selectedData.value = route.query.selectedData ? route.query.selectedData.split(',') : [];
+});
+
+</script>
+
+<style>
+/* 样式代码 */
+</style>
+
+```
+
