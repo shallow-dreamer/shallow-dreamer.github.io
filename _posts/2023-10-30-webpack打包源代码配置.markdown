@@ -106,376 +106,113 @@ tags:
 
 
 
-```javascript
-<template>
-  <div>
-    <!-- 选择器 -->
-    <select v-for="(selector, index) in selectors" :key="index" v-model="selectedData[index]" @change="handleChange(index)">
-      <option v-for="item in filteredSelectorData(index)" :key="item.value" :value="item.value">{{ item.label }}</option>
-    </select>
-  </div>
-</template>
+```js
+// 初始化第一个图表
+var chart1 = echarts.init(document.getElementById('chart1'));
+var option1 = {
+    // 第一个图表的配置
+    tooltip: {
+        trigger: 'axis',
+        axisPointer: {
+            type: 'cross'
+        },
+        formatter: function (params) {
+            // 格式化 Tooltip 显示的内容
+            var data = params[0].data;
+            return 'Chart 1: ' + data.value;
+        }
+    },
+    // 其他配置项...
+};
+chart1.setOption(option1);
 
-<script setup>
-import { ref, computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+// 初始化第二个图表
+var chart2 = echarts.init(document.getElementById('chart2'));
+var option2 = {
+    // 第二个图表的配置
+    tooltip: {
+        trigger: 'axis',
+        axisPointer: {
+            type: 'cross'
+        },
+        formatter: function (params) {
+            // 格式化 Tooltip 显示的内容
+            var data = params[0].data;
+            return 'Chart 2: ' + data.value;
+        }
+    },
+    // 其他配置项...
+};
+chart2.setOption(option2);
 
-// 模拟表格数据
-const tableData = ref([
-  { id: 1, value1: 'A', value2: 'X', value3: 'P' },
-  { id: 2, value1: 'B', value2: 'Y', value3: 'Q' },
-  { id: 3, value1: 'C', value2: 'Z', value3: 'R' }
-]);
+// 监听第一个图表的鼠标悬停事件
+chart1.on('mousemove', function (params) {
+    // 获取第一个图表当前鼠标所在的数据点
+    var data1 = params.seriesData;
 
-// 路由和路由参数
-const route = useRoute();
-const router = useRouter();
-
-// 获取路由参数中的选择器数据
-const selectedData = ref(route.query.selectedData ? route.query.selectedData.split(',') : []);
-
-// 选择器配置
-const selectors = [
-  { name: 'value1', label: 'Selector 1' },
-  { name: 'value2', label: 'Selector 2' },
-  { name: 'value3', label: 'Selector 3' }
-];
-
-// 生成选择器数据的计算属性
-const selectorData = computed(() => {
-  return selectors.map(selector => {
-    return {
-      name: selector.name,
-      options: Array.from(new Set(tableData.value.map(item => item[selector.name]))).map(value => ({ value, label: value }))
-    };
-  });
-});
-
-// 生成过滤选择器数据的函数
-const filteredSelectorData = index => {
-  return selectorData.value[index].options.filter(item => {
-    return selectedData.value.every((value, i) => {
-      if (i === index) return true;
-      return tableData.value.some(row => row[selectors[i].name] === value && row[selectorData.value[index].name] === item.value);
+    // 更新第二个图表的 Tooltip
+    chart2.dispatchAction({
+        type: 'showTip',
+        seriesIndex: 0,
+        dataIndex: params.dataIndex
     });
-  });
-};
-
-// 处理选择器改变事件
-const handleChange = index => {
-  // 更新路由参数中的选择器数据
-  const newSelectedData = selectedData.value.slice();
-  newSelectedData[index] = event.target.value;
-  const query = { ...route.query, selectedData: newSelectedData.join(',') };
-  router.push({ query });
-};
-
-// 监听路由变化，在路由变化时更新选择数据
-router.afterEach(() => {
-  selectedData.value = route.query.selectedData ? route.query.selectedData.split(',') : [];
 });
 
-</script>
+// 监听第二个图表的鼠标悬停事件
+chart2.on('mousemove', function (params) {
+    // 获取第二个图表当前鼠标所在的数据点
+    var data2 = params.seriesData;
 
-<style>
-/* 样式代码 */
-</style>
-```
-
-```vue
-<template>
-  <div>
-    <!-- 选择器 -->
-    <select v-for="(selector, index) in selectors" :key="index" v-model="selectedData[index]" @change="handleChange(index)">
-      <option v-for="item in filteredSelectorData(index)" :key="item.value" :value="item.value">{{ item.label }}</option>
-    </select>
-  </div>
-</template>
-
-<script setup>
-import { ref, computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
-
-// 模拟表格数据
-const tableData = ref([
-  { id: 1, value1: 'A', value2: 'X', value3: 'P' },
-  { id: 2, value1: 'B', value2: 'Y', value3: 'Q' },
-  { id: 3, value1: 'C', value2: 'Z', value3: 'R' }
-]);
-
-// 路由和路由参数
-const route = useRoute();
-const router = useRouter();
-
-// 获取路由参数中的选择器数据
-const selectedData = ref(route.query.selectedData ? route.query.selectedData.split(',') : []);
-
-// 记录用户操作顺序的数组
-const operationSequence = ref([]);
-
-// 选择器配置
-const selectors = [
-  { name: 'value1', label: 'Selector 1' },
-  { name: 'value2', label: 'Selector 2' },
-  { name: 'value3', label: 'Selector 3' }
-];
-
-// 生成选择器数据的计算属性
-const selectorData = computed(() => {
-  return selectors.map(selector => {
-    return {
-      name: selector.name,
-      options: Array.from(new Set(tableData.value.map(item => item[selector.name]))).map(value => ({ value, label: value }))
-    };
-  });
-});
-
-// 生成过滤选择器数据的函数
-const filteredSelectorData = index => {
-  return selectorData.value[index].options.filter(item => {
-    return selectedData.value.every((value, i) => {
-      if (i === index) return true;
-      return tableData.value.some(row => row[selectors[i].name] === value && row[selectorData.value[index].name] === item.value);
+    // 更新第一个图表的 Tooltip
+    chart1.dispatchAction({
+        type: 'showTip',
+        seriesIndex: 0,
+        dataIndex: params.dataIndex
     });
-  });
-};
-
-// 处理选择器改变事件
-const handleChange = index => {
-  // 更新路由参数中的选择器数据
-  const newSelectedData = selectedData.value.slice();
-  newSelectedData[index] = event.target.value;
-  const query = { ...route.query, selectedData: newSelectedData.join(',') };
-  router.push({ query });
-
-  // 记录用户的操作顺序
-  operationSequence.value.push(index);
-
-  // 如果当前选择器的数据为空，则前进一位并更新选择器的数据配置
-  if (filteredSelectorData(index).length === 0 && index < selectors.length - 1) {
-    const nextIndex = index + 1;
-    // 前进一位
-    selectedData.value[nextIndex] = '';
-    // 更新选择器的数据配置
-    updateSelectorData(nextIndex);
-  }
-};
-
-// 更新选择器的数据配置
-const updateSelectorData = index => {
-  const nextSelectorName = selectors[index].name;
-  const selectedValues = selectedData.value.slice(0, index);
-  const nextSelectorOptions = Array.from(new Set(tableData.value.filter(item => {
-    return selectedValues.every((value, i) => {
-      return item[selectors[i].name] === value;
-    });
-  }).map(item => item[nextSelectorName]))).map(value => ({ value, label: value }));
-
-  selectorData.value[index] = {
-    name: nextSelectorName,
-    options: nextSelectorOptions
-  };
-};
-
-// 监听路由变化，在路由变化时更新选择数据
-router.afterEach(() => {
-  selectedData.value = route.query.selectedData ? route.query.selectedData.split(',') : [];
 });
-
-</script>
-
-<style>
-/* 样式代码 */
-</style>
 
 ```
 
-```vue
-<template>
-  <div>
-    <!-- 选择器 -->
-    <select v-for="(selector, index) in selectors" :key="index" v-model="selectedData[index]" @change="handleChange(index)">
-      <option v-for="item in filteredSelectorData(index)" :key="item.value" :value="item.value">{{ item.label }}</option>
-    </select>
-  </div>
-</template>
+```js
+tooltip: {
+  trigger: 'axis',
+  position: function (point, params, dom, rect, size) {
+    // 自定义 Tooltip 的位置
+    var top = point[1] - size.contentSize[1] - 10; // 向上偏移 10px
+    var left = point[0] - size.contentSize[0] / 2; // 水平居中
 
-<script setup>
-import { ref, computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+    // 限制 Tooltip 的范围
+    var containerWidth = document.getElementById('chartContainer').offsetWidth;
+    var containerHeight = document.getElementById('chartContainer').offsetHeight;
 
-// 模拟表格数据
-const tableData = ref([
-  { id: 1, value1: 'A', value2: 'X', value3: 'P' },
-  { id: 2, value1: 'B', value2: 'Y', value3: 'Q' },
-  { id: 3, value1: 'C', value2: 'Z', value3: 'R' }
-]);
-
-// 路由和路由参数
-const route = useRoute();
-const router = useRouter();
-
-// 获取路由参数中的选择器数据
-const selectedData = ref(route.query.selectedData ? route.query.selectedData.split(',') : []);
-
-// 记录用户操作顺序的数组
-const operationSequence = ref([]);
-
-// 选择器配置
-const selectors = [
-  { name: 'value1', label: 'Selector 1' },
-  { name: 'value2', label: 'Selector 2' },
-  { name: 'value3', label: 'Selector 3' }
-];
-
-// 生成选择器数据的计算属性
-const selectorData = computed(() => {
-  return selectors.map(selector => {
-    return {
-      name: selector.name,
-      options: Array.from(new Set(tableData.value.map(item => item[selector.name]))).map(value => ({ value, label: value }))
-    };
-  });
-});
-
-// 生成过滤选择器数据的函数
-const filteredSelectorData = index => {
-  return selectorData.value[index].options.filter(item => {
-    return selectedData.value.every((value, i) => {
-      if (i === index) return true;
-      return tableData.value.some(row => row[selectors[i].name] === value && row[selectorData.value[index].name] === item.value);
-    });
-  });
-};
-
-// 处理选择器改变事件
-const handleChange = index => {
-  // 更新路由参数中的选择器数据
-  const newSelectedData = selectedData.value.slice();
-  newSelectedData[index] = event.target.value;
-  const query = { ...route.query, selectedData: newSelectedData.join(',') };
-  router.push({ query });
-
-  // 记录用户的操作顺序
-  operationSequence.value.push(index);
-
-  // 检查当前选择器的选择数据是否为空
-  if (filteredSelectorData(index).length === 0) {
-    // 如果为空，则将后续选择器的索引前进一位，并更新选择器的数据配置
-    for (let i = index + 1; i < selectors.length; i++) {
-      if (filteredSelectorData(i).length > 0) {
-        selectedData.value[i] = filteredSelectorData(i)[0].value;
-        break;
-      }
+    if (left < 0) {
+      left = 0;
+    } else if (left + size.contentSize[0] > containerWidth) {
+      left = containerWidth - size.contentSize[0];
     }
+
+    if (top < 0) {
+      top = 0;
+    } else if (top + size.contentSize[1] > containerHeight) {
+      top = containerHeight - size.contentSize[1];
+    }
+
+    return [left, top];
   }
-};
-
-// 监听路由变化，在路由变化时更新选择数据
-router.afterEach(() => {
-  selectedData.value = route.query.selectedData ? route.query.selectedData.split(',') : [];
-});
-
-</script>
-
-<style>
-/* 样式代码 */
-</style>
+}
 
 ```
 
-```vue
-<template>
-  <div>
-    <!-- 选择器 -->
-    <select v-for="(selector, index) in selectors" :key="index" v-model="selectedData[index]" @change="handleChange(index)">
-      <option v-for="item in filteredSelectorData(index)" :key="item.value" :value="item.value">{{ item.label }}</option>
-    </select>
-  </div>
-</template>
-
-<script setup>
-import { ref, computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
-
-// 模拟表格数据
-const tableData = ref([
-  { id: 1, value1: 'A', value2: 'X', value3: 'P' },
-  { id: 2, value1: 'B', value2: 'Y', value3: 'Q' },
-  { id: 3, value1: 'C', value2: 'Z', value3: 'R' }
-]);
-
-// 路由和路由参数
-const route = useRoute();
-const router = useRouter();
-
-// 获取路由参数中的选择器数据
-const selectedData = ref(route.query.selectedData ? route.query.selectedData.split(',') : []);
-
-// 记录用户操作顺序的数组
-const operationSequence = ref([]);
-
-// 选择器配置
-const selectors = [
-  { name: 'value1', label: 'Selector 1' },
-  { name: 'value2', label: 'Selector 2' },
-  { name: 'value3', label: 'Selector 3' }
-];
-
-// 生成选择器数据的计算属性
-const selectorData = computed(() => {
-  return selectors.map(selector => {
-    return {
-      name: selector.name,
-      options: Array.from(new Set(tableData.value.map(item => item[selector.name]))).map(value => ({ value, label: value }))
-    };
-  });
-});
-
-// 生成过滤选择器数据的函数
-const filteredSelectorData = index => {
-  return selectorData.value[index].options.filter(item => {
-    return selectedData.value.every((value, i) => {
-      if (i === index) return true;
-      return tableData.value.some(row => row[selectors[i].name] === value && row[selectorData.value[index].name] === item.value);
-    });
-  });
-};
-
-// 处理选择器改变事件
-const handleChange = index => {
-  // 更新路由参数中的选择器数据
-  const newSelectedData = selectedData.value.slice();
-  newSelectedData[index] = event.target.value;
-  const query = { ...route.query, selectedData: newSelectedData.join(',') };
-  router.push({ query });
-
-  // 记录用户的操作顺序
-  operationSequence.value.push(index);
-
-  // 检查当前选择器选择的数据是否为空
-  if (filteredSelectorData(index).length === 0) {
-    // 后续选择器前进一位并更新选择器的数据配置
-    for (let i = index + 1; i < selectors.length; i++) {
-      const nextSelector = selectors[i];
-      const filteredOptions = Array.from(new Set(tableData.value.map(item => item[nextSelector.name]))).map(value => ({ value, label: value }));
-      selectorData.value[i].options = filteredOptions;
-      // 更新选择器的值
-      selectedData.value[i] = filteredOptions.length > 0 ? filteredOptions[0].value : '';
-    }
+```js
+tooltip: {
+  trigger: 'axis',
+  position: function (point, params, dom, rect, size) {
+    // 自定义 Tooltip 的位置
+    var top = point[1] - size.contentSize[1] - 10; // 向上偏移 10px
+    var left = point[0] - size.contentSize[0] / 2; // 水平居中
+    return [left, top];
   }
-};
-
-// 监听路由变化，在路由变化时更新选择数据
-router.afterEach(() => {
-  selectedData.value = route.query.selectedData ? route.query.selectedData.split(',') : [];
-});
-
-</script>
-
-<style>
-/* 样式代码 */
-</style>
+}
 
 ```
 
