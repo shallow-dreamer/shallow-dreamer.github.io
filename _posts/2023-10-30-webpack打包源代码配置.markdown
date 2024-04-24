@@ -216,3 +216,73 @@ tooltip: {
 
 ```
 
+```js
+option = {
+  tooltip: {
+    trigger: 'axis',
+    formatter: function (params) {
+      var tooltipContent = '';
+      params.forEach(function (item) {
+        var dataIndex = item.dataIndex; // 数据索引
+        var seriesIndex = item.seriesIndex; // 系列索引
+        var value = item.value; // 数据值
+        var yAxisIndex = option.series[seriesIndex].data[dataIndex][2] || 0; // Y 轴索引
+        // 根据 Y 轴索引添加不同的后缀
+        var suffix = ''; // 后缀
+        if (yAxisIndex === 0) {
+          suffix = '单位1'; // 第一个 Y 轴的后缀
+        } else if (yAxisIndex === 1) {
+          suffix = '单位2'; // 第二个 Y 轴的后缀
+        }
+        // 拼接 Tooltip 内容，添加后缀
+        tooltipContent += item.marker + ' ' + item.seriesName + ': ' + value + suffix + '<br>';
+      });
+      return tooltipContent;
+    }
+  },
+  xAxis: {
+    type: 'value' // X 轴是数值型的
+  },
+  yAxis: [
+    {
+      type: 'value'
+    },
+    {
+      type: 'value'
+    }
+  ],
+  series: [
+    {
+      name: '系列1',
+      type: 'line',
+      // series.data 中包含 X 轴和 Y 轴的数据以及 Y 轴索引
+      data: [
+        [1, 10, 0], // 第一个数据项，X 轴为 1，Y 轴为 10，Y 轴索引为 0
+        [2, 20, 0], // 第二个数据项，X 轴为 2，Y 轴为 20，Y 轴索引为 0
+        [3, 30, 1], // 第三个数据项，X 轴为 3，Y 轴为 30，Y 轴索引为 1
+        [4, 40, 1], // 第四个数据项，X 轴为 4，Y 轴为 40，Y 轴索引为 1
+        [5, 50, 0],  // 第五个数据项，X 轴为 5，Y 轴为 50，Y 轴索引为 0
+        // 更多数据项...
+      ],
+      yAxisIndex: 0
+    },
+    {
+      name: '系列2',
+      type: 'line',
+      // series.data 中包含 X 轴和 Y 轴的数据以及 Y 轴索引
+      data: [
+        [1, 20, 0], // 第一个数据项，X 轴为 1，Y 轴为 20，Y 轴索引为 0
+        [2, 30, 1], // 第二个数据项，X 轴为 2，Y 轴为 30，Y 轴索引为 1
+        [3, 40, 0], // 第三个数据项，X 轴为 3，Y 轴为 40，Y 轴索引为 0
+        [4, 50, 1], // 第四个数据项，X 轴为 4，Y 轴为 50，Y 轴索引为 1
+        [5, 60, 0],  // 第五个数据项，X 轴为 5，Y 轴为 60，Y 轴索引为 0
+        // 更多数据项...
+      ],
+      yAxisIndex: 1
+    }
+    // 更多系列...
+  ]
+};
+
+```
+
