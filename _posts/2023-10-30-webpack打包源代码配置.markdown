@@ -286,3 +286,87 @@ option = {
 
 ```
 
+如果你需要在请求图片时携带认证 token，并且又要利用浏览器缓存，可以结合前面的方法，在自定义组件中使用浏览器缓存，并在请求图片时添加认证 token。以下是更新后的代码：
+
+### 步骤 1: 更新自定义组件以利用浏览器缓存和携带 token
+
+```vue
+<template>
+  <el-image :src="imageUrl" />
+</template>
+
+<script>
+import { ref } from 'vue';
+import axios from 'axios';
+
+export default {
+  name: 'ImageWithCacheAndAuth',
+  props: {
+    src: {
+      type: String,
+      required: true
+    }
+  },
+  setup(props) {
+    const imageUrl = ref('');
+
+    const loadImage = async () => {
+      try {
+        const response = await axios.get(props.src, {
+          responseType: 'blob',
+          headers: {
+            Authorization: `Bearer ${yourToken}`
+          }
+        });
+        const blobUrl = URL.createObjectURL(response.data);
+        imageUrl.value = blobUrl;
+      } catch (error) {
+        console.error('Failed to load image', error);
+      }
+    };
+
+    // 在组件挂载时，加载图片
+    loadImage();
+
+    return {
+      imageUrl
+    };
+  }
+};
+</script>
+```
+
+### 步骤 2: 使用自定义组件
+
+```vue
+<template>
+  <div>
+    <image-with-cache-and-auth src="https://your-image-url.com/image.jpg" />
+  </div>
+</template>
+
+<script>
+import ImageWithCacheAndAuth from './components/ImageWithCacheAndAuth.vue';
+
+export default {
+  components: {
+    ImageWithCacheAndAuth
+  }
+};
+</script>
+```
+
+这样做的好处是，浏览器可以根据图片 URL 进行缓存，而在每次请求图片时，都会携带认证 token。即使图片 URL 不变，但如果图片内容发生变化，服务器依然可以根据 token 返回新的图片内容。
+
+如果你有多个父组件都包含了保活的子组件，并且这些父组件都传递了相同的图片 URL 给子组件，那么在这种情况下，由于浏览器缓存的存在，图片可能会在多个父组件中共享，从而导致图片展示的问题。
+
+因为浏览器会根据图片 URL 进行缓存，而不是根据页面的组件结构。所以，如果你在多个父组件中使用了相同的图片 URL，那么这些组件在展示图片时都会使用同一个缓存的图片数据。这可能会导致以下问题：
+
+1. **图片显示不一致：** 如果一个父组件更新了图片，那么其他父组件中的相同图片也会更新，因为它们共享同一个缓存。
+2. **性能问题：** 如果多个父组件都有大量的保活子组件，并且这些子组件都加载了大量的图片，那么可能会导致浏览器的缓存空间被占满，进而影响页面的性能。
+
+为了解决这个问题，你可以考虑以下方案：
+
+1. **使用不同的图片 URL：** 如果可能的话，尽量确保每个父组件都使用不同的图片 URL，这样可以避免图片共享的问题。
+2. **动态生成图片 URL：** 如果图片 URL 是根据某些条件动态生成的，可以尝试根据不同的条件生成不同的 URL，以确保每个父组件使用不同的图片 URL。
+3. **禁用浏览器缓存：** 如果你不希望浏览器缓存影响图片展示，可以考虑在图片 URL 中添加随机参数或者禁用浏览器缓存头，这样可以确保每次请求都会获取最新的图片数据。
