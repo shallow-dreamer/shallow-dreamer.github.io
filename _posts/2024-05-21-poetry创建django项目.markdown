@@ -465,3 +465,160 @@ django_celery_results 新增3张表
 链接：https://juejin.cn/post/7208071684590714917
 来源：稀土掘金
 著作权归作者所有。商业转载请联系作者获得授权，非商业转载请注明出处。
+
+
+
+
+
+好的，以下是一个完整的示例代码，包括 Django 项目的配置和应用代码：
+
+1. **创建 Django 项目并配置 Poetry**：
+
+首先，确保你已经安装了 Poetry，并在命令行中执行以下步骤：
+
+```bash
+# 创建一个新的 Django 项目目录
+mkdir my_django_project
+cd my_django_project
+
+# 使用 Poetry 创建虚拟环境
+poetry init -n
+
+# 安装 Django
+poetry add django
+
+# 创建 Django 项目
+poetry run django-admin startproject my_project .
+```
+
+2. **安装并配置 Django REST framework 和 PostgreSQL**：
+
+继续在命令行中执行以下步骤：
+
+```bash
+# 安装 Django REST framework 和 PostgreSQL 连接库
+poetry add djangorestframework psycopg2-binary
+
+# 在 settings.py 中配置 'rest_framework' 和数据库连接
+```
+
+在 `my_project/settings.py` 文件中进行配置：
+
+```python
+# my_project/settings.py
+
+# 添加 'rest_framework' 到 INSTALLED_APPS
+INSTALLED_APPS = [
+    ...
+    'rest_framework',
+]
+
+# 配置 PostgreSQL 数据库连接
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'my_database',  # 数据库名称
+        'USER': 'my_user',      # 数据库用户名
+        'PASSWORD': 'my_password',  # 数据库密码
+        'HOST': 'localhost',    # 数据库主机地址
+        'PORT': '5432',         # 数据库端口
+    }
+}
+```
+
+3. **创建 Django 应用**：
+
+继续在命令行中执行以下步骤：
+
+```bash
+# 创建一个新的 Django 应用
+poetry run python manage.py startapp my_app
+```
+
+4. **编写 Django 应用中的视图和模型**：
+
+在 `my_app` 目录下的 `views.py` 中编写视图和 `models.py` 中编写模型。
+
+```python
+# my_app/views.py
+from rest_framework import generics
+from .models import MyModel
+from .serializers import MyModelSerializer
+
+class MyModelListView(generics.ListCreateAPIView):
+    queryset = MyModel.objects.all()
+    serializer_class = MyModelSerializer
+
+class MyModelDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = MyModel.objects.all()
+    serializer_class = MyModelSerializer
+```
+
+```python
+# my_app/models.py
+from django.db import models
+
+class MyModel(models.Model):
+    name = models.CharField(max_length=100)
+    description = models.TextField()
+
+    def __str__(self):
+        return self.name
+```
+
+5. **编写序列化器**：
+
+在 `my_app` 目录下创建 `serializers.py` 文件，并编写序列化器。
+
+```python
+# my_app/serializers.py
+from rest_framework import serializers
+from .models import MyModel
+
+class MyModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MyModel
+        fields = '__all__'
+```
+
+6. **配置 URL 路由**：
+
+在 `my_project` 目录下的 `urls.py` 中配置 URL 路由。
+
+```python
+# my_project/urls.py
+from django.urls import path, include
+
+urlpatterns = [
+    path('api/', include('my_app.urls')),
+]
+```
+
+在 `my_app` 目录下创建 `urls.py` 文件，并配置应用的 URL 路由。
+
+```python
+# my_app/urls.py
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('mymodel/', views.MyModelListView.as_view(), name='mymodel-list'),
+    path('mymodel/<int:pk>/', views.MyModelDetailView.as_view(), name='mymodel-detail'),
+]
+```
+
+7. **迁移数据库**：
+
+```bash
+# 创建数据库表
+poetry run python manage.py migrate
+```
+
+8. **运行开发服务器**：
+
+```bash
+poetry run python manage.py runserver
+```
+
+现在你已经拥有一个使用 Poetry 管理依赖的 Django 后端项目，其中包含了 Django REST framework 和 PostgreSQL 支持，可以根据需要继续添加自己的应用和功能。
+
