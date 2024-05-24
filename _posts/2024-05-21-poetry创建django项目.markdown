@@ -622,3 +622,234 @@ poetry run python manage.py runserver
 
 现在你已经拥有一个使用 Poetry 管理依赖的 Django 后端项目，其中包含了 Django REST framework 和 PostgreSQL 支持，可以根据需要继续添加自己的应用和功能。
 
+如果你可以直接访问接口并获取信息，但访问 API 文档时遇到 403 错误，问题可能出在 API 文档的权限配置或相关设置上。下面是一些排查和解决这个问题的方法：
+
+### 1. 确认 API 文档 URL 配置
+
+首先，确保你的 `urls.py` 文件中正确配置了 API 文档的 URL。下面是一个例子，使用 `include_docs_urls` 来生成 API 文档：
+
+```python
+# my_project/urls.py
+
+from django.contrib import admin
+from django.urls import path, include
+from rest_framework.documentation import include_docs_urls
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/', include('my_app.urls')),
+    path('api/docs/', include_docs_urls(title='API 文档')),
+]
+```
+
+### 2. 检查 REST framework 的设置
+
+确保在 `settings.py` 中的 `REST_FRAMEWORK` 配置中没有设置过于严格的权限限制。默认情况下，API 文档应该是可以被所有用户访问的：
+
+```python
+# my_project/settings.py
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.BasicAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny',
+    ],
+}
+```
+
+### 3. 确认 CSRF 设置
+
+如果你使用了 Session 认证或其他可能涉及 CSRF 保护的认证方式，确保你的 CSRF 设置不会阻止访问 API 文档。你可以尝试暂时禁用 CSRF 检查以进行排查：
+
+```python
+# my_project/settings.py
+
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    # 'django.middleware.csrf.CsrfViewMiddleware',  # 暂时注释掉
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',  # 确保它在正确的位置
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+```
+
+### 4. 检查 Django 和 REST framework 版本兼容性
+
+确保你使用的 Django 和 Django REST framework 版本是兼容的。有时版本不兼容可能会导致一些意外问题。你可以通过 `pip show django djangorestframework` 查看安装的版本，并参阅各自的文档确认兼容性。
+
+### 5. 尝试使用 Swagger 或 Redoc
+
+如果 `include_docs_urls` 仍然无法正常工作，你可以尝试使用 `drf-yasg` 生成 Swagger 文档或 `drf-spectacular` 生成 OpenAPI 文档：
+
+**安装 drf-yasg:**
+
+```bash
+poetry add drf-yasg
+```
+
+**配置 drf-yasg:**
+
+```python
+# my_project/urls.py
+
+from django.contrib import admin
+from django.urls import path, include
+from rest_framework import permissions
+from drf_yasg.views import get_schema_view
+from drf_yasg import openapi
+
+schema_view = get_schema_view(
+    openapi.Info(
+        title="API 文档",
+        default_version='v1',
+    ),
+    public=True,
+    permission_classes=(permissions.AllowAny,),
+)
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/', include('my_app.urls')),
+    path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+    path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc-ui'),
+]
+```
+
+### 6. 检查服务器和浏览器设置
+
+如果你在本地开发环境中没有问题，但在生产环境中遇到问题，检查你的服务器和浏览器设置，例如：
+
+- 确认服务器没有设置限制访问特定路径或 IP 的规则。
+- 确认浏览器没有缓存旧的 CSRF token 或其他认证信息，尝试清除浏览器缓存或使用隐身模式访问。
+
+通过上述步骤，你应该能够找出并解决访问 API 文档时遇到的 403 错误问题。如果问题仍然存在，请提供更多的错误日志或详细信息，以便进一步排查。
+
+如果你使用了 `drf-yasg` 来生成 Swagger 文档，并且在访问时遇到了 403 错误，可以考虑以下几种可能的解决方法：
+
+1. **确认权限设置**：
+   确保你在 `settings.py` 中配置了适当的权限设置，以确保所有用户都能够访问 Swagger 文档。在 `drf-yasg` 中，默认情况下，Swagger 文档是可以被所有用户访问的。
+
+```python
+# my_project/settings.py
+
+INSTALLED_APPS = [
+    ...
+    'drf_yasg',
+]
+
+# Swagger settings
+SWAGGER_SETTINGS = {
+    'DEFAULT_INFO': 'my_project.urls.swagger_info',
+    'SECURITY_DEFINITIONS': {
+        'Bearer': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header',
+        }
+    },
+}
+```
+
+2. **检查 URL 配置**：
+   确保你的 `urls.py` 文件中正确配置了 Swagger 文档的 URL 地址，并且没有设置任何权限限制。
+
+```python
+# my_project/urls.py
+
+from django.contrib import admin
+from django.urls import path, include
+from rest_framework import permissions
+from drf_yasg.views import get_schema_view
+
+schema_view = get_schema_view(
+    openapi.Info(
+        title="API 文档",
+        default_version='v1',
+    ),
+    public=True,
+    permission_classes=(permissions.AllowAny,),  # 确保这里使用了 AllowAny 权限
+)
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/', include('my_app.urls')),
+    path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+]
+```
+
+3. **排查认证和权限设置**：
+   如果你的 API 需要认证才能访问，确保你的请求包含了正确的认证信息，例如 Token 或用户名密码。你可以尝试使用无认证的方式访问 Swagger 文档，看是否仍然遇到 403 错误。
+
+4. **检查其它中间件和安全设置**：
+   确保你的项目中没有设置了过于严格的中间件或安全设置，以致于阻止了对 Swagger 文档的访问。你可以尝试暂时禁用一些中间件或安全设置来排查问题。
+
+通过以上步骤，你应该能够解决访问 Swagger 文档时遇到的 403 错误问题。如果问题仍然存在，请提供更多的详细信息以便进一步排查。
+
+要设置 API 的访问权限，并将其连接到单点登录（SSO）系统，可以使用 Django REST Framework（DRF）提供的权限类和认证类，并将其与 SSO 提供的认证机制集成。
+
+以下是一般的步骤：
+
+### 1. 配置认证类和权限类
+
+首先，在 Django 的 `settings.py` 文件中配置 DRF 的认证类和权限类。
+
+```python
+# settings.py
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.BasicAuthentication',
+        'yourapp.authentication.SSOAuthentication',  # 自定义的SSO认证类
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',  # 仅允许已认证用户访问
+    ],
+}
+```
+
+在这里，你需要创建一个自定义的 SSO 认证类，以实现与你的单点登录系统的集成。你可以继承 DRF 的 `BaseAuthentication` 类并实现 `authenticate` 方法来实现自定义认证逻辑。
+
+### 2. 实现单点登录认证逻辑
+
+在你的应用程序中创建一个自定义的认证类，并实现单点登录的认证逻辑。
+
+```python
+# yourapp/authentication.py
+
+from rest_framework.authentication import BaseAuthentication
+from rest_framework.exceptions import AuthenticationFailed
+
+class SSOAuthentication(BaseAuthentication):
+    def authenticate(self, request):
+        # 在这里实现单点登录的认证逻辑
+        # 检查请求中是否包含了单点登录的身份认证信息
+        # 如果认证成功，返回用户和认证信息元组 (user, auth)，
+        # 如果认证失败，抛出 AuthenticationFailed 异常
+        # 示例代码：
+        # if sso_login_successful(request):
+        #     return (user, auth)
+        # else:
+        #     raise AuthenticationFailed('SSO authentication failed.')
+        pass
+```
+
+### 3. 集成单点登录系统
+
+根据你所使用的单点登录系统，使用相应的库或工具来集成单点登录系统，并实现 `SSOAuthentication` 类中的认证逻辑。
+
+通常，你需要获取从单点登录系统返回的身份认证信息（例如 token），并使用该信息来验证用户身份。你可能需要与单点登录系统的 API 进行通信来验证 token 的有效性，并获取与用户相关的信息。
+
+### 4. 测试认证和权限设置
+
+确保在实现认证和权限设置后进行测试，以确保 API 正确地与单点登录系统集成，并且只允许经过认证的用户访问受保护的资源。
+
+你可以使用 Postman 或类似的工具来发送请求，并验证 API 的行为是否符合预期。
+
+通过以上步骤，你应该能够将 API 链接到单点登录系统，并设置适当的认证和权限，以确保 API 的安全性和可访问性。
