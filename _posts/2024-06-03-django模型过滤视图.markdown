@@ -1,0 +1,194 @@
+---
+layout:     post
+title:      "django模型过滤视图"
+subtitle:   ""
+date:       2024-06-03
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - django
+---
+
+当然，以下是每一行代码的详细解释，帮助你理解如何实现多表联合查询并进行过滤。
+
+### 1. 定义模型
+
+在 `your_app/models.py` 中定义 `Author` 和 `Book` 模型：
+
+```python
+# your_app/models.py
+
+from django.db import models
+
+# 定义Author模型
+class Author(models.Model):
+    # 定义作者姓名字段，最大长度为100
+    name = models.CharField(max_length=100)
+    # 定义作者出生日期字段
+    birth_date = models.DateField()
+
+    # 定义字符串表示形式，返回作者姓名
+    def __str__(self):
+        return self.name
+
+# 定义Book模型
+class Book(models.Model):
+    # 定义书名字段，最大长度为200
+    title = models.CharField(max_length=200)
+    # 定义外键字段，关联到Author模型，删除Author时删除关联的Book
+    author = models.ForeignKey(Author, related_name='books', on_delete=models.CASCADE)
+    # 定义书籍出版日期字段
+    published_date = models.DateField()
+
+    # 定义字符串表示形式，返回书名
+    def __str__(self):
+        return self.title
+```
+
+### 2. 创建序列化器
+
+在 `your_app/serializers.py` 中创建两个模型的序列化器：
+
+```python
+# your_app/serializers.py
+
+from rest_framework import serializers
+from .models import Author, Book
+
+# 定义Author模型的序列化器
+class AuthorSerializer(serializers.ModelSerializer):
+    class Meta:
+        # 指定序列化器对应的模型是Author
+        model = Author
+        # 指定需要序列化的字段
+        fields = ['id', 'name', 'birth_date']
+
+# 定义Book模型的序列化器
+class BookSerializer(serializers.ModelSerializer):
+    # 嵌套Author序列化器，用于序列化Author字段
+    author = AuthorSerializer()
+
+    class Meta:
+        # 指定序列化器对应的模型是Book
+        model = Book
+        # 指定需要序列化的字段
+        fields = ['id', 'title', 'author', 'published_date']
+```
+
+### 3. 创建过滤类
+
+在 `your_app/filters.py` 中创建过滤类：
+
+```python
+# your_app/filters.py
+
+import django_filters
+from .models import Book
+
+# 定义Book模型的过滤类
+class BookFilter(django_filters.FilterSet):
+    # 定义过滤器，按书名模糊查询
+    title = django_filters.CharFilter(lookup_expr='icontains')
+    # 定义过滤器，按作者姓名模糊查询
+    author_name = django_filters.CharFilter(field_name='author__name', lookup_expr='icontains')
+    # 定义过滤器，按出版日期精确查询
+    published_date = django_filters.DateFilter()
+
+    class Meta:
+        # 指定过滤器对应的模型是Book
+        model = Book
+        # 指定可以被过滤的字段
+        fields = ['title', 'author_name', 'published_date']
+```
+
+### 4. 创建视图
+
+在 `your_app/views.py` 中创建视图，并添加过滤功能：
+
+```python
+# your_app/views.py
+
+from rest_framework import viewsets
+from django_filters.rest_framework import DjangoFilterBackend
+from .models import Book
+from .serializers import BookSerializer
+from .filters import BookFilter
+
+# 定义Book模型的视图集
+class BookViewSet(viewsets.ModelViewSet):
+    # 指定视图集使用的查询集
+    queryset = Book.objects.all()
+    # 指定视图集使用的序列化器
+    serializer_class = BookSerializer
+    # 指定视图集使用的过滤后端
+    filter_backends = [DjangoFilterBackend]
+    # 指定视图集使用的过滤类
+    filterset_class = BookFilter
+```
+
+### 5. 配置 URL
+
+在 `your_app/urls.py` 中配置路由：
+
+```python
+# your_app/urls.py
+
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import BookViewSet
+
+# 创建一个默认的路由对象
+router = DefaultRouter()
+# 注册Book视图集，路由前缀为'books'
+router.register(r'books', BookViewSet, basename='book')
+
+# 定义URL模式
+urlpatterns = [
+    # 包含路由对象生成的所有URL模式
+    path('', include(router.urls)),
+]
+```
+
+在项目的 `urls.py` 中包含应用的 URL：
+
+```python
+# your_project/urls.py
+
+from django.contrib import admin
+from django.urls import path, include
+
+# 定义项目级别的URL模式
+urlpatterns = [
+    # 管理后台的URL模式
+    path('admin/', admin.site.urls),
+    # 包含应用的URL模式，前缀为'api/'
+    path('api/', include('your_app.urls')),
+]
+```
+
+### 6. 运行项目
+
+启动开发服务器：
+
+```bash
+python manage.py runserver
+```
+
+### 总结
+
+访问 `http://127.0.0.1:8000/api/books/`，并使用以下参数进行过滤，例如：
+
+- `http://127.0.0.1:8000/api/books/?title=some_title`：按书名模糊查询
+- `http://127.0.0.1:8000/api/books/?author_name=some_author`：按作者姓名模糊查询
+- `http://127.0.0.1:8000/api/books/?published_date=2023-01-01`：按出版日期精确查询
+
+### 示例
+
+假设数据库中有以下数据：
+
+- Author: J.K. Rowling, Birth Date: 1965-07-31
+- Book: Harry Potter and the Philosopher's Stone, Author: J.K. Rowling, Published Date: 1997-06-26
+
+你可以通过访问 `http://127.0.0.1:8000/api/books/?author_name=rowling` 来获取作者名中包含 "rowling" 的所有书籍。返回的结果将包含 "Harry Potter and the Philosopher's Stone" 这本书。
+
+通过这个示例，你可以了解如何在视图中实现多表联合查询并进行过滤。希望这对你有所帮助！如果你有任何问题或需要进一步的解释，请随时告诉我。
