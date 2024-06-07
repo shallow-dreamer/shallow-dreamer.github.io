@@ -789,3 +789,533 @@ python manage.py runserver
 | published_date | regex           | ^\d{4}-\d{2}-\d{2}$ |
 
 通过这个示例，你可以了解如何从 XLSX 文件中获取数据，并使用存储在 `BookColumn` 表中的校验规则对这些数据进行校验。如果你有任何问题或需要进一步的解释，请随时告诉我。
+
+------
+
+如果不需要自动解析，而是需要在序列化器中进行解析和校验，可以在序列化器的 `validate` 方法中实现。这样可以对数据进行校验，然后将解析后的数据存储到 JSON 字段中。以下是如何实现这一需求的完整示例代码：
+
+### 1. 修改模型
+
+首先，确保模型中包含一个 JSON 字段来存储解析后的数据：
+
+```python
+# your_app/models.py
+
+from django.db import models
+from django.contrib.postgres.fields import JSONField  # 使用 PostgreSQL 的 JSONField
+
+class YourModel(models.Model):
+    file_name = models.CharField(max_length=255)
+    file_metadata = JSONField(blank=True, null=True)  # JSON 字段
+
+    def __str__(self):
+        return self.file_name
+```
+
+### 2. 创建序列化器
+
+在序列化器中进行解析和校验，并将解析后的数据存储在 `file_metadata` 字段中：
+
+```python
+# your_app/serializers.py
+
+import re
+from rest_framework import serializers
+from .models import YourModel
+
+class YourModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = YourModel
+        fields = ['id', 'file_name', 'file_metadata']
+
+    def validate_file_name(self, value):
+        pattern = r'\[(.*?)\]-(.*)\.s4p'
+        match = re.match(pattern, value)
+        if not match:
+            raise serializers.ValidationError("Invalid file name format.")
+        
+        details = match.group(1).split('_')
+        type_ = details[0]
+        metadata = {"type": type_}
+
+        if type_ == 'thru':
+            metadata["channel"] = details[1]
+        elif type_ == 'fext':
+            metadata["victim_pair"] = details[1]
+            metadata["attacker_pair"] = details[3]
+        else:
+            metadata["details"] = details[1:]
+
+        # 将解析后的数据存储到 file_metadata 中
+        self.context['file_metadata'] = metadata
+
+        return value
+
+    def create(self, validated_data):
+        file_metadata = self.context.get('file_metadata')
+        instance = YourModel.objects.create(
+            file_name=validated_data['file_name'],
+            file_metadata=file_metadata
+        )
+        return instance
+
+    def update(self, instance, validated_data):
+        instance.file_name = validated_data.get('file_name', instance.file_name)
+        instance.file_metadata = self.context.get('file_metadata', instance.file_metadata)
+        instance.save()
+        return instance
+```
+
+### 3. 创建视图
+
+使用 Django REST Framework 的视图来处理 API 请求：
+
+```python
+# your_app/views.py
+
+from rest_framework import viewsets
+from .models import YourModel
+from .serializers import YourModelSerializer
+
+class YourModelViewSet(viewsets.ModelViewSet):
+    queryset = YourModel.objects.all()
+    serializer_class = YourModelSerializer
+```
+
+### 4. 配置 URL
+
+将视图添加到 URL 配置中：
+
+```python
+# your_app/urls.py
+
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import YourModelViewSet
+
+router = DefaultRouter()
+router.register(r'yourmodel', YourModelViewSet)
+
+urlpatterns = [
+    path('', include(router.urls)),
+]
+```
+
+### 5. 启动项目
+
+启动开发服务器：
+
+```bash
+python manage.py runserver
+```
+
+### 使用说明
+
+现在，当你通过 API 创建或更新 `YourModel` 实例时，文件名将通过序列化器进行解析和校验，解析出来的数据将被存储在 `file_metadata` JSON 字段中。
+
+### 示例请求和响应
+
+假设你有一个 `YourModel` 实例，其 `file_name` 字段为 `[thru_rx1]-xxx.s4p`。通过 API 创建或更新这个实例时，你会看到：
+
+```json
+{
+    "id": 1,
+    "file_name": "[thru_rx1]-xxx.s4p",
+    "file_metadata": {
+        "type": "thru",
+        "channel": "rx1"
+    }
+}
+```
+
+如果 `file_name` 是 `[fext_V_V1_A_A1]-xxx.s4p`，你会看到：
+
+```json
+{
+    "id": 2,
+    "file_name": "[fext_V_V1_A_A1]-xxx.s4p",
+    "file_metadata": {
+        "type": "fext",
+        "victim_pair": "V1",
+        "attacker_pair": "A1"
+    }
+}
+```
+
+通过这种方式，你可以在序列化器中对数据进行解析和校验，并灵活地存储解析后的数据。如果有新的格式，只需更新序列化器中的解析逻辑即可。
+
+------
+
+要在序列化器中为每个字段动态添加自定义校验类，你可以在序列化器的 `validate` 方法中根据配置或其他动态数据添加校验逻辑。以下是如何实现这一需求的完整示例代码：
+
+### 1. 修改模型
+
+首先，确保模型中包含所需的字段：
+
+```python
+# your_app/models.py
+
+from django.db import models
+from django.contrib.postgres.fields import JSONField  # 使用 PostgreSQL 的 JSONField
+
+class YourModel(models.Model):
+    file_name = models.CharField(max_length=255)
+    file_metadata = JSONField(blank=True, null=True)  # JSON 字段
+
+    def __str__(self):
+        return self.file_name
+```
+
+### 2. 创建动态校验类
+
+创建一个校验类，用于根据字段名称和规则进行校验：
+
+```python
+# your_app/validators.py
+
+import re
+from rest_framework import serializers
+
+class DynamicFieldValidator:
+    def __init__(self, field_name, validation_rules):
+        self.field_name = field_name
+        self.validation_rules = validation_rules
+
+    def __call__(self, value):
+        for rule in self.validation_rules:
+            if rule['type'] == 'regex':
+                if not re.match(rule['pattern'], value):
+                    raise serializers.ValidationError(f"{self.field_name} does not match pattern {rule['pattern']}")
+            # 可以添加更多规则类型
+            # elif rule['type'] == 'min_length':
+            #     if len(value) < rule['value']:
+            #         raise serializers.ValidationError(f"{self.field_name} length is less than {rule['value']}")
+```
+
+### 3. 修改序列化器
+
+在序列化器中应用动态校验逻辑：
+
+```python
+# your_app/serializers.py
+
+import re
+from rest_framework import serializers
+from .models import YourModel
+from .validators import DynamicFieldValidator
+
+class YourModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = YourModel
+        fields = ['id', 'file_name', 'file_metadata']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dynamic_validators = {
+            'file_name': [DynamicFieldValidator('file_name', [{'type': 'regex', 'pattern': r'\[.*?\]-.*\.s4p'}])]
+        }
+        # 可以根据需要添加更多字段和其校验规则
+
+    def validate(self, data):
+        # 逐字段应用动态校验
+        for field, validators in self.dynamic_validators.items():
+            value = data.get(field)
+            if value is not None:
+                for validator in validators:
+                    validator(value)
+
+        # 自定义解析逻辑
+        pattern = r'\[(.*?)\]-(.*)\.s4p'
+        match = re.match(pattern, data['file_name'])
+        if match:
+            details = match.group(1).split('_')
+            type_ = details[0]
+            metadata = {"type": type_}
+            if type_ == 'thru':
+                metadata["channel"] = details[1]
+            elif type_ == 'fext':
+                metadata["victim_pair"] = details[1]
+                metadata["attacker_pair"] = details[3]
+            else:
+                metadata["details"] = details[1:]
+            data['file_metadata'] = metadata
+        else:
+            data['file_metadata'] = None
+        
+        return data
+
+    def create(self, validated_data):
+        instance = YourModel.objects.create(
+            file_name=validated_data['file_name'],
+            file_metadata=validated_data['file_metadata']
+        )
+        return instance
+
+    def update(self, instance, validated_data):
+        instance.file_name = validated_data.get('file_name', instance.file_name)
+        instance.file_metadata = validated_data.get('file_metadata', instance.file_metadata)
+        instance.save()
+        return instance
+```
+
+### 4. 创建视图
+
+使用 Django REST Framework 的视图来处理 API 请求：
+
+```python
+# your_app/views.py
+
+from rest_framework import viewsets
+from .models import YourModel
+from .serializers import YourModelSerializer
+
+class YourModelViewSet(viewsets.ModelViewSet):
+    queryset = YourModel.objects.all()
+    serializer_class = YourModelSerializer
+```
+
+### 5. 配置 URL
+
+将视图添加到 URL 配置中：
+
+```python
+# your_app/urls.py
+
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import YourModelViewSet
+
+router = DefaultRouter()
+router.register(r'yourmodel', YourModelViewSet)
+
+urlpatterns = [
+    path('', include(router.urls)),
+]
+```
+
+### 6. 启动项目
+
+启动开发服务器：
+
+```bash
+python manage.py runserver
+```
+
+### 使用说明
+
+现在，当你通过 API 创建或更新 `YourModel` 实例时，文件名将通过序列化器进行解析和校验，解析出来的数据将被存储在 `file_metadata` JSON 字段中，并且动态校验逻辑将被应用。
+
+### 示例请求和响应
+
+假设你有一个 `YourModel` 实例，其 `file_name` 字段为 `[thru_rx1]-xxx.s4p`。通过 API 创建或更新这个实例时，你会看到：
+
+```json
+{
+    "id": 1,
+    "file_name": "[thru_rx1]-xxx.s4p",
+    "file_metadata": {
+        "type": "thru",
+        "channel": "rx1"
+    }
+}
+```
+
+通过这种方式，你可以在序列化器中对数据进行解析和校验，并灵活地存储解析后的数据。如果有新的格式或新的校验规则，只需更新 `DynamicFieldValidator` 或在序列化器中添加新的校验逻辑即可。
+
+------
+
+好的，假设你有一个自定义的校验类来校验数据，并且你需要先解析文件名，然后根据校验表对数据进行校验。在这个示例中，我们会：
+
+1. 解析文件名
+2. 根据校验表对需要校验的数据进行校验
+3. 其他正常字段也需要进行校验
+
+我们将一步一步地构建代码。
+
+### 1. 定义模型
+
+首先定义两个模型：`YourModel` 用于存储主要数据，`ValidationRule` 用于存储校验规则。
+
+```python
+# your_app/models.py
+
+from django.db import models
+from django.contrib.postgres.fields import JSONField
+
+class YourModel(models.Model):
+    file_name = models.CharField(max_length=255)  # 文件名字段
+    file_metadata = JSONField(blank=True, null=True)  # JSON 字段，用于存储文件元数据
+
+    def __str__(self):
+        return self.file_name  # 返回文件名作为字符串表示
+
+class ValidationRule(models.Model):
+    field_name = models.CharField(max_length=255)  # 需要校验的字段名称
+    rule_type = models.CharField(max_length=255)  # 校验规则类型，例如 'regex' 或 'min_length'
+    rule_value = models.CharField(max_length=255)  # 校验规则的具体值，例如正则表达式或最小长度
+
+    def __str__(self):
+        return f"{self.field_name} - {self.rule_type}: {self.rule_value}"  # 返回校验规则的字符串表示
+```
+
+### 2. 创建校验类
+
+自定义校验类，用于校验数据并返回错误信息：
+
+```python
+# your_app/validators.py
+
+import re
+from rest_framework import serializers
+
+class DynamicFieldValidator:
+    def __init__(self, field_name, rule_type, rule_value):
+        self.field_name = field_name  # 字段名称
+        self.rule_type = rule_type  # 校验规则类型
+        self.rule_value = rule_value  # 校验规则的具体值
+
+    def __call__(self, value):
+        if self.rule_type == 'regex':
+            if not re.match(self.rule_value, value):
+                raise serializers.ValidationError(f"{self.field_name} does not match pattern {self.rule_value}")
+        elif self.rule_type == 'min_length':
+            if len(value) < int(self.rule_value):
+                raise serializers.ValidationError(f"{self.field_name} length is less than {self.rule_value}")
+        # 可以添加更多规则类型
+```
+
+### 3. 解析文件名
+
+解析文件名的函数：
+
+```python
+# your_app/utils.py
+
+import re
+
+def parse_file_name(file_name):
+    match = re.match(r'\[(.*?)\]-(.*?)\.s4p', file_name)
+    if match:
+        parsed_data = match.groups()
+        return {
+            "type": parsed_data[0],
+            "channel": parsed_data[1]
+        }
+    return {}
+```
+
+### 4. 修改序列化器
+
+在序列化器中应用解析文件名和动态校验逻辑：
+
+```python
+# your_app/serializers.py
+
+from rest_framework import serializers
+from .models import YourModel, ValidationRule
+from .validators import DynamicFieldValidator
+from .utils import parse_file_name
+
+class YourModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = YourModel  # 绑定的模型
+        fields = ['id', 'file_name', 'file_metadata']  # 序列化器的字段
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)  # 调用父类的初始化方法
+        self.dynamic_validators = {}  # 动态校验器字典
+        # 从数据库中读取校验规则
+        validation_rules = ValidationRule.objects.all()
+        for rule in validation_rules:
+            if rule.field_name not in self.dynamic_validators:
+                self.dynamic_validators[rule.field_name] = []
+            self.dynamic_validators[rule.field_name].append(DynamicFieldValidator(rule.field_name, rule.rule_type, rule.rule_value))
+
+    def validate(self, data):
+        # 解析文件名
+        parsed_data = parse_file_name(data['file_name'])
+        data.update(parsed_data)
+        
+        # 逐字段应用动态校验
+        for field, validators in self.dynamic_validators.items():
+            value = data.get(field)
+            if value is not None:
+                for validator in validators:
+                    validator(value)
+
+        # 调用自定义校验方法
+        self.custom_validate(data)
+        return data
+
+    def custom_validate(self, data):
+        # 对于需要自定义校验的字段进行校验
+        # 比如：
+        if 'type' in data and not data['type'].startswith('thru'):
+            raise serializers.ValidationError({'type': 'Invalid type value'})
+        # 添加更多自定义校验
+
+    def create(self, validated_data):
+        instance = YourModel.objects.create(
+            file_name=validated_data['file_name'],
+            file_metadata=validated_data.get('file_metadata', {})
+        )
+        return instance
+
+    def update(self, instance, validated_data):
+        instance.file_name = validated_data.get('file_name', instance.file_name)
+        instance.file_metadata = validated_data.get('file_metadata', instance.file_metadata)
+        instance.save()
+        return instance
+```
+
+### 5. 创建视图
+
+使用 Django REST Framework 的视图来处理 API 请求：
+
+```python
+# your_app/views.py
+
+from rest_framework import viewsets
+from .models import YourModel
+from .serializers import YourModelSerializer
+
+class YourModelViewSet(viewsets.ModelViewSet):
+    queryset = YourModel.objects.all()  # 查询所有 YourModel 实例
+    serializer_class = YourModelSerializer  # 使用 YourModelSerializer 序列化器
+```
+
+### 6. 配置 URL
+
+将视图添加到 URL 配置中：
+
+```python
+# your_app/urls.py
+
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import YourModelViewSet
+
+router = DefaultRouter()
+router.register(r'yourmodel', YourModelViewSet)  # 注册 YourModelViewSet 视图集
+
+urlpatterns = [
+    path('', include(router.urls)),  # 包含默认路由
+]
+```
+
+### 7. 启动项目
+
+启动开发服务器：
+
+```bash
+python manage.py runserver
+```
+
+### 示例说明
+
+1. 当你通过 API 创建或更新 `YourModel` 实例时，序列化器会先解析文件名。
+2. 解析结果会与原始数据合并，进行动态校验。
+3. 根据校验表中的规则和自定义校验类进行校验。
+4. 如果校验失败，API 会返回相应的错误信息。
+
+通过这种方式，您可以灵活地管理校验规则，并根据需要进行扩展。如果需要添加新的校验规则，只需向 `ValidationRule` 表中添加相应的记录即可。
