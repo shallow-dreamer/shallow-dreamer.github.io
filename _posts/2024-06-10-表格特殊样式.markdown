@@ -1,0 +1,186 @@
+---
+layout:     post
+title:      "elementplus表格特殊样式"
+subtitle:   ""
+date:       2024-06-10
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - elementplus
+    - vue3
+---
+
+当然可以。我们可以将数据格式简化为更扁平化的形式，同时仍然保留每个单元格的背景色和悬浮信息。下面是简化后的数据格式及对应的Vue 3和Element Plus表格示例代码。
+
+### 简化后的数据格式
+```javascript
+const tableData = [
+  {
+    name: 'John Doe',
+    nameBgColor: 'lightgreen',
+    nameTooltip: 'Name: John Doe',
+    age: 25,
+    ageBgColor: 'lightblue',
+    ageTooltip: 'Age: 25',
+    status: 'active',
+    statusBgColor: 'lightgreen',
+    statusTooltip: 'Status: Active'
+  },
+  {
+    name: 'Jane Smith',
+    nameBgColor: 'lightcoral',
+    nameTooltip: 'Name: Jane Smith',
+    age: 30,
+    ageBgColor: 'lightyellow',
+    ageTooltip: 'Age: 30',
+    status: 'inactive',
+    statusBgColor: 'lightcoral',
+    statusTooltip: 'Status: Inactive'
+  },
+  {
+    name: 'Sam Johnson',
+    nameBgColor: 'lightyellow',
+    nameTooltip: 'Name: Sam Johnson',
+    age: 22,
+    ageBgColor: 'lightblue',
+    ageTooltip: 'Age: 22',
+    status: 'pending',
+    statusBgColor: 'lightyellow',
+    statusTooltip: 'Status: Pending'
+  }
+];
+```
+
+### Vue 3 和 Element Plus 表格示例代码
+
+1. 创建一个Vue组件（例如：`MyTable.vue`）：
+
+```vue
+<template>
+  <el-table :data="tableData" style="width: 100%">
+    <el-table-column prop="name" label="Name">
+      <template v-slot="{ row }">
+        <div
+          :style="{ backgroundColor: row.nameBgColor }"
+          @mouseover="handleMouseOver(row.nameTooltip)"
+          @mouseleave="handleMouseLeave"
+        >
+          {{ row.name }}
+          <el-tooltip v-if="hoveredTooltip === row.nameTooltip" content="Additional Info" placement="top">
+            <span>{{ row.nameTooltip }}</span>
+          </el-tooltip>
+        </div>
+      </template>
+    </el-table-column>
+    <el-table-column prop="age" label="Age">
+      <template v-slot="{ row }">
+        <div
+          :style="{ backgroundColor: row.ageBgColor }"
+          @mouseover="handleMouseOver(row.ageTooltip)"
+          @mouseleave="handleMouseLeave"
+        >
+          {{ row.age }}
+          <el-tooltip v-if="hoveredTooltip === row.ageTooltip" content="Additional Info" placement="top">
+            <span>{{ row.ageTooltip }}</span>
+          </el-tooltip>
+        </div>
+      </template>
+    </el-table-column>
+    <el-table-column prop="status" label="Status">
+      <template v-slot="{ row }">
+        <div
+          :style="{ backgroundColor: row.statusBgColor }"
+          @mouseover="handleMouseOver(row.statusTooltip)"
+          @mouseleave="handleMouseLeave"
+        >
+          {{ row.status }}
+          <el-tooltip v-if="hoveredTooltip === row.statusTooltip" content="Additional Info" placement="top">
+            <span>{{ row.statusTooltip }}</span>
+          </el-tooltip>
+        </div>
+      </template>
+    </el-table-column>
+  </el-table>
+</template>
+
+<script>
+import { ref } from 'vue';
+import { ElTable, ElTableColumn, ElTooltip } from 'element-plus';
+
+export default {
+  components: {
+    ElTable,
+    ElTableColumn,
+    ElTooltip,
+  },
+  setup() {
+    const tableData = ref([
+      {
+        name: 'John Doe',
+        nameBgColor: 'lightgreen',
+        nameTooltip: 'Name: John Doe',
+        age: 25,
+        ageBgColor: 'lightblue',
+        ageTooltip: 'Age: 25',
+        status: 'active',
+        statusBgColor: 'lightgreen',
+        statusTooltip: 'Status: Active'
+      },
+      {
+        name: 'Jane Smith',
+        nameBgColor: 'lightcoral',
+        nameTooltip: 'Name: Jane Smith',
+        age: 30,
+        ageBgColor: 'lightyellow',
+        ageTooltip: 'Age: 30',
+        status: 'inactive',
+        statusBgColor: 'lightcoral',
+        statusTooltip: 'Status: Inactive'
+      },
+      {
+        name: 'Sam Johnson',
+        nameBgColor: 'lightyellow',
+        nameTooltip: 'Name: Sam Johnson',
+        age: 22,
+        ageBgColor: 'lightblue',
+        ageTooltip: 'Age: 22',
+        status: 'pending',
+        statusBgColor: 'lightyellow',
+        statusTooltip: 'Status: Pending'
+      }
+    ]);
+
+    const hoveredTooltip = ref('');
+
+    const handleMouseOver = (tooltip) => {
+      hoveredTooltip.value = tooltip;
+    };
+
+    const handleMouseLeave = () => {
+      hoveredTooltip.value = '';
+    };
+
+    return {
+      tableData,
+      hoveredTooltip,
+      handleMouseOver,
+      handleMouseLeave,
+    };
+  },
+};
+</script>
+
+<style scoped>
+.el-tooltip {
+  display: inline-block;
+}
+</style>
+```
+
+### 解释
+
+1. **数据绑定**：使用 `tableData` 来绑定表格的数据。每个单元格的数据包括显示的值、背景颜色和悬浮信息。
+2. **自定义单元格渲染**：使用 `v-slot` 插槽来定制每个单元格的渲染，动态设置背景颜色和悬浮内容。
+3. **鼠标悬浮效果**：使用 `@mouseover` 和 `@mouseleave` 事件来处理鼠标悬浮效果，并使用 `el-tooltip` 显示额外的信息。通过 `handleMouseOver` 和 `handleMouseLeave` 方法管理当前悬浮的提示内容。
+
+这种方法实现了简化数据格式并根据不同的内容设置单元格背景颜色和悬浮信息的效果。
