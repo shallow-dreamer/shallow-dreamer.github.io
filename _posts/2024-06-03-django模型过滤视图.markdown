@@ -1521,3 +1521,305 @@ python manage.py runserver
 5. 只有在所有校验通过后，数据才会被写入数据库。
 
 这样，你可以确保数据在通过所有校验后才会被写入数据库，并在校验失败时返回详细的错误信息。
+
+------
+
+好的，我们可以将数据校验和数据保存分成两个视图分别处理。以下是实现完整代码的步骤：
+
+### 1. 模型定义
+
+```python
+# your_app/models.py
+
+from django.db import models
+from django.contrib.postgres.fields import JSONField
+import uuid
+
+class YourModel(models.Model):
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    file_name = models.CharField(max_length=255)
+    file_metadata = JSONField(blank=True, null=True)
+    is_deleted = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.file_name
+
+class FieldInfo(models.Model):
+    field_name = models.CharField(max_length=255)
+    is_unique_together = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.field_name} - {'Unique Together' if self.is_unique_together else 'Not Unique Together'}"
+```
+
+### 2. 自定义校验类
+
+```python
+# your_app/validators.py
+
+import re
+from rest_framework import serializers
+
+class DynamicFieldValidator:
+    def __init__(self, field_name, rule_type, rule_value):
+        self.field_name = field_name
+        self.rule_type = rule_type
+        self.rule_value = rule_value
+
+    def __call__(self, value):
+        if self.rule_type == 'regex':
+            if not re.match(self.rule_value, value):
+                raise serializers.ValidationError(f"{self.field_name} does not match pattern {self.rule_value}")
+        elif self.rule_type == 'min_length':
+            if len(value) < int(self.rule_value):
+                raise serializers.ValidationError(f"{self.field_name} length is less than {self.rule_value}")
+        # 可以添加更多规则类型
+```
+
+### 3. 解析文件名的函数
+
+```python
+# your_app/utils.py
+
+import re
+
+def parse_file_name(file_name):
+    match = re.match(r'\[(.*?)\]-(.*?)\.s4p', file_name)
+    if match:
+        parsed_data = match.groups()
+        return {
+            "type": parsed_data[0],
+            "channel": parsed_data[1]
+        }
+    return {}
+```
+
+### 4. 序列化器
+
+```python
+# your_app/serializers.py
+
+from rest_framework import serializers
+from .models import YourModel, FieldInfo
+from .validators import DynamicFieldValidator
+from .utils import parse_file_name
+import uuid
+
+class YourModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = YourModel
+        fields = ['id', 'uuid', 'file_name', 'file_metadata', 'is_deleted']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dynamic_validators = {}
+        validation_rules = FieldInfo.objects.all()
+        for rule in validation_rules:
+            if rule.field_name not in self.dynamic_validators:
+                self.dynamic_validators[rule.field_name] = []
+            self.dynamic_validators[rule.field_name].append(DynamicFieldValidator(rule.field_name, 'regex', r'.*'))  # 示例：默认使用regex规则，实际情况中应从数据库读取
+
+        # 动态生成unique_together字段
+        self.unique_together_fields = []
+        field_infos = FieldInfo.objects.filter(is_unique_together=True)
+        for field_info in field_infos:
+            self.unique_together_fields.append(field_info.field_name)
+
+    def validate(self, data):
+        # 解析文件名
+        parsed_data = parse_file_name(data['file_name'])
+        data.update(parsed_data)
+
+        errors = {}
+
+        # 逐字段应用动态校验
+        for field, validators in self.dynamic_validators.items():
+            value = data.get(field)
+            if value is not None:
+                for validator in validators:
+                    try:
+                        validator(value)
+                    except serializers.ValidationError as e:
+                        errors[field] = str(e)
+
+        # 检查动态unique_together约束
+        unique_filter = {field: data[field] for field in self.unique_together_fields}
+        if YourModel.objects.filter(**unique_filter, is_deleted=False).exists():
+            existing_instance = YourModel.objects.get(**unique_filter, is_deleted=False)
+            data['uuid'] = existing_instance.uuid
+            data['is_deleted'] = False
+        else:
+            data['uuid'] = uuid.uuid4()
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return data
+```
+
+### 5. 视图定义
+
+分开校验和保存的视图：
+
+```python
+# your_app/views.py
+
+from rest_framework import viewsets, status
+from rest_framework.response import Response
+from rest_framework.decorators import api_view
+from .models import YourModel
+from .serializers import YourModelSerializer
+
+@api_view(['POST'])
+def validate_data(request):
+    serializer = YourModelSerializer(data=request.data)
+    if serializer.is_valid():
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+def save_data(request):
+    serializer = YourModelSerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+```
+
+### 6. 配置 URL
+
+将视图添加到 URL 配置中：
+
+```python
+# your_app/urls.py
+
+from django.urls import path
+from .views import validate_data, save_data
+
+urlpatterns = [
+    path('yourmodel/validate/', validate_data, name='validate_data'),
+    path('yourmodel/save/', save_data, name='save_data'),
+]
+```
+
+### 7. 启动项目
+
+启动开发服务器：
+
+```bash
+python manage.py runserver
+```
+
+### 8. 测试流程
+
+通过以下步骤可以测试整个流程：
+
+#### 第一步：校验数据
+
+向 API 发送带有文件名和其他字段的 POST 请求进行数据校验。
+
+#### 请求
+
+```http
+POST /yourmodel/validate/
+Content-Type: application/json
+
+{
+    "file_name": "[thru_rx1]-example.s4p",
+    "file_metadata": {"key": "value"}
+}
+```
+
+#### 响应（校验通过）
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+    "id": null,
+    "uuid": "generated_or_existing_uuid",
+    "file_name": "[thru_rx1]-example.s4p",
+    "file_metadata": {"key": "value"},
+    "is_deleted": false,
+    "type": "thru",
+    "channel": "rx1"
+}
+```
+
+#### 响应（校验失败）
+
+```http
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+    "type": "Invalid type value",
+    "field_name": "error message"
+}
+```
+
+#### 第二步：保存数据
+
+用户检查数据无误后，将数据再次发送给后端进行保存。
+
+#### 请求
+
+```http
+POST /yourmodel/save/
+Content-Type: application/json
+
+{
+    "file_name": "[thru_rx1]-example.s4p",
+    "file_metadata": {"key": "value"},
+    "uuid": "generated_or_existing_uuid",
+    "is_deleted": false
+}
+```
+
+#### 响应（保存成功）
+
+```http
+HTTP/1.1 201 Created
+Content-Type: application/json
+
+{
+    "id": 1,
+    "uuid": "generated_or_existing_uuid",
+    "file_name": "[thru_rx1]-example.s4p",
+    "file_metadata": {"key": "value"},
+    "is_deleted": false,
+    "type": "thru",
+    "channel": "rx1"
+}
+```
+
+### 代码解释
+
+#### 模型
+
+- `YourModel`: 代表文件的数据模型，包括 UUID、文件名、文件元数据和删除标记。
+- `FieldInfo`: 存储字段信息，用于动态生成校验和唯一性约束。
+
+#### 校验类
+
+- `DynamicFieldValidator`: 自定义校验类，用于动态校验字段。
+
+#### 工具函数
+
+- `parse_file_name`: 解析文件名，提取类型和通道信息。
+
+#### 序列化器
+
+- `YourModelSerializer`: 序列化器用于验证和序列化 `YourModel` 数据，包括动态生成校验规则和唯一性约束。
+
+#### 视图
+
+- `validate_data`: 用于校验数据的视图函数，返回校验结果。
+- `save_data`: 用于保存数据的视图函数，在校验成功后将数据保存到数据库。
+
+#### URL 配置
+
+- 配置校验和保存数据的 URL。
+
+通过这种方式，数据在校验通过后会返回给前端，由用户检查后再提交进行保存，确保数据的完整性和正确性。
