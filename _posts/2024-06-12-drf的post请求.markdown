@@ -1,0 +1,165 @@
+---
+layout:     post
+title:      "drf的post请求"
+subtitle:   ""
+date:       2024-06-12
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - drf
+---
+
+如果你需要在视图中自定义 queryset，并在该 queryset 上应用过滤器，你可以轻松地在视图中实现这一点。以下是如何在视图中自定义 queryset 并应用过滤器的示例：
+
+```python
+from rest_framework import generics, status
+from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend
+from myapp.models import MyModel
+from myapp.filters import MyModelFilter
+from myapp.serializers import MyModelSerializer
+
+class MyModelListCreateView(generics.ListCreateAPIView):
+    serializer_class = MyModelSerializer
+    filter_backends = (DjangoFilterBackend,)
+    filterset_class = MyModelFilter
+
+    def get_queryset(self):
+        # 自定义 queryset 逻辑
+        # 这里只是一个示例，你可以根据你的需求进行修改
+        queryset = MyModel.objects.filter(some_field='some_value')
+        return queryset
+
+    def post(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        filterset = MyModelFilter(data=request.data, queryset=queryset)
+        if filterset.is_valid():
+            queryset = filterset.qs
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            return Response(filterset.errors, status=status.HTTP_400_BAD_REQUEST)
+```
+
+在这个示例中，`MyModelListCreateView` 继承自 `generics.ListCreateAPIView`，并覆盖了 `get_queryset` 方法以提供自定义的 queryset。然后，在 `post` 方法中，使用自定义的 queryset，并在其中应用过滤器。
+
+你可以根据你的需求自由地在 `get_queryset` 方法中编写你自己的逻辑，例如使用模型的所有对象，根据 URL 参数动态选择 queryset 等等。然后，你可以在 `post` 方法中使用这个 queryset，并在其中应用过滤器，以获得最终的过滤结果。
+
+------
+
+以下是一个完整的代码示例，包括视图、过滤器、序列化器和模型，所有部分都带有注释，以帮助你理解每个部分的作用。
+
+### 1. 模型 (`models.py`)
+
+```python
+from django.db import models
+
+class MyModel(models.Model):
+    my_field = models.IntegerField()
+    some_field = models.CharField(max_length=100)
+```
+
+### 2. 序列化器 (`serializers.py`)
+
+```python
+from rest_framework import serializers
+from myapp.models import MyModel
+
+class MyModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MyModel
+        fields = '__all__'
+```
+
+### 3. 过滤器 (`filters.py`)
+
+```python
+from django_filters import rest_framework as filters
+from myapp.models import MyModel
+
+class MyModelFilter(filters.FilterSet):
+    my_field = filters.BaseInFilter(field_name='my_field', lookup_expr='in')
+
+    class Meta:
+        model = MyModel
+        fields = ['my_field']
+```
+
+### 4. 视图 (`views.py`)
+
+```python
+from rest_framework import generics, status
+from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend
+from myapp.models import MyModel
+from myapp.filters import MyModelFilter
+from myapp.serializers import MyModelSerializer
+
+class MyModelListCreateView(generics.ListCreateAPIView):
+    serializer_class = MyModelSerializer
+    filter_backends = (DjangoFilterBackend,)
+    filterset_class = MyModelFilter
+
+    def get_queryset(self):
+        # 自定义 queryset 逻辑
+        # 这里只是一个示例，你可以根据你的需求进行修改
+        queryset = MyModel.objects.filter(some_field='some_value')
+        return queryset
+
+    def post(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        filterset = MyModelFilter(data=request.data, queryset=queryset)
+        if filterset.is_valid():
+            queryset = filterset.qs
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            return Response(filterset.errors, status=status.HTTP_400_BAD_REQUEST)
+```
+
+### 5. 配置 URL (`urls.py`)
+
+```python
+from django.urls import path
+from myapp.views import MyModelListCreateView
+
+urlpatterns = [
+    path('mymodels/', MyModelListCreateView.as_view(), name='mymodel-list-create'),
+]
+```
+
+### 详细注释说明
+
+1. **模型 (`models.py`):**
+   - `MyModel` 类定义了一个简单的模型，包含两个字段：`my_field` 和 `some_field`。
+
+2. **序列化器 (`serializers.py`):**
+   - `MyModelSerializer` 类用于将模型实例序列化为 JSON 格式，或将 JSON 数据反序列化为模型实例。
+   - `Meta` 类指定了对应的模型和包含的字段。
+
+3. **过滤器 (`filters.py`):**
+   - `MyModelFilter` 类定义了一个过滤器，使用 `BaseInFilter` 来过滤 `my_field` 字段。
+   - `Meta` 类指定了对应的模型和可过滤的字段。
+
+4. **视图 (`views.py`):**
+   - `MyModelListCreateView` 继承自 `generics.ListCreateAPIView`，提供了列表和创建的视图。
+   - `get_queryset` 方法返回一个自定义的 queryset，这里仅仅是示例，实际情况中可以根据需求调整。
+   - `post` 方法处理 POST 请求，从请求数据中提取过滤条件，并应用到自定义的 queryset 上，然后返回过滤后的结果。
+
+5. **URL 配置 (`urls.py`):**
+   - `urlpatterns` 列表包含一个 URL 路由，它将 URL `/mymodels/` 映射到 `MyModelListCreateView` 视图。
+
+### 使用方法
+
+现在，你可以发送一个 POST 请求到 `/mymodels/` 进行过滤。请求主体应该包含需要过滤的字段和值，例如：
+
+```
+POST /mymodels/
+Content-Type: application/json
+
+{
+    "my_field": [1, 2, 3]
+}
+```
+
+这段代码展示了如何在 Django Rest Framework 中通过 POST 请求实现过滤，并且可以自定义 queryset 来满足特定的业务需求。
