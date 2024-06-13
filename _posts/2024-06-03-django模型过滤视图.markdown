@@ -1823,3 +1823,989 @@ Content-Type: application/json
 - 配置校验和保存数据的 URL。
 
 通过这种方式，数据在校验通过后会返回给前端，由用户检查后再提交进行保存，确保数据的完整性和正确性。
+
+------
+
+了解您的需求后，下面的代码将会对您的问题进行实现。具体内容包括：
+
+1. 批量更新和添加数据。
+2. 更新数据时，新增一条数据，并将旧数据标记为删除。
+3. 删除数据时，新添加的数据也标记为删除。
+4. 动态地根据不同模型的 `unique_together` 进行数据标记。
+
+### 1. 模型定义
+
+```python
+# your_app/models.py
+
+from django.db import models
+from django.contrib.postgres.fields import JSONField
+import uuid
+
+class YourModel(models.Model):
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    file_name = models.CharField(max_length=255)
+    file_metadata = JSONField(blank=True, null=True)
+    is_deleted = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.file_name
+
+class FieldInfo(models.Model):
+    field_name = models.CharField(max_length=255)
+    is_unique_together = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.field_name} - {'Unique Together' if self.is_unique_together else 'Not Unique Together'}"
+```
+
+### 2. 自定义校验类
+
+```python
+# your_app/validators.py
+
+import re
+from rest_framework import serializers
+
+class DynamicFieldValidator:
+    def __init__(self, field_name, rule_type, rule_value):
+        self.field_name = field_name
+        self.rule_type = rule_type
+        self.rule_value = rule_value
+
+    def __call__(self, value):
+        if self.rule_type == 'regex':
+            if not re.match(self.rule_value, value):
+                raise serializers.ValidationError(f"{self.field_name} does not match pattern {self.rule_value}")
+        elif self.rule_type == 'min_length':
+            if len(value) < int(self.rule_value):
+                raise serializers.ValidationError(f"{self.field_name} length is less than {self.rule_value}")
+        # 可以添加更多规则类型
+```
+
+### 3. 解析文件名的函数
+
+```python
+# your_app/utils.py
+
+import re
+
+def parse_file_name(file_name):
+    match = re.match(r'\[(.*?)\]-(.*?)\.s4p', file_name)
+    if match:
+        parsed_data = match.groups()
+        return {
+            "type": parsed_data[0],
+            "channel": parsed_data[1]
+        }
+    return {}
+```
+
+### 4. 序列化器
+
+```python
+# your_app/serializers.py
+
+from rest_framework import serializers
+from .models import YourModel, FieldInfo
+from .validators import DynamicFieldValidator
+from .utils import parse_file_name
+import uuid
+
+class YourModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = YourModel
+        fields = ['id', 'uuid', 'file_name', 'file_metadata', 'is_deleted']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dynamic_validators = {}
+        validation_rules = FieldInfo.objects.all()
+        for rule in validation_rules:
+            if rule.field_name not in self.dynamic_validators:
+                self.dynamic_validators[rule.field_name] = []
+            self.dynamic_validators[rule.field_name].append(DynamicFieldValidator(rule.field_name, 'regex', r'.*'))  # 示例：默认使用regex规则，实际情况中应从数据库读取
+
+        # 动态生成unique_together字段
+        self.unique_together_fields = []
+        field_infos = FieldInfo.objects.filter(is_unique_together=True)
+        for field_info in field_infos:
+            self.unique_together_fields.append(field_info.field_name)
+
+    def validate(self, data):
+        # 解析文件名
+        parsed_data = parse_file_name(data['file_name'])
+        data.update(parsed_data)
+
+        errors = {}
+
+        # 逐字段应用动态校验
+        for field, validators in self.dynamic_validators.items():
+            value = data.get(field)
+            if value is not None:
+                for validator in validators:
+                    try:
+                        validator(value)
+                    except serializers.ValidationError as e:
+                        errors[field] = str(e)
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return data
+
+    def create(self, validated_data):
+        unique_filter = {field: validated_data[field] for field in self.unique_together_fields}
+        if YourModel.objects.filter(**unique_filter, is_deleted=False).exists():
+            existing_instance = YourModel.objects.get(**unique_filter, is_deleted=False)
+            existing_instance.is_deleted = True
+            existing_instance.save()
+            validated_data['uuid'] = existing_instance.uuid
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        unique_filter = {field: validated_data[field] for field in self.unique_together_fields}
+        if YourModel.objects.filter(**unique_filter, is_deleted=False).exists():
+            existing_instance = YourModel.objects.get(**unique_filter, is_deleted=False)
+            existing_instance.is_deleted = True
+            existing_instance.save()
+        return super().create(validated_data)
+```
+
+### 5. 视图定义
+
+```python
+# your_app/views.py
+
+from rest_framework import viewsets, status
+from rest_framework.response import Response
+from rest_framework.decorators import api_view
+from .models import YourModel
+from .serializers import YourModelSerializer
+
+@api_view(['POST'])
+def validate_data(request):
+    serializer = YourModelSerializer(data=request.data, many=True)
+    if serializer.is_valid():
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+def save_data(request):
+    serializer = YourModelSerializer(data=request.data, many=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+```
+
+### 6. 配置 URL
+
+```python
+# your_app/urls.py
+
+from django.urls import path
+from .views import validate_data, save_data
+
+urlpatterns = [
+    path('yourmodel/validate/', validate_data, name='validate_data'),
+    path('yourmodel/save/', save_data, name='save_data'),
+]
+```
+
+### 代码解释
+
+#### 模型
+
+- `YourModel`: 代表文件的数据模型，包括 UUID、文件名、文件元数据和删除标记。
+- `FieldInfo`: 存储字段信息，用于动态生成校验和唯一性约束。
+
+#### 校验类
+
+- `DynamicFieldValidator`: 自定义校验类，用于动态校验字段。
+
+#### 工具函数
+
+- `parse_file_name`: 解析文件名，提取类型和通道信息。
+
+#### 序列化器
+
+- `YourModelSerializer`: 序列化器用于验证和序列化 `YourModel` 数据，包括动态生成校验规则和唯一性约束。根据 `unique_together` 规则，在 `create` 和 `update` 方法中对数据进行标记和更新。
+
+#### 视图
+
+- `validate_data`: 用于校验数据的视图函数，返回校验结果。
+- `save_data`: 用于批量保存数据的视图函数，在校验成功后将数据保存到数据库，并根据 `unique_together` 规则进行数据更新和标记。
+
+#### URL 配置
+
+- 配置校验和保存数据的 URL。
+
+通过这种方式，数据在校验通过后会返回给前端，由用户检查后再提交进行保存，确保数据的完整性和正确性。批量处理数据时，符合 `unique_together` 规则的数据会被标记和更新。
+
+------
+
+要实现批量更新和添加，同时确保删除和更新操作符合业务需求，并动态地根据不同模型的 unique_together 字段来判断数据是否是同一条数据，可以进行以下修改：
+
+### 模型定义
+
+我们保留之前的模型定义，确保 `FieldInfo` 表中有每个字段的信息。
+
+### 自定义校验类和工具函数
+
+保留之前的 `DynamicFieldValidator` 和 `parse_file_name` 工具函数。
+
+### 序列化器
+
+我们在序列化器中添加对批量数据的处理逻辑。
+
+```python
+# your_app/serializers.py
+
+from rest_framework import serializers
+from .models import YourModel, FieldInfo
+from .validators import DynamicFieldValidator
+from .utils import parse_file_name
+import uuid
+
+class YourModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = YourModel
+        fields = ['id', 'uuid', 'file_name', 'file_metadata', 'is_deleted']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dynamic_validators = {}
+        validation_rules = FieldInfo.objects.all()
+        for rule in validation_rules:
+            if rule.field_name not in self.dynamic_validators:
+                self.dynamic_validators[rule.field_name] = []
+            self.dynamic_validators[rule.field_name].append(DynamicFieldValidator(rule.field_name, 'regex', r'.*'))
+
+        self.unique_together_fields = []
+        field_infos = FieldInfo.objects.filter(is_unique_together=True)
+        for field_info in field_infos:
+            self.unique_together_fields.append(field_info.field_name)
+
+    def validate(self, data):
+        parsed_data = parse_file_name(data['file_name'])
+        data.update(parsed_data)
+
+        errors = {}
+        for field, validators in self.dynamic_validators.items():
+            value = data.get(field)
+            if value is not None:
+                for validator in validators:
+                    try:
+                        validator(value)
+                    except serializers.ValidationError as e:
+                        errors[field] = str(e)
+
+        unique_filter = {field: data[field] for field in self.unique_together_fields}
+        existing_instance = YourModel.objects.filter(**unique_filter, is_deleted=False).first()
+        if existing_instance:
+            data['uuid'] = existing_instance.uuid
+            data['is_deleted'] = False
+        else:
+            data['uuid'] = uuid.uuid4()
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return data
+
+    def create(self, validated_data):
+        unique_filter = {field: validated_data[field] for field in self.unique_together_fields}
+        YourModel.objects.filter(**unique_filter).update(is_deleted=True)
+        return YourModel.objects.create(**validated_data)
+
+class BulkYourModelSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        instances = []
+        for data in validated_data:
+            serializer = YourModelSerializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            instances.append(serializer.save())
+        return instances
+```
+
+### 视图定义
+
+我们添加批量处理逻辑的视图函数。
+
+```python
+# your_app/views.py
+
+from rest_framework import status
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import YourModel
+from .serializers import YourModelSerializer, BulkYourModelSerializer
+
+@api_view(['POST'])
+def validate_data(request):
+    serializer = YourModelSerializer(data=request.data, many=True)
+    if serializer.is_valid():
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+def save_data(request):
+    serializer = BulkYourModelSerializer(data=request.data, many=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+```
+
+### 配置 URL
+
+更新 URL 配置以支持批量操作。
+
+```python
+# your_app/urls.py
+
+from django.urls import path
+from .views import validate_data, save_data
+
+urlpatterns = [
+    path('yourmodel/validate/', validate_data, name='validate_data'),
+    path('yourmodel/save/', save_data, name='save_data'),
+]
+```
+
+### 代码解释
+
+1. **模型定义**:
+   - 保持之前的模型定义。
+   - `FieldInfo` 表继续存储字段信息和 unique_together 标志。
+
+2. **校验类和工具函数**:
+   - `DynamicFieldValidator`: 保持之前的自定义校验类，用于动态校验字段。
+   - `parse_file_name`: 保持之前的文件名解析函数。
+
+3. **序列化器**:
+   - `YourModelSerializer`: 用于验证和序列化 `YourModel` 数据，包含动态校验规则和唯一性约束。
+   - `BulkYourModelSerializer`: 用于批量处理的序列化器，调用 `YourModelSerializer` 来处理每个数据项，并确保校验和保存逻辑。
+
+4. **视图定义**:
+   - `validate_data`: 校验数据的视图函数，支持批量校验。
+   - `save_data`: 保存数据的视图函数，支持批量保存。在保存前，检查 unique_together 字段，标记已有数据为删除并保存新的数据。
+
+5. **URL 配置**:
+   - 配置批量校验和保存数据的 URL。
+
+通过这种方式，前端可以批量发送数据进行校验，校验通过后再进行批量保存。保存时，根据 unique_together 字段标记已有数据为删除并保存新的数据，实现批量更新和添加的功能。
+
+------
+
+是的，如果数据中包含了多余的不属于字段的数据，我们可以在保存之前对这些数据进行过滤，只保留模型定义中的字段，然后再进行保存。我们可以通过动态过滤数据的方法来实现这一点。
+
+以下是具体实现方法：
+
+### 模型定义
+
+模型保持不变。
+
+### 自定义校验类和工具函数
+
+保持不变。
+
+### 序列化器
+
+在序列化器中动态过滤掉不属于模型字段的数据。
+
+```python
+# your_app/serializers.py
+
+from rest_framework import serializers
+from .models import YourModel, FieldInfo
+from .validators import DynamicFieldValidator
+from .utils import parse_file_name
+import uuid
+
+class YourModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = YourModel
+        fields = ['id', 'uuid', 'file_name', 'file_metadata', 'is_deleted']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dynamic_validators = {}
+        validation_rules = FieldInfo.objects.all()
+        for rule in validation_rules:
+            if rule.field_name not in self.dynamic_validators:
+                self.dynamic_validators[rule.field_name] = []
+            self.dynamic_validators[rule.field_name].append(DynamicFieldValidator(rule.field_name, 'regex', r'.*'))
+
+        self.unique_together_fields = []
+        field_infos = FieldInfo.objects.filter(is_unique_together=True)
+        for field_info in field_infos:
+            self.unique_together_fields.append(field_info.field_name)
+
+    def validate(self, data):
+        parsed_data = parse_file_name(data['file_name'])
+        data.update(parsed_data)
+
+        errors = {}
+        for field, validators in self.dynamic_validators.items():
+            value = data.get(field)
+            if value is not None:
+                for validator in validators:
+                    try:
+                        validator(value)
+                    except serializers.ValidationError as e:
+                        errors[field] = str(e)
+
+        unique_filter = {field: data[field] for field in self.unique_together_fields}
+        if YourModel.objects.filter(**unique_filter, is_deleted=False).exists():
+            existing_instance = YourModel.objects.get(**unique_filter, is_deleted=False)
+            data['uuid'] = existing_instance.uuid
+            data['is_deleted'] = False
+        else:
+            data['uuid'] = uuid.uuid4()
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return data
+
+    def create(self, validated_data):
+        unique_filter = {field: validated_data[field] for field in self.unique_together_fields}
+        YourModel.objects.filter(**unique_filter).update(is_deleted=True)
+        return YourModel.objects.create(**validated_data)
+
+class BulkYourModelSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        instances = []
+        for data in validated_data:
+            serializer = YourModelSerializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            instances.append(serializer.save())
+        return instances
+```
+
+### 视图定义
+
+在视图中对数据进行过滤，只保留模型字段，然后进行保存。
+
+```python
+# your_app/views.py
+
+from rest_framework import status
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import YourModel
+from .serializers import YourModelSerializer, BulkYourModelSerializer
+
+@api_view(['POST'])
+def validate_data(request):
+    serializer = YourModelSerializer(data=request.data, many=True)
+    if serializer.is_valid():
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+def save_data(request):
+    data_list = request.data
+    valid_data_list = []
+
+    for data in data_list:
+        file_metadata = {key: value for key, value in data.items() if key not in ['file_name', 'is_deleted']}
+        data['file_metadata'] = file_metadata
+        data = {key: value for key, value in data.items() if key in ['file_name', 'is_deleted', 'file_metadata']}
+        parsed_data = parse_file_name(data['file_name'])
+        data.update(parsed_data)
+        valid_data_list.append(data)
+    
+    serializer = BulkYourModelSerializer(data=valid_data_list, many=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+```
+
+### 配置 URL
+
+配置批量校验和保存数据的 URL。
+
+```python
+# your_app/urls.py
+
+from django.urls import path
+from .views import validate_data, save_data
+
+urlpatterns = [
+    path('yourmodel/validate/', validate_data, name='validate_data'),
+    path('yourmodel/save/', save_data, name='save_data'),
+]
+```
+
+### 代码解释
+
+1. **模型定义**:
+   - 保持之前的模型定义。
+
+2. **校验类和工具函数**:
+   - 保持之前的自定义校验类和文件名解析函数。
+
+3. **序列化器**:
+   - `YourModelSerializer`: 用于验证和序列化 `YourModel` 数据，包含动态校验规则和唯一性约束。
+   - `BulkYourModelSerializer`: 用于批量处理的序列化器，调用 `YourModelSerializer` 来处理每个数据项，并确保校验和保存逻辑。
+
+4. **视图定义**:
+   - `validate_data`: 校验数据的视图函数，支持批量校验。
+   - `save_data`: 保存数据的视图函数，支持批量保存。在保存前，过滤掉多余的数据，只保留模型字段，并将特定字段数据移入 JSON 字段，并根据文件名解析出额外字段。
+
+5. **URL 配置**:
+   - 配置批量校验和保存数据的 URL。
+
+通过这种方式，在校验数据时可以忽略多余的字段，而在保存时，我们会动态过滤掉这些多余的字段，只保留模型定义的字段并进行保存。同时将特定字段数据移入 JSON 字段，并根据文件名解析出额外字段，从而确保数据的一致性和完整性。
+
+------
+
+好的，我们可以将校验和保存分开处理。在校验过程中，数据以普通字段的形式传递进行校验；在保存时，将特定字段的数据移入 JSON 字段，并根据文件名解析出额外的字段。以下是具体实现步骤。
+
+### 1. 模型定义
+
+模型保持不变。
+
+```python
+# your_app/models.py
+
+from django.db import models
+from django.contrib.postgres.fields import JSONField
+import uuid
+
+class YourModel(models.Model):
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    file_name = models.CharField(max_length=255)
+    file_metadata = JSONField(blank=True, null=True)
+    is_deleted = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.file_name
+
+class FieldInfo(models.Model):
+    field_name = models.CharField(max_length=255)
+    is_unique_together = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.field_name} - {'Unique Together' if self.is_unique_together else 'Not Unique Together'}"
+```
+
+### 2. 自定义校验类和工具函数
+
+```python
+# your_app/validators.py
+
+import re
+from rest_framework import serializers
+
+class DynamicFieldValidator:
+    def __init__(self, field_name, rule_type, rule_value):
+        self.field_name = field_name
+        self.rule_type = rule_type
+        self.rule_value = rule_value
+
+    def __call__(self, value):
+        if self.rule_type == 'regex':
+            if not re.match(self.rule_value, value):
+                raise serializers.ValidationError(f"{self.field_name} does not match pattern {self.rule_value}")
+        elif self.rule_type == 'min_length':
+            if len(value) < int(self.rule_value):
+                raise serializers.ValidationError(f"{self.field_name} length is less than {self.rule_value}")
+        # 可以添加更多规则类型
+```
+
+```python
+# your_app/utils.py
+
+import re
+
+def parse_file_name(file_name):
+    match = re.match(r'\[(.*?)\]-(.*?)\.s4p', file_name)
+    if match:
+        parsed_data = match.groups()
+        return {
+            "type": parsed_data[0],
+            "channel": parsed_data[1]
+        }
+    return {}
+```
+
+### 3. 序列化器
+
+```python
+# your_app/serializers.py
+
+from rest_framework import serializers
+from .models import YourModel, FieldInfo
+from .validators import DynamicFieldValidator
+from .utils import parse_file_name
+import uuid
+
+class YourModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = YourModel
+        fields = ['id', 'uuid', 'file_name', 'file_metadata', 'is_deleted']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dynamic_validators = {}
+        validation_rules = FieldInfo.objects.all()
+        for rule in validation_rules:
+            if rule.field_name not in self.dynamic_validators:
+                self.dynamic_validators[rule.field_name] = []
+            self.dynamic_validators[rule.field_name].append(DynamicFieldValidator(rule.field_name, 'regex', r'.*'))
+
+        self.unique_together_fields = []
+        field_infos = FieldInfo.objects.filter(is_unique_together=True)
+        for field_info in field_infos:
+            self.unique_together_fields.append(field_info.field_name)
+
+    def validate(self, data):
+        parsed_data = parse_file_name(data['file_name'])
+        data.update(parsed_data)
+
+        errors = {}
+        for field, validators in self.dynamic_validators.items():
+            value = data.get(field)
+            if value is not None:
+                for validator in validators:
+                    try:
+                        validator(value)
+                    except serializers.ValidationError as e:
+                        errors[field] = str(e)
+
+        unique_filter = {field: data[field] for field in self.unique_together_fields}
+        if YourModel.objects.filter(**unique_filter, is_deleted=False).exists():
+            existing_instance = YourModel.objects.get(**unique_filter, is_deleted=False)
+            data['uuid'] = existing_instance.uuid
+            data['is_deleted'] = False
+        else:
+            data['uuid'] = uuid.uuid4()
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return data
+
+    def create(self, validated_data):
+        unique_filter = {field: validated_data[field] for field in self.unique_together_fields}
+        YourModel.objects.filter(**unique_filter).update(is_deleted=True)
+        return YourModel.objects.create(**validated_data)
+
+class BulkYourModelSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        instances = []
+        for data in validated_data:
+            serializer = YourModelSerializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            instances.append(serializer.save())
+        return instances
+```
+
+### 4. 视图定义
+
+我们将校验和保存视图分开处理。
+
+```python
+# your_app/views.py
+
+from rest_framework import status
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import YourModel
+from .serializers import YourModelSerializer, BulkYourModelSerializer
+
+@api_view(['POST'])
+def validate_data(request):
+    serializer = YourModelSerializer(data=request.data, many=True)
+    if serializer.is_valid():
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+def save_data(request):
+    data_list = request.data
+    for data in data_list:
+        file_metadata = {key: value for key, value in data.items() if key not in ['file_name', 'is_deleted']}
+        data['file_metadata'] = file_metadata
+        data = {key: value for key, value in data.items() if key in ['file_name', 'is_deleted', 'file_metadata']}
+        parsed_data = parse_file_name(data['file_name'])
+        data.update(parsed_data)
+    
+    serializer = BulkYourModelSerializer(data=data_list, many=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+```
+
+### 5. 配置 URL
+
+更新 URL 配置以支持批量操作。
+
+```python
+# your_app/urls.py
+
+from django.urls import path
+from .views import validate_data, save_data
+
+urlpatterns = [
+    path('yourmodel/validate/', validate_data, name='validate_data'),
+    path('yourmodel/save/', save_data, name='save_data'),
+]
+```
+
+### 代码解释
+
+1. **模型定义**:
+   - 保持之前的模型定义。
+   - `FieldInfo` 表继续存储字段信息和 unique_together 标志。
+
+2. **校验类和工具函数**:
+   - `DynamicFieldValidator`: 保持之前的自定义校验类，用于动态校验字段。
+   - `parse_file_name`: 保持之前的文件名解析函数。
+
+3. **序列化器**:
+   - `YourModelSerializer`: 用于验证和序列化 `YourModel` 数据，包含动态校验规则和唯一性约束。
+   - `BulkYourModelSerializer`: 用于批量处理的序列化器，调用 `YourModelSerializer` 来处理每个数据项，并确保校验和保存逻辑。
+
+4. **视图定义**:
+   - `validate_data`: 校验数据的视图函数，支持批量校验。
+   - `save_data`: 保存数据的视图函数，支持批量保存。在保存前，将特定字段数据移入 JSON 字段，并根据文件名解析出额外字段。
+
+5. **URL 配置**:
+   - 配置批量校验和保存数据的 URL。
+
+通过这种方式，数据在校验通过后返回给前端进行检查，用户确认无误后再进行保存。在保存时，将特定字段数据移入 JSON 字段，并根据文件名解析出额外字段。这样即使有额外的数据也可以正常保存，并且保持数据的一致性和完整性。
+
+------
+
+Django 的 ORM 不能直接保存包含非模型字段的数据。如果尝试保存包含多余字段的数据，Django 会抛出 `TypeError` 异常。因此，需要确保传递给模型实例的数据只包含模型定义的字段。
+
+不过，我们可以在视图或序列化器中处理这些多余字段。在保存数据之前，先过滤掉不属于模型字段的数据，或者动态地创建字典，确保只传递模型字段给 Django ORM。
+
+下面是完整的示例代码，演示如何在不过滤掉多余字段的情况下，确保正常保存数据。
+
+### 模型定义
+
+```python
+# your_app/models.py
+
+from django.db import models
+from django.contrib.postgres.fields import JSONField
+import uuid
+
+class YourModel(models.Model):
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    file_name = models.CharField(max_length=255)
+    file_metadata = JSONField(blank=True, null=True)
+    is_deleted = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.file_name
+
+class FieldInfo(models.Model):
+    field_name = models.CharField(max_length=255)
+    is_unique_together = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.field_name} - {'Unique Together' if self.is_unique_together else 'Not Unique Together'}"
+```
+
+### 自定义校验类和工具函数
+
+```python
+# your_app/validators.py
+
+import re
+from rest_framework import serializers
+
+class DynamicFieldValidator:
+    def __init__(self, field_name, rule_type, rule_value):
+        self.field_name = field_name
+        self.rule_type = rule_type
+        self.rule_value = rule_value
+
+    def __call__(self, value):
+        if self.rule_type == 'regex':
+            if not re.match(self.rule_value, value):
+                raise serializers.ValidationError(f"{self.field_name} does not match pattern {self.rule_value}")
+        elif self.rule_type == 'min_length':
+            if len(value) < int(self.rule_value):
+                raise serializers.ValidationError(f"{self.field_name} length is less than {self.rule_value}")
+        # 可以添加更多规则类型
+```
+
+```python
+# your_app/utils.py
+
+import re
+
+def parse_file_name(file_name):
+    match = re.match(r'\[(.*?)\]-(.*?)\.s4p', file_name)
+    if match:
+        parsed_data = match.groups()
+        return {
+            "type": parsed_data[0],
+            "channel": parsed_data[1]
+        }
+    return {}
+```
+
+### 序列化器
+
+```python
+# your_app/serializers.py
+
+from rest_framework import serializers
+from .models import YourModel, FieldInfo
+from .validators import DynamicFieldValidator
+from .utils import parse_file_name
+import uuid
+
+class YourModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = YourModel
+        fields = ['id', 'uuid', 'file_name', 'file_metadata', 'is_deleted']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dynamic_validators = {}
+        validation_rules = FieldInfo.objects.all()
+        for rule in validation_rules:
+            if rule.field_name not in self.dynamic_validators:
+                self.dynamic_validators[rule.field_name] = []
+            self.dynamic_validators[rule.field_name].append(DynamicFieldValidator(rule.field_name, 'regex', r'.*'))
+
+        self.unique_together_fields = []
+        field_infos = FieldInfo.objects.filter(is_unique_together=True)
+        for field_info in field_infos:
+            self.unique_together_fields.append(field_info.field_name)
+
+    def validate(self, data):
+        parsed_data = parse_file_name(data['file_name'])
+        data.update(parsed_data)
+
+        errors = {}
+        for field, validators in self.dynamic_validators.items():
+            value = data.get(field)
+            if value is not None:
+                for validator in validators:
+                    try:
+                        validator(value)
+                    except serializers.ValidationError as e:
+                        errors[field] = str(e)
+
+        unique_filter = {field: data[field] for field in self.unique_together_fields}
+        if YourModel.objects.filter(**unique_filter, is_deleted=False).exists():
+            existing_instance = YourModel.objects.get(**unique_filter, is_deleted=False)
+            data['uuid'] = existing_instance.uuid
+            data['is_deleted'] = False
+        else:
+            data['uuid'] = uuid.uuid4()
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return data
+
+    def create(self, validated_data):
+        unique_filter = {field: validated_data[field] for field in self.unique_together_fields}
+        YourModel.objects.filter(**unique_filter).update(is_deleted=True)
+        return YourModel.objects.create(**validated_data)
+
+class BulkYourModelSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        instances = []
+        for data in validated_data:
+            serializer = YourModelSerializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            instances.append(serializer.save())
+        return instances
+```
+
+### 视图定义
+
+在视图中过滤掉不属于模型字段的数据，然后进行保存。
+
+```python
+# your_app/views.py
+
+from rest_framework import status
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import YourModel
+from .serializers import YourModelSerializer, BulkYourModelSerializer
+
+def filter_data_by_model_fields(data, model):
+    model_fields = {field.name for field in model._meta.fields}
+    return {key: value for key, value in data.items() if key in model_fields}
+
+@api_view(['POST'])
+def validate_data(request):
+    serializer = YourModelSerializer(data=request.data, many=True)
+    if serializer.is_valid():
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+def save_data(request):
+    data_list = request.data
+    valid_data_list = []
+
+    for data in data_list:
+        filtered_data = filter_data_by_model_fields(data, YourModel)
+        file_metadata = {key: value for key, value in filtered_data.items() if key not in ['file_name', 'is_deleted']}
+        filtered_data['file_metadata'] = file_metadata
+        parsed_data = parse_file_name(filtered_data['file_name'])
+        filtered_data.update(parsed_data)
+        valid_data_list.append(filtered_data)
+    
+    serializer = BulkYourModelSerializer(data=valid_data_list, many=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+```
+
+### 配置 URL
+
+配置批量校验和保存数据的 URL。
+
+```python
+# your_app/urls.py
+
+from django.urls import path
+from .views import validate_data, save_data
+
+urlpatterns = [
+    path('yourmodel/validate/', validate_data, name='validate_data'),
+    path('yourmodel/save/', save_data, name='save_data'),
+]
+```
+
+### 代码解释
+
+1. **模型定义**:
+   - 保持之前的模型定义。
+
+2. **校验类和工具函数**:
+   - 保持之前的自定义校验类和文件名解析函数。
+
+3. **序列化器**:
+   - `YourModelSerializer`: 用于验证和序列化 `YourModel` 数据，包含动态校验规则和唯一性约束。
+   - `BulkYourModelSerializer`: 用于批量处理的序列化器，调用 `YourModelSerializer` 来处理每个数据项，并确保校验和保存逻辑。
+
+4. **视图定义**:
+   - `filter_data_by_model_fields`: 过滤掉不属于模型字段的数据。
+   - `validate_data`: 校验数据的视图函数，支持批量校验。
+   - `save_data`: 保存数据的视图函数，支持批量保存。在保存前，过滤掉多余的数据，只保留模型字段，并将特定字段数据移入 JSON 字段，并根据文件名解析出额外字段。
+
+5. **URL 配置**:
+   - 配置批量校验和保存数据的 URL。
+
+通过这种方式，在校验数据时可以忽略多余的字段，而在保存时，我们会动态过滤掉这些多余的字段，只保留模型定义的字段并进行保存。同时将特定字段数据移入 JSON 字段，并根据文件名解析出额外字段，从而确保数据的一致性和完整性。
