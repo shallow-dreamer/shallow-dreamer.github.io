@@ -502,3 +502,124 @@ curl -X POST http://localhost:8000/my-models/ -d '{"name": "example", "date": "2
 ------
 
 https://blog.csdn.net/a54288447/article/details/126161502
+
+------
+
+好的，下面是带有详细注释的代码版本，解释每个部分的作用：
+
+### 1. 定义过滤器类
+使用 `django_filters` 创建过滤器类来定义需要的过滤字段。
+
+#### filters.py
+```python
+import django_filters
+from myapp.models import MyModel
+
+class MyModelFilter(django_filters.FilterSet):
+    # 定义过滤字段和过滤条件
+    name = django_filters.CharFilter(field_name='name', lookup_expr='icontains')
+    date = django_filters.DateFilter(field_name='date')
+
+    class Meta:
+        model = MyModel  # 关联的模型
+        fields = ['name', 'date']  # 可过滤的字段
+```
+
+### 2. 创建自定义视图
+继承自 `ListAPIView` 并覆盖 `get_queryset` 方法来处理过滤逻辑。确保视图只接受 `POST` 请求，并处理复杂的数据格式。
+
+#### views.py
+```python
+from rest_framework.generics import ListAPIView
+from rest_framework.exceptions import MethodNotAllowed, ValidationError
+from myapp.models import MyModel
+from myapp.serializers import MyModelSerializer
+from myapp.filters import MyModelFilter
+
+class MyModelListView(ListAPIView):
+    serializer_class = MyModelSerializer  # 指定序列化器类
+
+    def get_queryset(self):
+        # 确保只接受POST请求
+        if self.request.method != 'POST':
+            raise MethodNotAllowed(self.request.method)
+        
+        queryset = MyModel.objects.all()  # 获取所有对象
+        
+        # 获取请求数据
+        data = self.request.data
+
+        # 处理复杂数据结构，展平嵌套的字典
+        if isinstance(data, dict):
+            filter_data = self.flatten_data(data)
+        else:
+            filter_data = data
+        
+        # 使用过滤器进行过滤
+        filterset = MyModelFilter(filter_data, queryset=queryset)
+        
+        if filterset.is_valid():
+            return filterset.qs  # 返回过滤后的查询集
+        else:
+            raise ValidationError(filterset.errors)  # 抛出验证错误
+
+    def flatten_data(self, data, parent_key='', sep='__'):
+        """
+        将嵌套的字典展平，以便 django_filters 兼容
+        """
+        items = []
+        for k, v in data.items():
+            # 新的键名
+            new_key = f'{parent_key}{sep}{k}' if parent_key else k
+            if isinstance(v, dict):
+                # 递归展平嵌套的字典
+                items.extend(self.flatten_data(v, new_key, sep=sep).items())
+            else:
+                items.append((new_key, v))
+        return dict(items)
+
+    def post(self, request, *args, **kwargs):
+        # 处理POST请求，返回列表响应
+        return self.list(request, *args, **kwargs)
+```
+
+### 3. 配置 URL 路由
+在 `urls.py` 中配置路由，以便将请求路由到自定义视图。
+
+#### urls.py
+```python
+from django.urls import path
+from myapp.views import MyModelListView
+
+urlpatterns = [
+    # 将路径 'my-models/' 路由到 MyModelListView 视图
+    path('my-models/', MyModelListView.as_view(), name='my-model-list'),
+]
+```
+
+### 使用示例
+现在，你可以使用 `POST` 请求来传递复杂的过滤参数，并获取过滤后的数据列表。例如：
+
+```bash
+curl -X POST http://localhost:8000/my-models/ -H "Content-Type: application/json" -d '{
+    "name": "example",
+    "date": "2023-06-16",
+    "nested": {
+        "field1": "value1",
+        "field2": ["value2", "value3"]
+    }
+}'
+```
+
+### 代码解释
+1. **filters.py** 定义了过滤器类 `MyModelFilter`，指定了可过滤的字段 `name` 和 `date`。
+2. **views.py** 中的 `MyModelListView` 继承自 `ListAPIView`，并覆盖了 `get_queryset` 方法。
+   - `get_queryset` 方法首先检查请求方法是否为 `POST`，如果不是，则抛出 `MethodNotAllowed` 异常。
+   - 获取所有对象的查询集。
+   - 处理请求数据，如果数据是字典类型，则使用 `flatten_data` 方法将嵌套的字典展平成平面结构，以便 `django_filters` 能处理。
+   - 使用 `MyModelFilter` 过滤数据，如果过滤器有效，则返回过滤后的查询集；否则，抛出 `ValidationError` 异常。
+   - `flatten_data` 方法用于将嵌套的字典展平成平面结构，支持复杂的嵌套数据结构。
+   - `post` 方法用于处理 `POST` 请求，并返回列表响应。
+3. **urls.py** 配置了视图的 URL 路由，将路径 `'my-models/'` 路由到 `MyModelListView` 视图。
+
+通过这种方式，你可以在 `get_queryset` 方法中处理 `POST` 请求的数据，实现过滤查询，并且所有查询请求都通过 `POST` 方法进行，支持复杂的数据格式。
