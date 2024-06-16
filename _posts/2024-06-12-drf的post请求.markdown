@@ -163,3 +163,342 @@ Content-Type: application/json
 ```
 
 这段代码展示了如何在 Django Rest Framework 中通过 POST 请求实现过滤，并且可以自定义 queryset 来满足特定的业务需求。
+
+------
+
+让我们再检查一下代码，确保没有遗漏或错误之处。以下是经过检查和调整后的完整实现：
+
+### 1. 定义过滤器类
+使用 `django_filters` 创建过滤器类来定义需要的过滤字段：
+
+#### filters.py
+```python
+import django_filters
+from myapp.models import MyModel
+
+class MyModelFilter(django_filters.FilterSet):
+    name = django_filters.CharFilter(field_name='name', lookup_expr='icontains')
+    date = django_filters.DateFilter(field_name='date')
+
+    class Meta:
+        model = MyModel
+        fields = ['name', 'date']
+```
+
+### 2. 创建自定义视图
+继承自 `ListAPIView` 并覆盖 `get_queryset` 方法来处理过滤逻辑。确保视图只接受 `POST` 请求。
+
+#### views.py
+```python
+from rest_framework.generics import ListAPIView
+from rest_framework.exceptions import MethodNotAllowed, ValidationError
+from myapp.models import MyModel
+from myapp.serializers import MyModelSerializer
+from myapp.filters import MyModelFilter
+
+class MyModelListView(ListAPIView):
+    serializer_class = MyModelSerializer
+
+    def get_queryset(self):
+        if self.request.method != 'POST':
+            raise MethodNotAllowed(self.request.method)
+
+        queryset = MyModel.objects.all()
+        filterset = MyModelFilter(self.request.data, queryset=queryset)
+
+        if filterset.is_valid():
+            return filterset.qs
+        else:
+            raise ValidationError(filterset.errors)
+
+    def post(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+```
+
+### 3. 配置 URL 路由
+在 `urls.py` 中配置路由，以便将请求路由到自定义视图：
+
+#### urls.py
+```python
+from django.urls import path
+from myapp.views import MyModelListView
+
+urlpatterns = [
+    path('my-models/', MyModelListView.as_view(), name='my-model-list'),
+]
+```
+
+### 使用示例
+现在，你可以使用 `POST` 请求来传递过滤参数，并获取过滤后的数据列表。例如：
+
+```bash
+curl -X POST http://localhost:8000/my-models/ -H "Content-Type: application/json" -d '{"name": "example", "date": "2023-06-16"}'
+```
+
+### 代码解释
+1. **filters.py** 定义了过滤器类 `MyModelFilter`，指定了可过滤的字段。
+2. **views.py** 中的 `MyModelListView` 继承自 `ListAPIView`，并覆盖了 `get_queryset` 方法。在 `get_queryset` 方法中，首先检查请求方法是否为 `POST`，如果不是，则抛出 `MethodNotAllowed` 异常。然后，通过 `MyModelFilter` 过滤数据，如果过滤器有效，则返回过滤后的查询集；否则，抛出 `ValidationError` 异常。
+3. **urls.py** 配置了视图的 URL 路由。
+
+### 注意事项
+- 确保 `django_filters` 已安装并正确配置。
+- `filters.py`、`views.py` 和 `urls.py` 文件路径根据你的项目结构可能有所不同，请确保这些文件在正确的位置。
+
+通过这种方式，你可以在 `get_queryset` 方法中处理 `POST` 请求的数据，实现过滤查询，并且所有查询请求都通过 `POST` 方法进行。
+
+------
+
+当然可以。通过在视图中定义 `get_queryset` 方法，你可以使用 `POST` 请求中的数据来过滤查询集。下面是如何实现这一功能的示例：
+
+### 1. 定义过滤器类
+首先，使用 `django_filters` 创建过滤器类来定义需要的过滤字段：
+
+```python
+import django_filters
+from myapp.models import MyModel
+
+class MyModelFilter(django_filters.FilterSet):
+    name = django_filters.CharFilter(field_name='name', lookup_expr='icontains')
+    date = django_filters.DateFilter(field_name='date')
+
+    class Meta:
+        model = MyModel
+        fields = ['name', 'date']
+```
+
+### 2. 创建自定义视图
+继承自 `ListAPIView` 并覆盖 `get_queryset` 方法来处理过滤逻辑。确保视图只接受 `POST` 请求。
+
+```python
+from rest_framework.generics import ListAPIView
+from rest_framework.exceptions import MethodNotAllowed
+from myapp.models import MyModel
+from myapp.serializers import MyModelSerializer
+from myapp.filters import MyModelFilter
+
+class MyModelListView(ListAPIView):
+    serializer_class = MyModelSerializer
+
+    def get_queryset(self):
+        if self.request.method != 'POST':
+            raise MethodNotAllowed(self.request.method)
+
+        queryset = MyModel.objects.all()
+        filterset = MyModelFilter(self.request.data, queryset=queryset)
+
+        if filterset.is_valid():
+            return filterset.qs
+        else:
+            raise ValidationError(filterset.errors)
+    
+    def post(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+```
+
+### 3. 配置 URL 路由
+在 `urls.py` 中配置路由，以便将请求路由到自定义视图：
+
+```python
+from django.urls import path
+from myapp.views import MyModelListView
+
+urlpatterns = [
+    path('my-models/', MyModelListView.as_view(), name='my-model-list'),
+]
+```
+
+### 完整代码示例
+
+#### filters.py
+```python
+import django_filters
+from myapp.models import MyModel
+
+class MyModelFilter(django_filters.FilterSet):
+    name = django_filters.CharFilter(field_name='name', lookup_expr='icontains')
+    date = django_filters.DateFilter(field_name='date')
+
+    class Meta:
+        model = MyModel
+        fields = ['name', 'date']
+```
+
+#### views.py
+```python
+from rest_framework.generics import ListAPIView
+from rest_framework.exceptions import MethodNotAllowed, ValidationError
+from myapp.models import MyModel
+from myapp.serializers import MyModelSerializer
+from myapp.filters import MyModelFilter
+
+class MyModelListView(ListAPIView):
+    serializer_class = MyModelSerializer
+
+    def get_queryset(self):
+        if self.request.method != 'POST':
+            raise MethodNotAllowed(self.request.method)
+
+        queryset = MyModel.objects.all()
+        filterset = MyModelFilter(self.request.data, queryset=queryset)
+
+        if filterset.is_valid():
+            return filterset.qs
+        else:
+            raise ValidationError(filterset.errors)
+    
+    def post(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+```
+
+#### urls.py
+```python
+from django.urls import path
+from myapp.views import MyModelListView
+
+urlpatterns = [
+    path('my-models/', MyModelListView.as_view(), name='my-model-list'),
+]
+```
+
+### 使用示例
+现在，你可以使用 `POST` 请求来传递过滤参数，并获取过滤后的数据列表。例如：
+
+```bash
+curl -X POST http://localhost:8000/my-models/ -d '{"name": "example", "date": "2023-06-16"}'
+```
+
+这将返回符合过滤条件的记录列表。
+
+通过这种方式，你可以在 `get_queryset` 方法中处理 `POST` 请求的数据，实现过滤查询，同时强制视图只接受 `POST` 请求。
+
+------
+
+不需要在 `settings.py` 中专门注册。你可以直接在视图中使用 `django_filters` 来进行过滤，只要你已经安装并配置了 `django_filters` 和 `rest_framework`，如在 `INSTALLED_APPS` 中添加了它们。这种方法不需要额外在 `REST_FRAMEWORK` 设置中进行配置。
+
+### 1. 安装和配置 `django_filters`
+确保你已经安装并配置了 `django_filters`。在你的 `settings.py` 中，添加 `django_filters` 和 `rest_framework` 到 `INSTALLED_APPS` 中：
+
+```python
+INSTALLED_APPS = [
+    ...
+    'django_filters',
+    'rest_framework',
+]
+```
+
+### 2. 定义过滤器类
+使用 `django_filters` 创建过滤器类来定义需要的过滤字段：
+
+```python
+import django_filters
+from myapp.models import MyModel
+
+class MyModelFilter(django_filters.FilterSet):
+    name = django_filters.CharFilter(field_name='name', lookup_expr='icontains')
+    date = django_filters.DateFilter(field_name='date')
+
+    class Meta:
+        model = MyModel
+        fields = ['name', 'date']
+```
+
+### 3. 创建自定义视图
+创建一个继承自 `APIView` 的视图类，并在 `post` 方法中处理过滤逻辑：
+
+```python
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from myapp.models import MyModel
+from myapp.serializers import MyModelSerializer
+from myapp.filters import MyModelFilter
+
+class MyModelListView(APIView):
+    def post(self, request, *args, **kwargs):
+        queryset = MyModel.objects.all()
+        filterset = MyModelFilter(request.data, queryset=queryset)
+        
+        if filterset.is_valid():
+            queryset = filterset.qs
+        else:
+            return Response(filterset.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        serializer = MyModelSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+```
+
+### 4. 配置 URL 路由
+在 `urls.py` 中配置路由，以便将请求路由到自定义视图：
+
+```python
+from django.urls import path
+from myapp.views import MyModelListView
+
+urlpatterns = [
+    path('my-models/', MyModelListView.as_view(), name='my-model-list'),
+]
+```
+
+### 完整代码示例
+
+#### filters.py
+```python
+import django_filters
+from myapp.models import MyModel
+
+class MyModelFilter(django_filters.FilterSet):
+    name = django_filters.CharFilter(field_name='name', lookup_expr='icontains')
+    date = django_filters.DateFilter(field_name='date')
+
+    class Meta:
+        model = MyModel
+        fields = ['name', 'date']
+```
+
+#### views.py
+```python
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from myapp.models import MyModel
+from myapp.serializers import MyModelSerializer
+from myapp.filters import MyModelFilter
+
+class MyModelListView(APIView):
+    def post(self, request, *args, **kwargs):
+        queryset = MyModel.objects.all()
+        filterset = MyModelFilter(request.data, queryset=queryset)
+        
+        if filterset.is_valid():
+            queryset = filterset.qs
+        else:
+            return Response(filterset.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        serializer = MyModelSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+```
+
+#### urls.py
+```python
+from django.urls import path
+from myapp.views import MyModelListView
+
+urlpatterns = [
+    path('my-models/', MyModelListView.as_view(), name='my-model-list'),
+]
+```
+
+### 使用示例
+现在，你可以使用 `POST` 请求来传递过滤参数，并获取过滤后的数据列表。例如：
+
+```bash
+curl -X POST http://localhost:8000/my-models/ -d '{"name": "example", "date": "2023-06-16"}'
+```
+
+这将返回符合过滤条件的记录列表。
+
+通过上述步骤，你已经实现了使用 `POST` 请求来进行过滤查询，并返回过滤后的结果。所有查询请求都通过 `POST` 方法进行，而不需要在 `REST_FRAMEWORK` 设置中进行特殊配置。
+
+------
+
+https://blog.csdn.net/a54288447/article/details/126161502
