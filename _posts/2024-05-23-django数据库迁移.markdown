@@ -1152,3 +1152,141 @@ python manage.py createsuperuser
 7. 实现增删改查功能。
 
 确保所有文件和路径名都与你的实际项目相匹配。如果遇到错误，请提供详细的错误信息以便进一步调试。
+
+------
+
+理解了，你的需求是有多个字段的模型，其中只有部分字段是 `unique_together`，你希望在初始化数据时检查这些字段的组合是否唯一，并在重复时进行更新，不重复时进行添加。
+
+我们将使用一个更复杂的示例模型，并在 `apps.py` 中初始化数据，确保根据 `unique_together` 字段组合来进行检查。
+
+### 示例模型
+
+假设我们有一个 `Book` 模型，有多个字段，其中 `title` 和 `author` 字段组合是唯一的。
+
+#### `books/models.py`
+
+```python
+from django.db import models
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    author = models.CharField(max_length=100)
+    published_date = models.DateField()
+    isbn = models.CharField(max_length=13)
+    pages = models.IntegerField()
+    cover = models.CharField(max_length=100)
+    language = models.CharField(max_length=30)
+
+    class Meta:
+        unique_together = ['title', 'author']
+
+    def __str__(self):
+        return f"{self.title} by {self.author}"
+```
+
+### 在 `apps.py` 中初始化数据
+
+在 `books/apps.py` 中编写初始化逻辑，确保在应用启动时进行数据初始化。
+
+#### `books/apps.py`
+
+```python
+from django.apps import AppConfig
+
+class BooksConfig(AppConfig):
+    name = 'books'
+
+    def ready(self):
+        import django.db.utils
+        try:
+            self.initialize_data()
+        except django.db.utils.OperationalError:
+            # 数据库还没有准备好
+            pass
+
+    def initialize_data(self):
+        from .models import Book
+        from datetime import date
+        
+        # 定义初始化数据
+        books_data = [
+            {
+                'title': 'Book One',
+                'author': 'Author One',
+                'published_date': date(2020, 1, 1),
+                'isbn': '1234567890123',
+                'pages': 200,
+                'cover': 'Hardcover',
+                'language': 'English'
+            },
+            {
+                'title': 'Book Two',
+                'author': 'Author Two',
+                'published_date': date(2021, 6, 15),
+                'isbn': '1234567890124',
+                'pages': 300,
+                'cover': 'Paperback',
+                'language': 'Spanish'
+            },
+        ]
+        
+        # 遍历数据，使用 update_or_create 确保数据唯一且可更新
+        for book_data in books_data:
+            Book.objects.update_or_create(
+                title=book_data['title'],
+                author=book_data['author'],
+                defaults=book_data
+            )
+```
+
+### 配置应用
+
+确保在 `settings.py` 中正确配置应用。
+
+```python
+INSTALLED_APPS = [
+    ...
+    'books',
+]
+```
+
+### 生成并应用数据库迁移
+
+运行以下命令以生成并应用数据库迁移：
+
+```bash
+python manage.py makemigrations
+python manage.py migrate
+```
+
+### 运行 Django 项目
+
+启动 Django 项目，确保在启动时数据初始化逻辑正确执行。
+
+```bash
+python manage.py runserver
+```
+
+### 验证数据初始化
+
+你可以通过 Django shell 验证数据是否正确初始化。
+
+#### 使用 Django shell 验证
+
+```bash
+python manage.py shell
+```
+
+```python
+from books.models import Book
+
+# 列出所有书籍
+for book in Book.objects.all():
+    print(book.title, book.author, book.published_date, book.isbn, book.pages, book.cover, book.language)
+```
+
+这将显示数据库中的所有书籍，验证初始化逻辑是否按预期工作。
+
+### 总结
+
+这个示例展示了如何在 `apps.py` 中初始化数据，并确保在重复运行时对 `unique_together` 字段（在此示例中为 `title` 和 `author`）进行检查，重复的数据会更新，不重复的数据会添加。通过这种方式，你可以确保在 Django 项目启动时数据的一致性和完整性。
