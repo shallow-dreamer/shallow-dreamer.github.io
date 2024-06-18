@@ -1,0 +1,182 @@
+---
+layout:     post
+title:      "获取外键数据"
+subtitle:   ""
+date:       2024-06-18
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - django
+---
+
+如果 `Book` 模型和 `Author` 模型位于不同的 Django 应用中，处理方法基本相同，只需确保正确引用和导入相关的模型和序列化器。
+
+### 1. 模型定义
+
+假设 `Author` 模型位于 `authors` 应用中，而 `Book` 模型位于 `books` 应用中。
+
+在 `authors/models.py` 中定义 `Author` 模型：
+
+```python
+from django.db import models
+
+class Author(models.Model):
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return self.name
+```
+
+在 `books/models.py` 中定义 `Book` 模型：
+
+```python
+from django.db import models
+from authors.models import Author  # 引用另一个应用的模型
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    author = models.ForeignKey(Author, related_name='books', on_delete=models.CASCADE)
+
+    def __str__(self):
+        return self.title
+```
+
+### 2. 序列化器定义
+
+在 `authors/serializers.py` 中定义 `AuthorSerializer`：
+
+```python
+from rest_framework import serializers
+from .models import Author
+
+class AuthorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Author
+        fields = ['id', 'name']
+```
+
+在 `books/serializers.py` 中定义 `BookSerializer`：
+
+```python
+from rest_framework import serializers
+from authors.models import Author  # 引用另一个应用的模型
+from .models import Book
+from authors.serializers import AuthorSerializer  # 引用另一个应用的序列化器
+
+class BookSerializer(serializers.ModelSerializer):
+    author = AuthorSerializer()  # 嵌套序列化器
+
+    class Meta:
+        model = Book
+        fields = ['id', 'title', 'author']
+
+    def create(self, validated_data):
+        author_data = validated_data.pop('author')
+        author, created = Author.objects.update_or_create(**author_data)
+        book = Book.objects.create(author=author, **validated_data)
+        return book
+
+    def update(self, instance, validated_data):
+        author_data = validated_data.pop('author')
+        author = instance.author
+
+        # Update author fields
+        for attr, value in author_data.items():
+            setattr(author, attr, value)
+        author.save()
+
+        # Update book fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        return instance
+```
+
+### 3. 视图集定义
+
+在 `books/views.py` 中定义视图集：
+
+```python
+from rest_framework import viewsets
+from .models import Book
+from .serializers import BookSerializer
+
+class BookViewSet(viewsets.ModelViewSet):
+    queryset = Book.objects.all()
+    serializer_class = BookSerializer
+```
+
+### 4. URL 配置
+
+在 `books/urls.py` 中配置 URL：
+
+```python
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import BookViewSet
+
+router = DefaultRouter()
+router.register(r'books', BookViewSet)
+
+urlpatterns = [
+    path('', include(router.urls)),
+]
+```
+
+在 `myproject/urls.py` 中包含应用的 URL 配置：
+
+```python
+from django.contrib import admin
+from django.urls import path, include
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/books/', include('books.urls')),
+    path('api/authors/', include('authors.urls')),
+]
+```
+
+### 5. 测试 API
+
+运行开发服务器：
+
+```bash
+python manage.py runserver
+```
+
+### 测试获取请求
+
+使用工具如 `curl` 或 Postman 来测试 API。下面是一个使用 `curl` 的示例请求，获取所有 `Book` 实例及其关联的 `Author` 数据：
+
+```bash
+curl -X GET http://127.0.0.1:8000/api/books/ \
+-H 'Content-Type: application/json'
+```
+
+这个请求将返回类似以下的响应，其中包含 `Book` 实例及其关联的 `Author` 数据：
+
+```json
+[
+    {
+        "id": 1,
+        "title": "New Book Title",
+        "author": {
+            "id": 1,
+            "name": "New Author Name"
+        }
+    },
+    {
+        "id": 2,
+        "title": "Another Book Title",
+        "author": {
+            "id": 2,
+            "name": "Another Author Name"
+        }
+    }
+]
+```
+
+### 总结
+
+通过这种方式，你可以在不同应用之间正确引用模型和序列化器，实现数据获取时同时获取外键主表的数据。关键是确保在序列化器中正确嵌套和引用其他应用的序列化器和模型。
