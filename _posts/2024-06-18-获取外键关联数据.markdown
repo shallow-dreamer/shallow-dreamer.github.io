@@ -180,3 +180,273 @@ curl -X GET http://127.0.0.1:8000/api/books/ \
 ### 总结
 
 通过这种方式，你可以在不同应用之间正确引用模型和序列化器，实现数据获取时同时获取外键主表的数据。关键是确保在序列化器中正确嵌套和引用其他应用的序列化器和模型。
+
+------
+
+要使用 Django ORM 中的窗口函数（Window Function）来获取分类的最新数据，并结合 `get_object_or_404` 返回这些数据，我们需要一些步骤来实现这一目标。以下是详细的示例：
+
+### 模型定义
+
+假设我们有一个模型 `File`，其中包含 `file_name`、`content` 和 `last_modified` 字段。我们希望获取每个文件名分类中 `last_modified` 最近的一条记录。
+
+#### `files/models.py`
+
+```python
+from django.db import models
+
+class File(models.Model):
+    file_name = models.CharField(max_length=255)
+    content = models.TextField()
+    last_modified = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.file_name
+```
+
+### 序列化器
+
+#### `files/serializers.py`
+
+```python
+from rest_framework import serializers
+from .models import File
+
+class FileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = File
+        fields = ['file_name', 'content', 'last_modified']
+```
+
+### 视图
+
+我们将使用 Django ORM 的窗口函数来获取每个 `file_name` 分类中最新的记录。
+
+#### `files/views.py`
+
+```python
+from django.db.models import F
+from django.db.models.functions import RowNumber
+from django.db.models.expressions import Window
+from django.shortcuts import get_object_or_404
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from .models import File
+from .serializers import FileSerializer
+
+class LatestFileAPIView(APIView):
+
+    def post(self, request):
+        # 使用窗口函数为每个文件名分组获取最近的一条记录
+        latest_files = File.objects.annotate(
+            row_number=Window(
+                expression=RowNumber(),
+                partition_by=[F('file_name')],
+                order_by=F('last_modified').desc()
+            )
+        ).filter(row_number=1)
+        
+        # 检查是否找到数据
+        if not latest_files.exists():
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+        # 序列化数据
+        serializer = FileSerializer(latest_files, many=True)
+
+        # 返回响应
+        return Response(serializer.data, status=status.HTTP_200_OK)
+```
+
+### 路由
+
+配置 URL 路由以访问这些视图。
+
+#### `files/urls.py`
+
+```python
+from django.urls import path
+from .views import LatestFileAPIView
+
+urlpatterns = [
+    path('files/latest/', LatestFileAPIView.as_view(), name='file-latest'),
+]
+```
+
+### 运行服务器并测试
+
+启动 Django 服务器：
+
+```bash
+python manage.py runserver
+```
+
+你可以使用 Postman 或 cURL 发送 `POST` 请求来测试这些端点。
+
+- 获取每个文件名分类中最新的一条记录：`http://localhost:8000/api/files/latest/`
+
+示例 `POST` 请求：
+
+```bash
+curl -X POST http://localhost:8000/api/files/latest/
+```
+
+示例响应：
+
+```json
+[
+    {
+        "file_name": "file1.txt",
+        "content": "Content of file 1",
+        "last_modified": "2024-06-19T10:00:00Z"
+    },
+    {
+        "file_name": "file2.txt",
+        "content": "Content of file 2",
+        "last_modified": "2024-06-19T09:00:00Z"
+    }
+]
+```
+
+### 解释
+
+1. **模型定义**：我们定义了一个 `File` 模型，其中包含 `file_name`、`content` 和 `last_modified` 字段。
+2. **序列化器**：我们定义了一个 `FileSerializer` 来序列化 `File` 模型的数据。
+3. **视图**：在 `LatestFileAPIView` 中，我们使用 Django ORM 的窗口函数 `RowNumber` 来为每个 `file_name` 分类获取最新的一条记录。通过 `partition_by` 参数，我们按照 `file_name` 字段进行分组，并通过 `order_by` 参数按照 `last_modified` 字段进行排序。我们只过滤 `row_number` 为 1 的记录，即每个分组中的第一条记录。
+4. **路由**：我们定义了一个 URL 路由来访问 `LatestFileAPIView` 视图。
+
+通过这种方式，我们可以使用窗口函数、`last_modified` 和 `get_object_or_404` 来获取每个文件名分类中最新的一条数据。
+
+------
+
+要使用 Django ORM 中的窗口函数（Window Function）来获取分类的最新数据，并结合 `get_object_or_404` 返回这些数据，我们需要一些步骤来实现这一目标。以下是详细的示例：
+
+### 模型定义
+
+假设我们有一个模型 `File`，其中包含 `file_name`、`content` 和 `last_modified` 字段。我们希望获取每个文件名分类中 `last_modified` 最近的一条记录。
+
+#### `files/models.py`
+
+```python
+from django.db import models
+
+class File(models.Model):
+    file_name = models.CharField(max_length=255)
+    content = models.TextField()
+    last_modified = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.file_name
+```
+
+### 序列化器
+
+#### `files/serializers.py`
+
+```python
+from rest_framework import serializers
+from .models import File
+
+class FileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = File
+        fields = ['file_name', 'content', 'last_modified']
+```
+
+### 视图
+
+我们将使用 Django ORM 的窗口函数来获取每个 `file_name` 分类中最新的记录。
+
+#### `files/views.py`
+
+```python
+from django.db.models import F
+from django.db.models.functions import RowNumber
+from django.db.models.expressions import Window
+from django.shortcuts import get_object_or_404
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from .models import File
+from .serializers import FileSerializer
+
+class LatestFileAPIView(APIView):
+
+    def post(self, request):
+        # 使用窗口函数为每个文件名分组获取最近的一条记录
+        latest_files = File.objects.annotate(
+            row_number=Window(
+                expression=RowNumber(),
+                partition_by=[F('file_name')],
+                order_by=F('last_modified').desc()
+            )
+        ).filter(row_number=1)
+        
+        # 检查是否找到数据
+        if not latest_files.exists():
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+        # 序列化数据
+        serializer = FileSerializer(latest_files, many=True)
+
+        # 返回响应
+        return Response(serializer.data, status=status.HTTP_200_OK)
+```
+
+### 路由
+
+配置 URL 路由以访问这些视图。
+
+#### `files/urls.py`
+
+```python
+from django.urls import path
+from .views import LatestFileAPIView
+
+urlpatterns = [
+    path('files/latest/', LatestFileAPIView.as_view(), name='file-latest'),
+]
+```
+
+### 运行服务器并测试
+
+启动 Django 服务器：
+
+```bash
+python manage.py runserver
+```
+
+你可以使用 Postman 或 cURL 发送 `POST` 请求来测试这些端点。
+
+- 获取每个文件名分类中最新的一条记录：`http://localhost:8000/api/files/latest/`
+
+示例 `POST` 请求：
+
+```bash
+curl -X POST http://localhost:8000/api/files/latest/
+```
+
+示例响应：
+
+```json
+[
+    {
+        "file_name": "file1.txt",
+        "content": "Content of file 1",
+        "last_modified": "2024-06-19T10:00:00Z"
+    },
+    {
+        "file_name": "file2.txt",
+        "content": "Content of file 2",
+        "last_modified": "2024-06-19T09:00:00Z"
+    }
+]
+```
+
+### 解释
+
+1. **模型定义**：我们定义了一个 `File` 模型，其中包含 `file_name`、`content` 和 `last_modified` 字段。
+2. **序列化器**：我们定义了一个 `FileSerializer` 来序列化 `File` 模型的数据。
+3. **视图**：在 `LatestFileAPIView` 中，我们使用 Django ORM 的窗口函数 `RowNumber` 来为每个 `file_name` 分类获取最新的一条记录。通过 `partition_by` 参数，我们按照 `file_name` 字段进行分组，并通过 `order_by` 参数按照 `last_modified` 字段进行排序。我们只过滤 `row_number` 为 1 的记录，即每个分组中的第一条记录。
+4. **路由**：我们定义了一个 URL 路由来访问 `LatestFileAPIView` 视图。
+
+通过这种方式，我们可以使用窗口函数、`last_modified` 和 `get_object_or_404` 来获取每个文件名分类中最新的一条数据。
