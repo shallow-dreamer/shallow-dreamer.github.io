@@ -232,6 +232,7 @@ LIMIT 1;
 
 ------
 
+```vue
 <style>
   main {
     width: 100%;
@@ -306,3 +307,5 @@ LIMIT 1;
 </template>
 <script>
 </script>
+```
+
