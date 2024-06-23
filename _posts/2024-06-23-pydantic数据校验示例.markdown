@@ -1,0 +1,351 @@
+---
+layout:     post
+title:      "pydantic数据校验示例"
+subtitle:   ""
+date:       2024-06-23
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - django
+    - pydantic
+---
+
+为了在 Django 和 Django REST Framework（DRF）中实现每个字段的数据校验并返回自定义的错误信息（包括一条或多条），你可以通过以下步骤来进行设置和实现：
+
+### 定义 Django 模型
+
+在 `myapp/models.py` 中定义模型：
+
+```python
+from django.db import models
+
+class Product(models.Model):
+    name = models.CharField(max_length=100)
+    category = models.CharField(max_length=100)
+
+    class Meta:
+        unique_together = ('name', 'category')
+
+    def __str__(self):
+        return f"{self.name} ({self.category})"
+```
+
+### 迁移数据库
+
+生成并应用数据库迁移：
+
+```bash
+python manage.py makemigrations
+python manage.py migrate
+```
+
+### 定义 Pydantic 模型
+
+在 `myapp/validators.py` 中定义 Pydantic 模型和校验逻辑，并返回自定义的错误信息：
+
+```python
+from pydantic import BaseModel, validator, ValidationError
+from typing import Dict, Any
+from .models import Product
+
+class ProductModel(BaseModel):
+    name: str
+    category: str
+
+    @validator('name')
+    def name_must_not_be_empty(cls, value):
+        if not value.strip():
+            raise ValueError("Product name must not be empty.")
+        return value
+
+    @validator('category')
+    def category_must_not_be_empty(cls, value):
+        if not value.strip():
+            raise ValueError("Category must not be empty.")
+        return value
+
+    @validator('category')
+    def unique_name_category(cls, value, values, **kwargs):
+        if 'name' in values:
+            name = values['name']
+            category = value
+            context = kwargs.get('context', {})
+            product_id = context.get('product_id')
+
+            existing_product = Product.objects.filter(name=name, category=category)
+            if product_id:
+                existing_product = existing_product.exclude(id=product_id)
+            if existing_product.exists():
+                raise ValueError(f"Product with name '{name}' and category '{category}' already exists.")
+        return value
+
+    @classmethod
+    def validate_product(cls, data: Dict[str, Any], context: Dict[str, Any] = None):
+        try:
+            cls(**data, context=context)
+        except ValidationError as e:
+            errors = {}
+            for error in e.errors():
+                field = error['loc'][0]
+                if field not in errors:
+                    errors[field] = []
+                errors[field].append(error['msg'])
+            raise ValueError(errors)
+```
+
+### 定义 DRF 序列化器
+
+在 `myapp/serializers.py` 中定义序列化器，并处理自定义的错误信息：
+
+```python
+from rest_framework import serializers
+from .models import Product
+from .validators import ProductModel
+
+class ProductSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = ['id', 'name', 'category']
+
+    def validate(self, data):
+        context = {
+            'product_id': self.instance.id if self.instance else None
+        }
+        try:
+            ProductModel.validate_product(data, context=context)
+        except ValueError as e:
+            raise serializers.ValidationError(e.args[0])
+        return data
+```
+
+### 定义视图
+
+在 `myapp/views.py` 中定义视图：
+
+```python
+from rest_framework import viewsets
+from .models import Product
+from .serializers import ProductSerializer
+
+class ProductViewSet(viewsets.ModelViewSet):
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
+```
+
+### 设置 URL 路由
+
+在 `myapp/urls.py` 中设置 URL 路由：
+
+```python
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import ProductViewSet
+
+router = DefaultRouter()
+router.register(r'products', ProductViewSet)
+
+urlpatterns = [
+    path('', include(router.urls)),
+]
+```
+
+在 `myproject/urls.py` 中包含应用的 URL：
+
+```python
+from django.contrib import admin
+from django.urls import path, include
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/', include('myapp.urls')),
+]
+```
+
+### 测试 API
+
+现在可以运行 Django 服务器并测试 API：
+
+```bash
+python manage.py runserver
+```
+
+### 说明
+
+1. **Pydantic 模型**：`ProductModel` 定义了产品的数据结构，并使用 `validator` 装饰器对 `name` 和 `category` 进行校验。每个校验方法都抛出自定义的错误信息。
+2. **DRF 序列化器**：`ProductSerializer` 在校验数据时，将当前实例的 ID 传递给 Pydantic 模型的上下文，确保在更新数据时正确排除自身的记录。捕获 Pydantic 抛出的错误，并将错误信息转换为适当的响应格式，返回给客户端。
+3. **自定义错误信息**：在 `ProductModel` 的 `validate_product` 方法中，捕获 Pydantic 抛出的 `ValidationError` 并构建自定义的错误信息字典。该字典中的每个字段都可以包含一条或多条错误信息。
+
+通过这种方式，可以实现更灵活和动态的数据校验逻辑，并确保在校验失败时返回详细且有用的自定义错误信息。
+
+------
+
+为了在 Django 和 Django REST Framework（DRF）中实现对每个字段的数据校验时返回自定义的错误信息（包括一条或多条错误信息），你可以扩展 Pydantic 和 DRF 序列化器的功能。以下是一个详细的示例，展示了如何实现这一功能。
+
+### 定义 Django 模型
+
+在 `myapp/models.py` 中定义包含 `unique_together` 约束的模型：
+
+```python
+from django.db import models
+
+class Product(models.Model):
+    name = models.CharField(max_length=100)
+    category = models.CharField(max_length=100)
+
+    class Meta:
+        unique_together = ('name', 'category')
+
+    def __str__(self):
+        return f"{self.name} ({self.category})"
+```
+
+### 迁移数据库
+
+生成并应用数据库迁移：
+
+```bash
+python manage.py makemigrations
+python manage.py migrate
+```
+
+### 定义 Pydantic 模型
+
+在 `myapp/validators.py` 中定义 Pydantic 模型和校验逻辑，并返回自定义的错误信息：
+
+```python
+from pydantic import BaseModel, Field, validator, ValidationError
+from typing import Any, Dict
+from .models import Product
+
+class ProductModel(BaseModel):
+    name: str
+    category: str
+
+    @validator('name')
+    def name_must_not_be_empty(cls, value):
+        if not value.strip():
+            raise ValueError("Product name must not be empty.")
+        return value
+
+    @validator('category')
+    def category_must_not_be_empty(cls, value):
+        if not value.strip():
+            raise ValueError("Category must not be empty.")
+        return value
+
+    @validator('category')
+    def unique_name_category(cls, value, values, **kwargs):
+        if 'name' in values:
+            name = values['name']
+            category = value
+            # 获取传入的上下文，如果有则用它来动态校验
+            context = kwargs.get('context', {})
+            product_id = context.get('product_id')
+
+            # 检查数据库中是否存在相同的 name 和 category，排除当前正在编辑的产品
+            existing_product = Product.objects.filter(name=name, category=category)
+            if product_id:
+                existing_product = existing_product.exclude(id=product_id)
+            if existing_product.exists():
+                raise ValueError(f"Product with name '{name}' and category '{category}' already exists.")
+        return value
+
+    @classmethod
+    def validate_product(cls, data: Dict[str, Any], context: Dict[str, Any] = None):
+        try:
+            cls(**data, context=context)
+        except ValidationError as e:
+            errors = {}
+            for error in e.errors():
+                field = error['loc'][0]
+                if field not in errors:
+                    errors[field] = []
+                errors[field].append(error['msg'])
+            raise ValueError(errors)
+```
+
+### 定义 DRF 序列化器
+
+在 `myapp/serializers.py` 中定义序列化器，并处理自定义的错误信息：
+
+```python
+from rest_framework import serializers
+from .models import Product
+from .validators import ProductModel
+
+class ProductSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = ['id', 'name', 'category']
+
+    def validate(self, data):
+        context = {
+            'product_id': self.instance.id if self.instance else None
+        }
+        try:
+            # 使用 Pydantic 校验数据，并传入上下文
+            ProductModel.validate_product(data, context=context)
+        except ValueError as e:
+            # 这里捕获 Pydantic 抛出的错误，并转换为 DRF 的 ValidationError
+            raise serializers.ValidationError(e.args[0])
+        return data
+```
+
+### 定义视图
+
+在 `myapp/views.py` 中定义视图：
+
+```python
+from rest_framework import viewsets
+from .models import Product
+from .serializers import ProductSerializer
+
+class ProductViewSet(viewsets.ModelViewSet):
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
+```
+
+### 设置 URL 路由
+
+在 `myapp/urls.py` 中设置 URL 路由：
+
+```python
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import ProductViewSet
+
+router = DefaultRouter()
+router.register(r'products', ProductViewSet)
+
+urlpatterns = [
+    path('', include(router.urls)),
+]
+```
+
+在 `myproject/urls.py` 中包含应用的 URL：
+
+```python
+from django.contrib import admin
+from django.urls import path, include
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/', include('myapp.urls')),
+]
+```
+
+### 测试 API
+
+现在可以运行 Django 服务器并测试 API：
+
+```bash
+python manage.py runserver
+```
+
+### 说明
+
+1. **Pydantic 模型**：`ProductModel` 定义了产品的数据结构，并使用 `validator` 装饰器对 `name` 和 `category` 进行校验。每个校验方法都抛出自定义的错误信息。
+2. **DRF 序列化器**：`ProductSerializer` 在校验数据时，将当前实例的 ID 传递给 Pydantic 模型的上下文，确保在更新数据时正确排除自身的记录。捕获 Pydantic 抛出的错误，并将错误信息转换为适当的响应格式，返回给客户端。
+3. **自定义错误信息**：在 `ProductModel` 的 `validate_product` 方法中，捕获 Pydantic 抛出的 `ValidationError` 并构建自定义的错误信息字典。该字典中的每个字段都可以包含一条或多条错误信息。
+
+通过这种方式，可以实现更灵活和动态的数据校验逻辑，并确保在校验失败时返回详细且有用的自定义错误信息。
