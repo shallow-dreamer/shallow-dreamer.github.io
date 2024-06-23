@@ -1,0 +1,231 @@
+---
+layout:     post
+title:      "历史数据保存方案"
+subtitle:   ""
+date:       2024-06-24
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - sql
+---
+
+在使用与数据表结构一致的历史表来保存数据的方案下，如果回滚的数据中缺少新增字段的数据，而这个字段设置了非空约束，则回滚操作会遇到问题。为了解决这个问题，需要在回滚操作时为这些缺失的字段提供合理的默认值。
+
+以下是如何处理这种情况的详细步骤：
+
+### 处理步骤
+
+1. **在新增字段时设置临时默认值**：在新增字段并设置非空约束时，可以为其设置一个临时默认值。
+2. **更新历史数据**：将历史表中的旧数据更新为合适的值，确保回滚时不会出现非空约束错误。
+3. **回滚时处理缺失字段**：在回滚操作中检查并填充缺失字段。
+
+### 具体实现
+
+#### 表结构设计
+
+```sql
+CREATE TABLE main_table (
+    id SERIAL PRIMARY KEY,
+    order_id VARCHAR(50),
+    field1 VARCHAR(255),
+    field2 INT,
+    new_field VARCHAR(255) NOT NULL DEFAULT 'temporary_default', -- 新增非空字段，设置临时默认值
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE history_table (
+    id SERIAL PRIMARY KEY,
+    main_table_id INT,
+    order_id VARCHAR(50),
+    field1 VARCHAR(255),
+    field2 INT,
+    new_field VARCHAR(255) NOT NULL DEFAULT 'temporary_default', -- 与main_table一致
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    metadata JSONB,
+    FOREIGN KEY (main_table_id) REFERENCES main_table(id)
+);
+```
+
+#### 插入和更新操作
+
+在每次更新主表数据时，将旧数据保存到历史表。
+
+```sql
+-- 插入旧数据到历史表
+INSERT INTO history_table (main_table_id, order_id, field1, field2, new_field, created_at, updated_at, metadata)
+SELECT id, order_id, field1, field2, new_field, created_at, updated_at, '{"updated_by": "user1", "update_reason": "example reason"}'::jsonb
+FROM main_table
+WHERE id = :id;
+
+-- 更新主表数据
+UPDATE main_table
+SET field1 = :new_field1, field2 = :new_field2, new_field = :new_new_field, updated_at = CURRENT_TIMESTAMP
+WHERE id = :id;
+```
+
+#### 更新历史表中的旧数据
+
+将历史表中的旧数据更新为合适的值，以确保回滚操作时不会违反非空约束。
+
+```sql
+UPDATE history_table
+SET new_field = 'specified_value' -- 用实际需要的值替换临时默认值
+WHERE new_field = 'temporary_default';
+```
+
+#### 移除临时默认值
+
+在确保所有数据都已更新后，移除临时默认值约束。
+
+```sql
+ALTER TABLE main_table ALTER COLUMN new_field DROP DEFAULT;
+ALTER TABLE history_table ALTER COLUMN new_field DROP DEFAULT;
+```
+
+#### 回滚操作
+
+在回滚操作中检查并填充缺失字段。
+
+```sql
+-- 回滚操作示例
+UPDATE main_table
+SET field1 = h.field1,
+    field2 = h.field2,
+    new_field = COALESCE(h.new_field, 'specified_value'), -- 如果新字段值为空，则使用指定值
+    updated_at = CURRENT_TIMESTAMP
+FROM history_table h
+WHERE main_table.id = h.main_table_id AND h.order_id = :order_id
+ORDER BY h.created_at DESC
+LIMIT 1;
+```
+
+### 总结
+
+通过设置临时默认值、更新历史表中的旧数据以及在回滚操作中处理缺失字段，可以确保回滚操作成功并满足非空约束。虽然这种方法需要在新增字段时进行一些额外的操作，但它可以有效避免数据一致性问题和回滚失败，确保系统的稳定运行。
+
+------
+
+在使用JSON方案存储历史数据时，当新增字段并设置不能为空后，回滚历史数据会遇到一些挑战。具体地，当历史数据没有新添加的字段数据，而新添加的字段设置为非空时，会导致回滚失败或数据不完整。
+
+### 解决方案
+
+为了解决这个问题，可以采用以下几种方法：
+
+1. **设置默认值**：
+   - 在新增字段时，设置一个合理的默认值，确保即使历史数据中没有该字段的数据，回滚时也不会违反非空约束。
+
+2. **数据迁移**：
+   - 在新增字段后，立即对历史表中的旧数据进行数据迁移，给缺失新字段的历史记录填充默认值。
+
+3. **回滚逻辑处理**：
+   - 在回滚操作中，检查并补充新字段的默认值，确保不违反非空约束。
+
+### 实现方式
+
+#### 方法一：设置默认值
+
+假设我们在 `main_table` 中新增一个非空字段 `new_field`，并设置默认值。
+
+```sql
+ALTER TABLE main_table ADD COLUMN new_field VARCHAR(255) NOT NULL DEFAULT 'default_value';
+```
+
+同样地，在 `history_table` 中也添加该字段，设置默认值：
+
+```sql
+ALTER TABLE history_table ADD COLUMN new_field VARCHAR(255) DEFAULT 'default_value';
+```
+
+这样，即使历史数据没有 `new_field` 的数据，在回滚时也会使用默认值，不会违反非空约束。
+
+#### 方法二：数据迁移
+
+在新增字段后，立即对历史表中的旧数据进行迁移，给缺失新字段的历史记录填充默认值。
+
+```sql
+UPDATE history_table
+SET new_field = 'default_value'
+WHERE new_field IS NULL;
+```
+
+#### 方法三：回滚逻辑处理
+
+在回滚操作中，检查并补充新字段的默认值：
+
+```sql
+-- 回滚操作示例
+UPDATE main_table
+SET field1 = h.field1,
+    field2 = h.field2,
+    new_field = COALESCE(h.new_field, 'default_value'), -- 如果新字段值为空，则使用默认值
+    updated_at = CURRENT_TIMESTAMP
+FROM history_table h
+WHERE main_table.id = h.main_table_id AND h.order_id = :order_id
+ORDER BY h.created_at DESC
+LIMIT 1;
+```
+
+### 示例
+
+以下是一个完整的示例，包括主表、历史表结构定义，以及插入、更新、回滚操作：
+
+#### 表结构定义
+
+```sql
+CREATE TABLE main_table (
+    id SERIAL PRIMARY KEY,
+    order_id VARCHAR(50),
+    field1 VARCHAR(255),
+    field2 INT,
+    new_field VARCHAR(255) NOT NULL DEFAULT 'default_value', -- 新增非空字段
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE history_table (
+    id SERIAL PRIMARY KEY,
+    main_table_id INT,
+    order_id VARCHAR(50),
+    field1 VARCHAR(255),
+    field2 INT,
+    new_field VARCHAR(255) DEFAULT 'default_value', -- 新增字段，设置默认值
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    metadata JSONB,
+    FOREIGN KEY (main_table_id) REFERENCES main_table(id)
+);
+```
+
+#### 插入和更新操作
+
+```sql
+-- 插入旧数据到历史表
+INSERT INTO history_table (main_table_id, order_id, field1, field2, new_field, created_at, updated_at, metadata)
+SELECT id, order_id, field1, field2, new_field, created_at, updated_at, '{"updated_by": "user1", "update_reason": "example reason"}'::jsonb
+FROM main_table
+WHERE id = :id;
+
+-- 更新主表数据
+UPDATE main_table
+SET field1 = :new_field1, field2 = :new_field2, new_field = :new_new_field, updated_at = CURRENT_TIMESTAMP
+WHERE id = :id;
+```
+
+#### 回滚操作
+
+```sql
+-- 回滚操作示例
+UPDATE main_table
+SET field1 = h.field1,
+    field2 = h.field2,
+    new_field = COALESCE(h.new_field, 'default_value'), -- 如果新字段值为空，则使用默认值
+    updated_at = CURRENT_TIMESTAMP
+FROM history_table h
+WHERE main_table.id = h.main_table_id AND h.order_id = :order_id
+ORDER BY h.created_at DESC
+LIMIT 1;
+```
+
+通过设置默认值、数据迁移和回滚逻辑处理，可以确保即使在历史数据中没有新添加的字段数据，回滚操作也能成功进行，且不会违反非空约束。
