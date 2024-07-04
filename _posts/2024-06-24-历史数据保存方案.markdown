@@ -309,3 +309,228 @@ LIMIT 1;
 </script>
 ```
 
+------
+
+如果历史表中的 `main_table_uid` 是引用主表 `uid` 的外键，并且你不希望使用信号来实现这个功能，可以在视图或模型方法中手动处理保存历史数据、删除旧数据和写入新数据的逻辑。
+
+### 示例代码：
+
+#### 1. 定义模型
+
+```python
+# models.py
+
+from django.db import models
+
+class MainTable(models.Model):
+    uid = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=255)
+    data = models.TextField()
+
+class MainTableHistory(models.Model):
+    main_table_uid = models.ForeignKey(MainTable, on_delete=models.DO_NOTHING)
+    name = models.CharField(max_length=255)
+    data = models.TextField()
+    operation_type = models.CharField(max_length=50)  # e.g., 'update', 'delete'
+    changed_at = models.DateTimeField(auto_now_add=True)
+```
+
+#### 2. 创建保存历史数据的方法
+
+在你的视图或模型方法中，手动处理保存历史数据、删除旧数据和写入新数据的逻辑。
+
+```python
+# utils.py
+
+from .models import MainTable, MainTableHistory
+
+def save_history(instance, operation_type):
+    MainTableHistory.objects.create(
+        main_table_uid=instance,
+        name=instance.name,
+        data=instance.data,
+        operation_type=operation_type
+    )
+```
+
+#### 3. 更新和删除操作的视图逻辑
+
+```python
+# views.py
+
+from django.shortcuts import get_object_or_404, redirect
+from django.http import HttpResponse
+from .models import MainTable
+from .utils import save_history
+
+def update_main_table(request, uid):
+    instance = get_object_or_404(MainTable, uid=uid)
+    
+    # 保存旧数据到历史表
+    save_history(instance, 'update')
+
+    # 更新数据
+    instance.name = request.POST.get('name')
+    instance.data = request.POST.get('data')
+    instance.save()
+
+    return HttpResponse("Data updated successfully.")
+
+def delete_main_table(request, uid):
+    instance = get_object_or_404(MainTable, uid=uid)
+    
+    # 保存数据到历史表
+    save_history(instance, 'delete')
+
+    # 删除数据
+    instance.delete()
+
+    return HttpResponse("Data deleted successfully.")
+```
+
+#### 4. URL 配置
+
+```python
+# urls.py
+
+from django.urls import path
+from .views import update_main_table, delete_main_table
+
+urlpatterns = [
+    path('update/<int:uid>/', update_main_table, name='update_main_table'),
+    path('delete/<int:uid>/', delete_main_table, name='delete_main_table'),
+]
+```
+
+### 解释
+
+1. **模型定义**：
+   - `MainTable` 是主表。
+   - `MainTableHistory` 是历史数据表，用于保存删除或更新的主表数据。它引用 `MainTable` 的 `uid`，并增加了 `operation_type` 字段来区分操作类型（更新或删除）。
+
+2. **保存历史数据的方法**：
+   - `save_history` 方法用于将旧数据保存到历史数据表中。它接收一个 `MainTable` 实例和操作类型（'update' 或 'delete'），并将相关数据保存到 `MainTableHistory` 表中。
+
+3. **更新和删除操作的视图逻辑**：
+   - `update_main_table` 视图函数用于处理更新操作。它首先调用 `save_history` 方法保存旧数据，然后更新 `MainTable` 实例并保存。
+   - `delete_main_table` 视图函数用于处理删除操作。它首先调用 `save_history` 方法保存数据，然后删除 `MainTable` 实例。
+
+通过这种方式，你可以在视图中显式地处理保存历史数据、删除旧数据和写入新数据的逻辑。这可以避免使用信号，同时确保历史数据的完整性。
+
+------
+
+在这种情况下，你的更新操作包含以下几个步骤：
+
+1. **保存历史数据**：在更新之前，将旧数据保存到历史数据表中。
+2. **删除原数据**：从主表中删除旧数据。
+3. **写入新数据**：将新数据写入主表。
+
+你可以通过 Django 的信号机制来实现这一过程。具体来说，可以使用 `pre_save` 信号在更新操作之前保存旧数据到历史表，然后继续删除旧数据并保存新数据。
+
+### 示例代码：
+
+#### 1. 定义模型
+
+```python
+# models.py
+
+from django.db import models
+
+class MainTable(models.Model):
+    uid = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=255)
+    data = models.TextField()
+
+class MainTableHistory(models.Model):
+    main_table_uid = models.ForeignKey(MainTable, on_delete=models.DO_NOTHING)
+    name = models.CharField(max_length=255)
+    data = models.TextField()
+    operation_type = models.CharField(max_length=50)  # e.g., 'update', 'delete'
+    changed_at = models.DateTimeField(auto_now_add=True)
+```
+
+#### 2. 创建信号处理函数
+
+```python
+# signals.py
+
+from django.db.models.signals import pre_save, pre_delete
+from django.dispatch import receiver
+from .models import MainTable, MainTableHistory
+from django.core.exceptions import ObjectDoesNotExist
+
+@receiver(pre_save, sender=MainTable)
+def save_update_to_history(sender, instance, **kwargs):
+    if instance.pk:
+        try:
+            old_instance = MainTable.objects.get(pk=instance.pk)
+            if old_instance.name != instance.name or old_instance.data != instance.data:
+                MainTableHistory.objects.create(
+                    main_table_uid=old_instance,
+                    name=old_instance.name,
+                    data=old_instance.data,
+                    operation_type='update'
+                )
+        except ObjectDoesNotExist:
+            print(f"Original instance not found for pk {instance.pk}")
+        except Exception as e:
+            print(f"Error saving update history: {e}")
+
+@receiver(pre_delete, sender=MainTable)
+def save_delete_to_history(sender, instance, **kwargs):
+    try:
+        if not MainTableHistory.objects.filter(main_table_uid=instance, operation_type='delete').exists():
+            MainTableHistory.objects.create(
+                main_table_uid=instance,
+                name=instance.name,
+                data=instance.data,
+                operation_type='delete'
+            )
+    except Exception as e:
+        print(f"Error saving delete history: {e}")
+```
+
+#### 3. 连接信号
+
+确保 Django 在启动时加载信号处理函数。可以在应用程序的 `apps.py` 文件中进行配置。
+
+```python
+# apps.py
+
+from django.apps import AppConfig
+
+class MyAppConfig(AppConfig):
+    name = 'myapp'
+
+    def ready(self):
+        import myapp.signals  # 确保信号处理函数被导入
+```
+
+#### 4. 设置应用配置
+
+确保在 `settings.py` 中设置正确的应用配置。
+
+```python
+# settings.py
+
+INSTALLED_APPS = [
+    ...
+    'myapp.apps.MyAppConfig',
+    ...
+]
+```
+
+### 解释
+
+1. **模型定义**：
+   - `MainTable` 是主表。
+   - `MainTableHistory` 是历史数据表，用于保存删除或更新的主表数据。它引用 `MainTable` 的 `uid`，并增加了 `operation_type` 字段来区分操作类型（更新或删除）。
+
+2. **信号处理函数**：
+   - `save_update_to_history` 函数在更新主表数据之前，将旧的数据保存到历史数据表中。
+   - `save_delete_to_history` 函数在删除主表数据之前，将数据保存到历史数据表中，并确保不会有重复的记录。
+
+3. **连接信号**：
+   - 在 `apps.py` 中的 `ready` 方法中导入 `signals` 模块，确保 Django 启动时加载信号处理函数。
+
+通过这种方式，你可以确保在更新和删除主表数据时，相关的数据会先保存到历史数据表中。这样可以避免在更新和删除操作时出现问题，并确保历史数据的完整性。
