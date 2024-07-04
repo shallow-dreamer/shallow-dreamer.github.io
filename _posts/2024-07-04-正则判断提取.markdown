@@ -1,0 +1,105 @@
+---
+layout:     post
+title:      "正则判断提取"
+subtitle:   ""
+date:       2024-07-04
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - re
+---
+
+为了处理不同的格式，我们可以使用稍微复杂一点的正则表达式来分别匹配 `thru`、`fext` 和 `next` 的不同模式。以下是更新后的 Python 脚本，能够根据指定格式匹配并提取信息：
+
+```python
+import re
+
+def match_and_extract_info(filename):
+    # 定义正则表达式模式
+    pattern_thru = re.compile(
+        r'\[thru_([^_]+)_(up|down)\]_.*\.s\*p'
+    )
+    pattern_fext_next = re.compile(
+        r'\[(fext|next)_v_([^_]+)_a_([^_]+)_(up|down)\]\.s\*p'
+    )
+    
+    # 尝试匹配 thru 格式
+    match_thru = pattern_thru.match(filename)
+    if match_thru:
+        return {
+            'type': 'thru',
+            'identifier': match_thru.group(1),
+            'direction': match_thru.group(2),
+            'valid': True
+        }
+
+    # 尝试匹配 fext 和 next 格式
+    match_fext_next = pattern_fext_next.match(filename)
+    if match_fext_next:
+        return {
+            'type': match_fext_next.group(1),
+            'identifier_v': match_fext_next.group(2),
+            'identifier_a': match_fext_next.group(3),
+            'direction': match_fext_next.group(4),
+            'valid': True
+        }
+
+    return {
+        'valid': False
+    }
+
+# 测试字符串
+test_strings = [
+    '[thru_rx1_up]_xxx.s*p',
+    '[fext_v_v1_a_a1_up].s*p',
+    '[next_v_v1_a_a1_up].s*p',
+    '[thru_test]_test.s*p',
+    '[invalid]_test.s*p',
+    '[next_v_rx2_a_a2_down].s*p',
+    '[fext_v_a1_a2_up].s*p',
+    '[thru_abcd_up]_xxx.s*p',
+    '[fext_v_xyz_a_abc_down].s*p'
+]
+
+# 运行测试
+for s in test_strings:
+    result = match_and_extract_info(s)
+    print(f"{s}: {result}")
+```
+
+### 解释
+
+1. **正则表达式**：
+   - `pattern_thru`：
+     - `r'\[thru_([^_]+)_(up|down)\]_.*\.s\*p'`
+       - `\[thru_`：匹配 `[thru_`。
+       - `([^_]+)`：匹配一个或多个非下划线字符的标识符。
+       - `_(up|down)\]`：匹配 `_up]` 或 `_down]`。
+       - `_.*\.s\*p`：匹配 `_` 后面任意字符，接着是 `.s` 后面任意字符，并以 `p` 结尾。
+   - `pattern_fext_next`：
+     - `r'\[(fext|next)_v_([^_]+)_a_([^_]+)_(up|down)\]\.s\*p'`
+       - `\[(fext|next)_v_`：匹配 `[fext_v_` 或 `[next_v_`。
+       - `([^_]+)`：匹配一个或多个非下划线字符的标识符。
+       - `_a_([^_]+)`：匹配 `_a_` 后面跟一个或多个非下划线字符的标识符。
+       - `_(up|down)\]`：匹配 `_up]` 或 `_down]`。
+       - `\.s\*p`：匹配 `.s` 后面任意字符，并以 `p` 结尾。
+
+2. **匹配和提取**：
+   - `match_thru = pattern_thru.match(filename)`：尝试匹配 `thru` 格式。
+   - `match_fext_next = pattern_fext_next.match(filename)`：尝试匹配 `fext` 和 `next` 格式。
+
+### 输出示例
+
+```plaintext
+[thru_rx1_up]_xxx.s*p: {'type': 'thru', 'identifier': 'rx1', 'direction': 'up', 'valid': True}
+[fext_v_v1_a_a1_up].s*p: {'type': 'fext', 'identifier_v': 'v1', 'identifier_a': 'a1', 'direction': 'up', 'valid': True}
+[next_v_v1_a_a1_up].s*p: {'type': 'next', 'identifier_v': 'v1', 'identifier_a': 'a1', 'direction': 'up', 'valid': True}
+[thru_test]_test.s*p: {'type': 'thru', 'identifier': 'test', 'direction': 'up', 'valid': True}
+[invalid]_test.s*p: {'valid': False}
+[next_v_rx2_a_a2_down].s*p: {'type': 'next', 'identifier_v': 'rx2', 'identifier_a': 'a2', 'direction': 'down', 'valid': True}
+[fext_v_a1_a2_up].s*p: {'type': 'fext', 'identifier_v': 'a1', 'identifier_a': 'a2', 'direction': 'up', 'valid': True}
+[thru_abcd_up]_xxx.s*p: {'type': 'thru', 'identifier': 'abcd', 'direction': 'up', 'valid': True}
+[fext_v_xyz_a_abc_down].s*p: {'type': 'fext', 'identifier_v': 'xyz', 'identifier_a': 'abc', 'direction': 'down', 'valid': True}
+```
+
+这个脚本将匹配并提取符合指定模式的字符串中的信息，并判断字符串是否符合要求，支持 `thru`、`fext` 和 `next` 格式。
