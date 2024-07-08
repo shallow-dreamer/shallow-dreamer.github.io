@@ -3960,3 +3960,188 @@ class YourModelListSerializer(serializers.ListSerializer):
    - `create`、`update` 和 `delete` 方法分别处理批量操作的创建、更新和删除。
 
 通过这样的设置，您可以在序列化器中使用 `context` 参数，并通过 `list_serializer_class` 处理批量操作，保持代码的清晰性和可维护性。
+
+------
+
+为了确保 `user` 字段能够正确地序列化，你需要在数据还原后显式调用 `user` 序列化器。以下是修改后的代码，包括 `to_representation` 方法，用于确保在还原数据后正确序列化 `user` 字段：
+
+### 模型定义
+
+```python
+# your_app/models.py
+
+from django.contrib.auth.models import User
+from django.db import models
+
+class YourModel(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    field1 = models.CharField(max_length=255)
+    field2 = models.CharField(max_length=255)
+    # 其他字段...
+
+class YourModelHistory(models.Model):
+    original_id = models.IntegerField()
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    field1 = models.CharField(max_length=255)
+    field2 = models.CharField(max_length=255)
+    # 其他字段...
+```
+
+### 序列化器
+
+```python
+# your_app/serializers.py
+
+from rest_framework import serializers
+from django.contrib.auth.models import User
+from .models import YourModel, YourModelHistory
+
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email']
+
+class YourModelSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+
+    class Meta:
+        model = YourModel
+        fields = ['id', 'user', 'field1', 'field2']
+
+    def create(self, validated_data):
+        user = self.context['request'].user
+        validated_data['user'] = user
+        return YourModel.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        user = self.context['request'].user
+        YourModelHistory.objects.create(
+            original_id=instance.id,
+            user=user,
+            field1=instance.field1,
+            field2=instance.field2,
+            # 其他字段...
+        )
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        return instance
+
+    def delete(self, instance):
+        user = self.context['request'].user
+        YourModelHistory.objects.create(
+            original_id=instance.id,
+            user=user,
+            field1=instance.field1,
+            field2=instance.field2,
+            # 其他字段...
+        )
+        instance.delete()
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if 'user' in ret:
+            ret['user'] = UserSerializer(instance.user).data
+        return ret
+
+class YourModelListSerializer(serializers.ListSerializer):
+    def perform_operation(self, action, data, context):
+        if action == 'create':
+            created_instances = []
+            for item in data:
+                serializer = YourModelSerializer(data=item, context=context)
+                if serializer.is_valid(raise_exception=True):
+                    created_instances.append(serializer.save())
+            return created_instances
+        elif action == 'update':
+            updated_instances = []
+            for item in data:
+                instance_id = item.get('id')
+                if not instance_id:
+                    raise serializers.ValidationError({"id": "This field is required for update."})
+                try:
+                    instance = YourModel.objects.get(id=instance_id)
+                    serializer = YourModelSerializer(instance, data=item, context=context)
+                    if serializer.is_valid(raise_exception=True):
+                        updated_instances.append(serializer.save())
+                except YourModel.DoesNotExist:
+                    raise serializers.ValidationError({"id": "Instance with this id does not exist."})
+            return updated_instances
+        elif action == 'delete':
+            for item in data:
+                instance_id = item.get('id')
+                if not instance_id:
+                    raise serializers.ValidationError({"id": "This field is required for delete."})
+                try:
+                    instance = YourModel.objects.get(id=instance_id)
+                    YourModelSerializer().delete(instance)
+                except YourModel.DoesNotExist:
+                    raise serializers.ValidationError({"id": "Instance with this id does not exist."})
+            return None
+        else:
+            raise serializers.ValidationError({"action": "Invalid action."})
+
+class YourModelListModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = YourModel
+        fields = ['id', 'user', 'field1', 'field2']
+        list_serializer_class = YourModelListSerializer
+
+    def perform_operation(self, action, data):
+        if isinstance(data, list):
+            list_serializer = self.Meta.list_serializer_class()
+            return list_serializer.perform_operation(action, data, self.context)
+        else:
+            if action == 'create':
+                return self.create(data)
+            elif action == 'update':
+                instance = YourModel.objects.get(id=data.get('id'))
+                return self.update(instance, data)
+            elif action == 'delete':
+                instance = YourModel.objects.get(id=data.get('id'))
+                self.delete(instance)
+                return None
+            else:
+                raise serializers.ValidationError({"action": "Invalid action."})
+```
+
+### 视图
+
+```python
+# your_app/views.py
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from .models import YourModel
+from .serializers import YourModelListModelSerializer
+
+class YourModelView(APIView):
+    def post(self, request, *args, **kwargs):
+        action = request.data.get('action')
+        data = request.data.get('data')
+        if not action or not data:
+            return Response({"error": "Action and data are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = YourModelListModelSerializer(data=data, context={'request': request}, many=isinstance(data, list))
+
+        if serializer.is_valid():
+            result = serializer.perform_operation(action, serializer.validated_data)
+            if result:
+                return Response(result, status=status.HTTP_200_OK)
+            else:
+                return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+```
+
+### 解释说明
+
+1. **`to_representation` 方法**：在 `YourModelSerializer` 中添加 `to_representation` 方法，以确保在序列化 `YourModel` 实例时正确嵌套序列化 `user` 字段。
+   
+2. **`YourModelListSerializer`**：处理列表数据的创建、更新和删除操作。
+
+3. **`YourModelListModelSerializer`**：指定 `list_serializer_class` 为 `YourModelListSerializer`，并实现 `perform_operation` 方法。
+
+4. **`YourModelView`**：处理 POST 请求，使用 `YourModelListModelSerializer` 处理数据并执行操作。
+
+这样，序列化器将能够正确处理 `user` 字段，并确保在还原数据后正确序列化用户信息。
