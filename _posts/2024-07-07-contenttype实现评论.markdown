@@ -125,7 +125,7 @@ def post_detail(request, post_id):
 
     <h2>Leave a comment</h2>
     <form method="post">
-        {% csrf_token %}
+        {{ csrf_token }}
         {{ form.as_p }}
         <button type="submit">Add comment</button>
     </form>
