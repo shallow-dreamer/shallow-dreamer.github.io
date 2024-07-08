@@ -385,7 +385,7 @@ urlpatterns = [
 
     <h2>Leave a comment</h2>
     <form method="post">
-        {% csrf_token %}
+        {{csrf_token }}
         {{ form.as_p }}
         <button type="submit">Add comment</button>
     </form>
@@ -595,7 +595,7 @@ urlpatterns = [
 
     <h2>Leave a comment</h2>
     <form method="post">
-        {% csrf_token %}  <!-- 跨站请求伪造保护 -->
+        {{csrf_token }}  <!-- 跨站请求伪造保护 -->
         {{ form.as_p }}  <!-- 以段落形式渲染表单字段 -->
         <button type="submit">Add comment</button>  <!-- 提交按钮 -->
     </form>
@@ -665,7 +665,7 @@ python manage.py runserver
 #### 6. 模板 `post_detail.html`
 
 - 显示博客文章的详细信息、所有相关评论以及一个用于提交新评论的表单。
-- `{{% csrf_token %}}`: 跨站请求伪造保护。
+- `{{csrf_token }}`: 跨站请求伪造保护。
 - `{{ form.as_p }}`: 以段落形式渲染表单字段。
 
 通过这些步骤，你已经创建了一个完整的Django项目，能够使用ContentType实现通用的评论系统。这个系统可以方便地扩展到其他模型，如产品、新闻文章等，只需在相应模型中添加类似的获取评论的方法，并确保在视图中正确处理评论表单的提交。
