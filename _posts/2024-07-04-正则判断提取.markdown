@@ -103,3 +103,81 @@ for s in test_strings:
 ```
 
 这个脚本将匹配并提取符合指定模式的字符串中的信息，并判断字符串是否符合要求，支持 `thru`、`fext` 和 `next` 格式。
+
+------
+
+如果你需要在选择时将 `v-model` 中的数据绑定到 `file_name`，但最终使用 `file_uid`，可以通过额外的逻辑来实现。由于 `file_uid` 可能重复，你可以使用一个映射对象来保存 `file_name` 到 `file_uid` 的映射。
+
+以下是一个示例：
+
+假设你的数据结构是这样的：
+```javascript
+data() {
+  return {
+    files: [
+      { file_uid: '1', file_name: 'File 1' },
+      { file_uid: '2', file_name: 'File 2' },
+      { file_uid: '1', file_name: 'File 3' } // 重复的 file_uid
+    ],
+    selectedFileNames: [],
+    fileUidMap: {}
+  }
+},
+created() {
+  this.buildFileUidMap();
+},
+methods: {
+  buildFileUidMap() {
+    this.files.forEach(file => {
+      this.fileUidMap[file.file_name] = file.file_uid;
+    });
+  },
+  getSelectedFileUids() {
+    return this.selectedFileNames.map(fileName => this.fileUidMap[fileName]);
+  }
+}
+```
+
+在模板中，可以这样使用 `el-checkbox`：
+```html
+<template>
+  <div>
+    <el-checkbox-group v-model="selectedFileNames">
+      <el-checkbox 
+        v-for="file in files" 
+        :key="file.file_name" 
+        :label="file.file_name">
+        {{ file.file_name }}
+      </el-checkbox>
+    </el-checkbox-group>
+    <button @click="showSelectedFileUids">Show Selected File UIDs</button>
+  </div>
+</template>
+```
+
+在 methods 中添加一个方法来获取选中的 `file_uid`：
+```javascript
+methods: {
+  buildFileUidMap() {
+    this.files.forEach(file => {
+      this.fileUidMap[file.file_name] = file.file_uid;
+    });
+  },
+  getSelectedFileUids() {
+    return this.selectedFileNames.map(fileName => this.fileUidMap[fileName]);
+  },
+  showSelectedFileUids() {
+    const selectedUids = this.getSelectedFileUids();
+    console.log(selectedUids); // 或者在这里执行你需要的操作
+  }
+}
+```
+
+在这个示例中：
+- `v-model` 绑定的是 `selectedFileNames`，这是一个数组，用于存储选中的 `file_name`。
+- `el-checkbox` 的 `:label` 属性绑定的是 `file.file_name`，这样选中的值将是 `file_name`。
+- 在 `created` 生命周期钩子中调用 `buildFileUidMap` 方法来构建 `file_name` 到 `file_uid` 的映射。
+- `getSelectedFileUids` 方法将 `selectedFileNames` 转换为对应的 `file_uid`。
+- `showSelectedFileUids` 方法可以用来显示或使用选中的 `file_uid`。
+
+这样你就可以在选择时使用 `file_name`，并在需要时获取对应的 `file_uid`。
