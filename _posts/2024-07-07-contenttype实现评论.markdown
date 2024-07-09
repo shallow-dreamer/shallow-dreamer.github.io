@@ -907,3 +907,398 @@ def post_detail(request, post_id):
 ### 总结
 
 通过上述步骤，你可以将评论系统作为一个独立的Django应用，并在其他项目中重复使用。只需包含`comments`应用，并根据需要配置模型和视图，即可在任何Django项目中实现评论功能。
+
+------
+
+下面是一个详细注释的完整代码示例，包含了 `comments` 应用和两个示例应用 `blog` 和 `product`，每行代码都附有详细的注释。
+
+### 项目结构
+
+```plaintext
+myproject/
+│
+├── myproject/
+│   ├── __init__.py
+│   ├── settings.py
+│   ├── urls.py
+│   ├── wsgi.py
+│   └── asgi.py
+│
+├── comments/
+│   ├── __init__.py
+│   ├── models.py
+│   ├── admin.py
+│   ├── views.py
+│   ├── urls.py
+│   └── migrations/
+│       └── __init__.py
+│
+├── blog/
+│   ├── __init__.py
+│   ├── admin.py
+│   ├── apps.py
+│   ├── models.py
+│   ├── views.py
+│   ├── urls.py
+│   ├── forms.py
+│   └── migrations/
+│       └── __init__.py
+│
+├── product/
+│   ├── __init__.py
+│   ├── admin.py
+│   ├── apps.py
+│   ├── models.py
+│   ├── views.py
+│   ├── urls.py
+│   ├── forms.py
+│   └── migrations/
+│       └── __init__.py
+│
+└── manage.py
+```
+
+### `comments` 应用
+
+#### `comments/models.py`
+
+```python
+# comments/models.py
+from django.db import models  # 导入Django的模型类
+from django.contrib.contenttypes.models import ContentType  # 导入ContentType
+from django.contrib.contenttypes.fields import GenericForeignKey  # 导入GenericForeignKey
+
+class BaseComment(models.Model):  # 定义一个抽象的基类评论模型
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE)  # 关联评论用户
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)  # 关联内容类型
+    object_id = models.PositiveIntegerField()  # 存储关联对象的ID
+    content_object = GenericForeignKey('content_type', 'object_id')  # 定义一个通用外键
+    content = models.TextField()  # 评论内容
+    created_at = models.DateTimeField(auto_now_add=True)  # 创建时间，自动设置为当前时间
+
+    class Meta:
+        abstract = True  # 将该模型设为抽象模型，不会生成数据库表
+
+    def __str__(self):
+        return f'Comment by {self.user} on {self.content_object}'  # 定义模型的字符串表示
+```
+
+### `blog` 应用
+
+#### `blog/models.py`
+
+```python
+# blog/models.py
+from django.db import models  # 导入Django的模型类
+from django.contrib.contenttypes.models import ContentType  # 导入ContentType
+from comments.models import BaseComment  # 导入基类评论模型
+
+class BlogPost(models.Model):  # 定义博客文章模型
+    title = models.CharField(max_length=255)  # 文章标题
+    content = models.TextField()  # 文章内容
+    author = models.ForeignKey('auth.User', on_delete=models.CASCADE)  # 关联作者
+    created_at = models.DateTimeField(auto_now_add=True)  # 创建时间
+
+    def get_comments(self):  # 获取文章的所有评论
+        content_type = ContentType.objects.get_for_model(self)  # 获取ContentType实例
+        return BlogPostComment.objects.filter(content_type=content_type, object_id=self.id)  # 过滤评论
+
+    def get_content_type_id(self):  # 获取ContentType ID
+        return ContentType.objects.get_for_model(self).id
+
+    def __str__(self):
+        return self.title  # 定义模型的字符串表示
+
+class BlogPostHistory(models.Model):  # 定义博客文章历史记录模型
+    original_post = models.ForeignKey(BlogPost, on_delete=models.CASCADE)  # 关联原始文章
+    title = models.CharField(max_length=255)  # 历史记录标题
+    content = models.TextField()  # 历史记录内容
+    author = models.ForeignKey('auth.User', on_delete=models.CASCADE)  # 关联作者
+    created_at = models.DateTimeField(auto_now_add=True)  # 创建时间
+
+    def get_comments(self):  # 获取历史记录的所有评论
+        content_type = ContentType.objects.get_for_model(self)  # 获取ContentType实例
+        return BlogPostHistoryComment.objects.filter(content_type=content_type, object_id=self.id)  # 过滤评论
+
+    def get_content_type_id(self):  # 获取ContentType ID
+        return ContentType.objects.get_for_model(self).id
+
+    def __str__(self):
+        return self.title  # 定义模型的字符串表示
+
+class BlogPostComment(BaseComment):  # 博客文章评论模型，继承自BaseComment
+    class Meta:
+        db_table = 'blog_post_comments'  # 指定数据库表名
+
+class BlogPostHistoryComment(BaseComment):  # 博客文章历史评论模型，继承自BaseComment
+    class Meta:
+        db_table = 'blog_post_history_comments'  # 指定数据库表名
+```
+
+#### `blog/forms.py`
+
+```python
+# blog/forms.py
+from django import forms  # 导入Django的表单类
+from .models import BlogPostComment, BlogPostHistoryComment  # 导入评论模型
+
+class BlogPostCommentForm(forms.ModelForm):  # 博客文章评论表单
+    class Meta:
+        model = BlogPostComment  # 指定表单对应的模型
+        fields = ['content']  # 表单包含的字段
+
+class BlogPostHistoryCommentForm(forms.ModelForm):  # 博客文章历史评论表单
+    class Meta:
+        model = BlogPostHistoryComment  # 指定表单对应的模型
+        fields = ['content']  # 表单包含的字段
+```
+
+#### `blog/views.py`
+
+```python
+# blog/views.py
+from django.shortcuts import render, redirect, get_object_or_404  # 导入Django的视图工具
+from django.contrib.contenttypes.models import ContentType  # 导入ContentType
+from .models import BlogPost, BlogPostHistory, BlogPostComment, BlogPostHistoryComment  # 导入博客模型
+from .forms import BlogPostCommentForm, BlogPostHistoryCommentForm  # 导入评论表单
+
+def add_blogpost_comment(request, content_type_id, object_id):  # 添加博客文章评论
+    return handle_comment(request, BlogPostComment, BlogPostCommentForm, content_type_id, object_id)
+
+def add_blogpost_history_comment(request, content_type_id, object_id):  # 添加博客文章历史评论
+    return handle_comment(request, BlogPostHistoryComment, BlogPostHistoryCommentForm, content_type_id, object_id)
+
+def handle_comment(request, CommentModel, CommentForm, content_type_id, object_id):  # 处理添加评论
+    content_type = ContentType.objects.get(id=content_type_id)  # 获取ContentType实例
+    model_class = content_type.model_class()  # 获取对应的模型类
+    obj = model_class.objects.get(id=object_id)  # 获取对应的对象
+
+    if request.method == 'POST':  # 如果请求方法是POST
+        form = CommentForm(request.POST)  # 创建表单实例
+        if form.is_valid():  # 如果表单有效
+            comment = form.save(commit=False)  # 暂不保存评论实例
+            comment.user = request.user  # 设置评论的用户
+            comment.content_type = content_type  # 设置评论的内容类型
+            comment.object_id = obj.id  # 设置评论的对象ID
+            comment.save()  # 保存评论
+            return redirect(request.META.get('HTTP_REFERER', '/'))  # 重定向到上一页面
+    else:
+        form = CommentForm()  # 如果请求方法不是POST，创建空表单实例
+
+    comments = CommentModel.objects.filter(content_type=content_type, object_id=obj.id)  # 获取对象的所有评论
+    return render(request, 'blog/comment_list.html', {'form': form, 'comments': comments, 'object': obj})  # 渲染评论列表页面
+
+def post_detail(request, post_id):  # 博客文章详情视图
+    post = get_object_or_404(BlogPost, id=post_id)  # 获取文章对象，如果不存在则返回404
+    comments = post.get_comments()  # 获取文章的所有评论
+    form = BlogPostCommentForm()  # 创建空的评论表单实例
+    return render(request, 'blog/post_detail.html', {'post': post, 'comments': comments, 'form': form})  # 渲染文章详情页面
+
+def post_history_detail(request, history_id):  # 博客文章历史详情视图
+    post_history = get_object_or_404(BlogPostHistory, id=history_id)  # 获取历史记录对象，如果不存在则返回404
+    comments = post_history.get_comments()  # 获取历史记录的所有评论
+    form = BlogPostHistoryCommentForm()  # 创建空的历史评论表单实例
+    return render(request, 'blog/post_history_detail.html', {'post_history': post_history, '
+
+comments': comments, 'form': form})  # 渲染历史记录详情页面
+```
+
+#### `blog/urls.py`
+
+```python
+# blog/urls.py
+from django.urls import path  # 导入路径函数
+from .views import add_blogpost_comment, add_blogpost_history_comment, post_detail, post_history_detail  # 导入视图函数
+
+urlpatterns = [
+    path('post/<int:post_id>/', post_detail, name='post_detail'),  # 博客文章详情页面URL
+    path('post_history/<int:history_id>/', post_history_detail, name='post_history_detail'),  # 博客文章历史详情页面URL
+    path('add_blogpost_comment/<int:content_type_id>/<int:object_id>/', add_blogpost_comment, name='add_blogpost_comment'),  # 添加博客文章评论URL
+    path('add_blogpost_history_comment/<int:content_type_id>/<int:object_id>/', add_blogpost_history_comment, name='add_blogpost_history_comment'),  # 添加博客文章历史评论URL
+]
+```
+
+### `product` 应用
+
+#### `product/models.py`
+
+```python
+# product/models.py
+from django.db import models  # 导入Django的模型类
+from django.contrib.contenttypes.models import ContentType  # 导入ContentType
+from comments.models import BaseComment  # 导入基类评论模型
+
+class Product(models.Model):  # 定义产品模型
+    name = models.CharField(max_length=255)  # 产品名称
+    description = models.TextField()  # 产品描述
+    price = models.DecimalField(max_digits=10, decimal_places=2)  # 产品价格
+    created_at = models.DateTimeField(auto_now_add=True)  # 创建时间
+
+    def get_comments(self):  # 获取产品的所有评论
+        content_type = ContentType.objects.get_for_model(self)  # 获取ContentType实例
+        return ProductComment.objects.filter(content_type=content_type, object_id=self.id)  # 过滤评论
+
+    def get_content_type_id(self):  # 获取ContentType ID
+        return ContentType.objects.get_for_model(self).id
+
+    def __str__(self):
+        return self.name  # 定义模型的字符串表示
+
+class ProductHistory(models.Model):  # 定义产品历史记录模型
+    original_product = models.ForeignKey(Product, on_delete=models.CASCADE)  # 关联原始产品
+    name = models.CharField(max_length=255)  # 历史记录名称
+    description = models.TextField()  # 历史记录描述
+    price = models.DecimalField(max_digits=10, decimal_places=2)  # 历史记录价格
+    created_at = models.DateTimeField(auto_now_add=True)  # 创建时间
+
+    def get_comments(self):  # 获取历史记录的所有评论
+        content_type = ContentType.objects.get_for_model(self)  # 获取ContentType实例
+        return ProductHistoryComment.objects.filter(content_type=content_type, object_id=self.id)  # 过滤评论
+
+    def get_content_type_id(self):  # 获取ContentType ID
+        return ContentType.objects.get_for_model(self).id
+
+    def __str__(self):
+        return self.name  # 定义模型的字符串表示
+
+class ProductComment(BaseComment):  # 产品评论模型，继承自BaseComment
+    class Meta:
+        db_table = 'product_comments'  # 指定数据库表名
+
+class ProductHistoryComment(BaseComment):  # 产品历史评论模型，继承自BaseComment
+    class Meta:
+        db_table = 'product_history_comments'  # 指定数据库表名
+```
+
+#### `product/forms.py`
+
+```python
+# product/forms.py
+from django import forms  # 导入Django的表单类
+from .models import ProductComment, ProductHistoryComment  # 导入评论模型
+
+class ProductCommentForm(forms.ModelForm):  # 产品评论表单
+    class Meta:
+        model = ProductComment  # 指定表单对应的模型
+        fields = ['content']  # 表单包含的字段
+
+class ProductHistoryCommentForm(forms.ModelForm):  # 产品历史评论表单
+    class Meta:
+        model = ProductHistoryComment  # 指定表单对应的模型
+        fields = ['content']  # 表单包含的字段
+```
+
+#### `product/views.py`
+
+```python
+# product/views.py
+from django.shortcuts import render, redirect, get_object_or_404  # 导入Django的视图工具
+from django.contrib.contenttypes.models import ContentType  # 导入ContentType
+from .models import Product, ProductHistory, ProductComment, ProductHistoryComment  # 导入产品模型
+from .forms import ProductCommentForm, ProductHistoryCommentForm  # 导入评论表单
+
+def add_product_comment(request, content_type_id, object_id):  # 添加产品评论
+    return handle_comment(request, ProductComment, ProductCommentForm, content_type_id, object_id)
+
+def add_product_history_comment(request, content_type_id, object_id):  # 添加产品历史评论
+    return handle_comment(request, ProductHistoryComment, ProductHistoryCommentForm, content_type_id, object_id)
+
+def handle_comment(request, CommentModel, CommentForm, content_type_id, object_id):  # 处理添加评论
+    content_type = ContentType.objects.get(id=content_type_id)  # 获取ContentType实例
+    model_class = content_type.model_class()  # 获取对应的模型类
+    obj = model_class.objects.get(id=object_id)  # 获取对应的对象
+
+    if request.method == 'POST':  # 如果请求方法是POST
+        form = CommentForm(request.POST)  # 创建表单实例
+        if form.is_valid():  # 如果表单有效
+            comment = form.save(commit=False)  # 暂不保存评论实例
+            comment.user = request.user  # 设置评论的用户
+            comment.content_type = content_type  # 设置评论的内容类型
+            comment.object_id = obj.id  # 设置评论的对象ID
+            comment.save()  # 保存评论
+            return redirect(request.META.get('HTTP_REFERER', '/'))  # 重定向到上一页面
+    else:
+        form = CommentForm()  # 如果请求方法不是POST，创建空表单实例
+
+    comments = CommentModel.objects.filter(content_type=content_type, object_id=obj.id)  # 获取对象的所有评论
+    return render(request, 'product/comment_list.html', {'form': form, 'comments': comments, 'object': obj})  # 渲染评论列表页面
+
+def product_detail(request, product_id):  # 产品详情视图
+    product = get_object_or_404(Product, id=product_id)  # 获取产品对象，如果不存在则返回404
+    comments = product.get_comments()  # 获取产品的所有评论
+    form = ProductCommentForm()  # 创建空的评论表单实例
+    return render(request, 'product/product_detail.html', {'product': product, 'comments': comments, 'form': form})  # 渲染产品详情页面
+
+def product_history_detail(request, history_id):  # 产品历史详情视图
+    product_history = get_object_or_404(ProductHistory, id=history_id)  # 获取历史记录对象，如果不存在则返回404
+    comments = product_history.get_comments()  # 获取历史记录的所有评论
+    form = ProductHistoryCommentForm()  # 创建空的历史评论表单实例
+    return render(request, 'product/product_history_detail.html', {'product_history': product_history, 'comments': comments, 'form': form})  # 渲染历史记录详情页面
+```
+
+#### `product/urls.py`
+
+```python
+# product/urls.py
+from django.urls import path  # 导入路径函数
+from .views import add_product_comment, add_product_history_comment, product_detail, product_history_detail  # 导入视图函数
+
+urlpatterns = [
+    path('product/<int:product_id>/', product_detail, name='product_detail'),  # 产品详情页面URL
+    path('product_history/<int:history_id>/', product_history_detail, name='product_history_detail'),  # 产品历史详情页面URL
+    path('add_product_comment/<int:content_type_id>/<int:object_id>/', add_product_comment, name='add_product_comment'),  # 添加产品评论URL
+    path('add_product_history_comment/<int:content_type_id>/<int:object_id>/', add_product_history_comment, name='add_product_history_comment'),  # 添加产品历史评论URL
+]
+```
+
+### 配置项目URL
+
+#### `myproject/urls.py`
+
+```python
+# myproject/urls.py
+from django.contrib import admin  # 导入Django的admin工具
+from django.urls import path, include  # 导入路径和包含函数
+
+urlpatterns = [
+    path('admin/', admin.site.urls),  # 管理界面URL
+    path('comments/', include('comments.urls')),  # 评论应用的URL
+    path('blog/', include('blog.urls')),  # 博客应用的URL
+    path('product/', include('product.urls')),  # 产品应用的URL
+]
+```
+
+### 创建和迁移数据库
+
+在项目的根目录下运行以下命令以创建和迁移数据库：
+
+```sh
+python manage.py makemigrations comments blog product  # 创建迁移文件
+python manage.py migrate  # 迁移数据库
+```
+
+### 创建超级用户
+
+运行以下命令创建超级用户：
+
+```sh
+python manage.py createsuperuser  # 创建超级用户
+```
+
+### 启动开发
+
+服务器
+
+运行以下命令启动开发服务器：
+
+```sh
+python manage.py runserver  # 启动开发服务器
+```
+
+### 访问管理界面
+
+打开浏览器并访问 `http://127.0.0.1:8000/admin`，使用超级用户帐户登录以管理数据和评论。
+
+### 总结
+
+以上是一个详细注释的Django项目结构，包含了一个可复用的评论系统和两个示例应用 (`blog` 和 `product`)。每个应用都有自己的评论模型和历史评论模型，确保了评论数据的独立和可管理性。通过这种方式，你可以轻松地扩展项目并添加更多具有独立评论功能的应用。
