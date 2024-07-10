@@ -450,3 +450,89 @@ def read_s3_object(bucket_name, key):
 - **清理临时文件**：确保在处理完文件后删除临时文件，以避免占用磁盘空间。
 
 通过这种方式，你可以有效处理可能很大的 S3 文件，避免将整个文件加载到内存中，同时仍然可以利用需要文件路径的现有函数逻辑。
+
+------
+
+如果你希望直接将从 S3 读取的内容转换为一个 Python 文件对象，并且包含文件名而不使用临时文件，可以创建一个自定义文件对象类。这个自定义类会包含文件内容和文件名，并实现必要的文件方法，使其行为类似于文件对象。
+
+### 示例代码
+
+下面是如何实现一个自定义的文件对象类，并使用它来处理从 S3 读取的文件内容：
+
+```python
+import boto3
+from io import StringIO, BytesIO
+
+class S3FileObject:
+    def __init__(self, file_content, file_name):
+        self.file_content = file_content
+        self.file_name = file_name
+        self.file_object = StringIO(file_content) if isinstance(file_content, str) else BytesIO(file_content)
+
+    def read(self, *args, **kwargs):
+        return self.file_object.read(*args, **kwargs)
+
+    def seek(self, *args, **kwargs):
+        return self.file_object.seek(*args, **kwargs)
+
+    def tell(self, *args, **kwargs):
+        return self.file_object.tell(*args, **kwargs)
+
+    def close(self):
+        return self.file_object.close()
+
+def get_s3_file_object(bucket_name, key):
+    s3_client = boto3.client('s3')
+    try:
+        # 下载 S3 对象内容
+        response = s3_client.get_object(Bucket=bucket_name, Key=key)
+        file_content = response['Body'].read()
+        
+        # 获取文件名
+        file_name = key.split('/')[-1]
+        
+        # 返回自定义文件对象
+        return S3FileObject(file_content, file_name)
+
+    except Exception as e:
+        print(f"Error reading S3 object: {e}")
+        return None
+
+# 示例使用
+bucket_name = 'your-bucket-name'
+key = 'your-file-key'
+
+s3_file_object = get_s3_file_object(bucket_name, key)
+if s3_file_object:
+    print(f"Processing file: {s3_file_object.file_name}")
+    content = s3_file_object.read()
+    print(content)
+
+    # 将文件对象传递给眼图绘图包
+    # eye_diagram_plot(s3_file_object)  # 假设这是眼图绘图包的函数
+```
+
+### 解释
+
+1. **`S3FileObject` 类**：
+   - 包含文件内容和文件名。
+   - 使用 `StringIO` 或 `BytesIO` 创建一个文件对象，以便支持文本和二进制内容。
+   - 实现 `read`、`seek`、`tell` 和 `close` 方法，使其行为类似于文件对象。
+
+2. **`get_s3_file_object()` 函数**：
+   - 使用 `boto3` 获取 S3 对象内容。
+   - 读取 S3 对象内容。
+   - 获取文件名（通过拆分 S3 键）。
+   - 创建并返回自定义的 `S3FileObject` 实例。
+
+3. **示例使用**：
+   - 指定 S3 存储桶名称和文件键。
+   - 调用 `get_s3_file_object()` 函数获取自定义文件对象。
+   - 读取文件内容并打印。
+   - 将自定义文件对象传递给眼图绘图包的函数（假设眼图绘图包的函数能够处理文件对象）。
+
+### 注意事项
+
+- **文件内容类型**：根据文件内容是文本还是二进制，分别使用 `StringIO` 或 `BytesIO`。
+- **自定义文件对象**：确保自定义文件对象实现了调用方所需的所有文件方法。
+- **异常处理**：在实际应用中，添加更多的异常处理逻辑，以应对可能的错误情况。
