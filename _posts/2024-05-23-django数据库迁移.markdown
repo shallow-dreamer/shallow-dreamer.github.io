@@ -1290,3 +1290,130 @@ for book in Book.objects.all():
 ### 总结
 
 这个示例展示了如何在 `apps.py` 中初始化数据，并确保在重复运行时对 `unique_together` 字段（在此示例中为 `title` 和 `author`）进行检查，重复的数据会更新，不重复的数据会添加。通过这种方式，你可以确保在 Django 项目启动时数据的一致性和完整性。
+
+------
+
+感谢你的进一步说明。如果模型中只有字段和 `verbose_name`，并且 `admin.py` 中只显示字段，却依然在 Django admin 页面中点击查看时报错，这可能是由于某些特定数据或配置的问题。下面是一些步骤来排查和解决问题。
+
+### 排查步骤
+
+1. **检查数据库中的数据**：
+
+   确保数据库中的所有数据都是有效的，并且字段值符合模型定义的要求。
+
+   ```python
+   # 启动 Django shell
+   python manage.py shell
+
+   # 导入模型并检查数据
+   from my_app.models import MyModel
+   for obj in MyModel.objects.all():
+       print(obj.name)  # 替换为你的字段名，确保没有异常数据
+   ```
+
+2. **确保迁移正确**：
+
+   确保所有的数据库迁移都已正确应用：
+
+   ```sh
+   python manage.py makemigrations
+   python manage.py migrate
+   ```
+
+3. **检查模型定义**：
+
+   确保模型定义中没有问题，特别是 `verbose_name` 的用法：
+
+   ```python
+   from django.db import models
+
+   class MyModel(models.Model):
+       name = models.CharField(max_length=100, verbose_name='Name')
+       description = models.TextField(verbose_name='Description')
+
+       class Meta:
+           verbose_name = 'My Model'
+           verbose_name_plural = 'My Models'
+   ```
+
+4. **检查 Admin 配置**：
+
+   确保在 `admin.py` 中正确配置了模型：
+
+   ```python
+   from django.contrib import admin
+   from .models import MyModel
+   
+   @admin.register(MyModel)
+   class MyModelAdmin(admin.ModelAdmin):
+       list_display = ('name', 'description')
+   ```
+
+### 获取详细错误信息
+
+为了获取更多详细的错误信息，可以在 Django 的 `settings.py` 文件中启用 DEBUG 模式，并查看错误日志：
+
+```python
+# settings.py
+DEBUG = True
+```
+
+然后重现错误，查看浏览器中的详细错误信息，或者在终端中查看 Django 的错误日志。
+
+### 示例代码
+
+确保你的模型和 Admin 配置如下：
+
+#### models.py
+
+```python
+from django.db import models
+
+class MyModel(models.Model):
+    name = models.CharField(max_length=100, verbose_name='Name')
+    description = models.TextField(verbose_name='Description')
+
+    class Meta:
+        verbose_name = 'My Model'
+        verbose_name_plural = 'My Models'
+```
+
+#### admin.py
+
+```python
+from django.contrib import admin
+from .models import MyModel
+
+@admin.register(MyModel)
+class MyModelAdmin(admin.ModelAdmin):
+    list_display = ('name', 'description')
+```
+
+### 调试
+
+如果上述步骤仍然无法解决问题，可以在 `admin.py` 中添加日志记录或打印信息来帮助调试：
+
+```python
+from django.contrib import admin
+from .models import MyModel
+
+@admin.register(MyModel)
+class MyModelAdmin(admin.ModelAdmin):
+    list_display = ('name', 'description')
+
+    def changelist_view(self, request, extra_context=None):
+        try:
+            return super().changelist_view(request, extra_context=extra_context)
+        except Exception as e:
+            print(f"Error in changelist_view: {e}")
+            raise
+
+    def change_view(self, request, object_id, form_url='', extra_context=None):
+        try:
+            return super().change_view(request, object_id, form_url, extra_context)
+        except Exception as e:
+            print(f"Error in change_view: {e}")
+            raise
+```
+
+通过这些步骤和方法，你应该能够找到并解决在 Django admin 页面中点击查看时报错的问题。如果问题依旧存在，请提供详细的错误信息，以便进一步诊断和解决。
