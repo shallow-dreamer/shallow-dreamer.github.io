@@ -1,0 +1,168 @@
+---
+layout:     post
+title:      "虚拟列表"
+subtitle:   ""
+date:       2024-07-24
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue
+---
+
+为了确保滚动时元素正确显示并且性能良好，我们可以通过调整数据的管理方式和渲染逻辑，来实现虚拟滚动。这次，我们确保所有计算正确，并使用 `flex` 布局。以下是一个详细的实现方式，保证元素在滚动时正确显示。
+
+### 更新后的代码实现
+
+```html
+<template>
+  <div class="container" ref="container" @scroll="onScroll">
+    <div class="spacer" :style="{ height: spacerHeight + 'px' }"></div>
+    <div class="items" :style="{ transform: `translateY(${marginTop}px)` }">
+      <el-card
+        v-for="(item, index) in visibleItems"
+        :key="item.id"
+        class="item"
+      >
+        <div class="card-content">
+          <el-checkbox :label="item.id" v-model="selectedItems">{{ item.text }}</el-checkbox>
+          <el-select
+            v-model="item.selectedOption"
+            filterable
+            remote
+            reserve-keyword
+            :remote-method="remoteMethod"
+            :loading="loading"
+          >
+            <el-option
+              v-for="option in options"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            ></el-option>
+          </el-select>
+        </div>
+      </el-card>
+    </div>
+  </div>
+</template>
+
+<script>
+import { debounce } from 'lodash';
+
+export default {
+  data() {
+    return {
+      listData: Array.from({ length: 1000 }, (_, i) => ({
+        id: i,
+        text: `Item ${i}`,
+        selectedOption: null
+      })),
+      startIndex: 0,
+      visibleCount: 10,
+      buffer: 5, // Buffer items to prevent flickering
+      selectedItems: [],
+      options: [],
+      loading: false,
+      itemHeight: 150, // Ensure this matches the height of el-card
+    };
+  },
+  computed: {
+    visibleItems() {
+      const start = Math.max(this.startIndex - this.buffer, 0);
+      const end = Math.min(this.startIndex + this.visibleCount + this.buffer, this.listData.length);
+      return this.listData.slice(start, end);
+    },
+    spacerHeight() {
+      return this.listData.length * this.itemHeight;
+    },
+    marginTop() {
+      return this.startIndex * this.itemHeight;
+    }
+  },
+  methods: {
+    onScroll: debounce(function () {
+      const container = this.$refs.container;
+      const scrollTop = container.scrollTop;
+      this.startIndex = Math.floor(scrollTop / this.itemHeight);
+    }, 50), // Adjust debounce time as needed
+    deleteSelected() {
+      this.listData = this.listData.filter(item => !this.selectedItems.includes(item.id));
+      this.selectedItems = [];
+      this.onScroll(); // Recalculate visible items
+    },
+    remoteMethod(query) {
+      if (query !== '') {
+        this.loading = true;
+        setTimeout(() => {
+          this.loading = false;
+          this.options = this.listData.filter(item => {
+            return item.text.toLowerCase().includes(query.toLowerCase());
+          }).map(item => {
+            return { value: item.id, label: item.text };
+          });
+        }, 200);
+      } else {
+        this.options = [];
+      }
+    }
+  },
+  mounted() {
+    this.onScroll(); // Initialize visible items
+  }
+};
+</script>
+
+<style>
+.container {
+  height: 400px; /* Adjust this height as needed */
+  overflow-y: auto;
+  position: relative;
+}
+.spacer {
+  width: 100%;
+  background: transparent;
+}
+.items {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+.item {
+  box-sizing: border-box;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  cursor: pointer;
+  height: 150px; /* Ensure this matches itemHeight */
+}
+.card-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+</style>
+```
+
+### 关键点解释
+
+1. **`visibleItems`** 计算属性：
+   - 根据 `startIndex` 和 `buffer` 计算出需要渲染的条目，确保在可视区域及其附近的条目都能正确渲染。
+
+2. **`spacerHeight`** 计算属性：
+   - 用于设置 `spacer` 的高度，确保滚动条的高度正确。
+
+3. **`marginTop`** 计算属性：
+   - 根据 `startIndex` 计算出 `items` 容器的 `margin-top`，确保条目在正确的位置显示。
+
+4. **滚动事件处理 (`onScroll`)**：
+   - 使用防抖（`debounce`）优化滚动事件处理，减少计算频率，提高性能。
+
+### 调试建议
+
+- **检查控制台**：确保没有错误或警告。
+- **浏览器开发者工具**：查看元素的实际渲染情况，检查 `transform` 和条目的渲染位置。
+- **调整 `debounce` 时间**：根据实际性能调整防抖时间，以确保滚动平滑。
+
+通过这些调整，你应该能确保条目在滚动时正确显示。如果这个实现仍然存在问题，请告诉我具体的表现或错误信息，我会根据情况进行进一步调整。
