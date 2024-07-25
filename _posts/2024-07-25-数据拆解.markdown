@@ -1,0 +1,33 @@
+---
+layout:     post
+title:      "数据拆解"
+subtitle:   ""
+date:       2024-07-25
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+```python
+def data_reorganize_split_duplicate_row(data: List[Dict], json_list_fields: List[str]) -> List[Dict]:
+    result = []
+
+    for row in data:
+        # 获取所有 JSON 列表字段的最大长度
+        item_len = max((len(row.get(field, [])) for field in json_list_fields), default=1)
+
+        for index in range(item_len):
+            temp = {k: v for k, v in row.items() if k not in json_list_fields}  # 复制非 JSON 列表字段
+
+            for field in json_list_fields:
+                if field in row:
+                    field_data = row[field]
+                    if index < len(field_data):
+                        temp.update(field_data[index])
+
+            result.append(temp)
+
+    return result
+```
+
