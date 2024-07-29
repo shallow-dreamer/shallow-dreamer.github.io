@@ -1,0 +1,491 @@
+---
+layout:     post
+title:      "python异常处理"
+subtitle:   ""
+date:       2024-07-29
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+Python 提供了丰富的异常类，用于处理不同类型的错误和异常情况。以下是一些常见的 Python 异常类及其使用场景：
+
+### 基本异常类
+1. **Exception**
+   - 所有异常类的基类。通常不直接使用，而是用它的子类。
+
+2. **BaseException**
+   - 所有异常的基类。一般不直接使用，主要用于 `try` 和 `except` 块中的广泛捕获。
+
+### 常见内置异常类
+1. **ArithmeticError**
+   - 算术运算错误的基类，包括 `ZeroDivisionError`、`OverflowError` 和 `FloatingPointError`。
+
+2. **ZeroDivisionError**
+   - 除以零时引发的异常。
+   ```python
+   try:
+       result = 1 / 0
+   except ZeroDivisionError:
+       print("除以零错误")
+   ```
+
+3. **OverflowError**
+   - 数值运算结果超出表示范围时引发的异常。
+   ```python
+   import math
+   try:
+       result = math.exp(1000)
+   except OverflowError:
+       print("数值超出表示范围")
+   ```
+
+4. **IndexError**
+   - 使用序列中不存在的索引时引发的异常。
+   ```python
+   my_list = [1, 2, 3]
+   try:
+       element = my_list[5]
+   except IndexError:
+       print("索引超出范围")
+   ```
+
+5. **KeyError**
+   - 使用映射中不存在的键时引发的异常。
+   ```python
+   my_dict = {'a': 1}
+   try:
+       value = my_dict['b']
+   except KeyError:
+       print("键不存在")
+   ```
+
+6. **AttributeError**
+   - 尝试访问对象不存在的属性时引发的异常。
+   ```python
+   class MyClass:
+       pass
+   obj = MyClass()
+   try:
+       obj.some_attribute
+   except AttributeError:
+       print("属性不存在")
+   ```
+
+7. **TypeError**
+   - 操作或函数应用于错误类型的对象时引发的异常。
+   ```python
+   try:
+       result = 'string' + 5
+   except TypeError:
+       print("类型错误")
+   ```
+
+8. **ValueError**
+   - 操作或函数接收的参数具有正确的类型但不适当的值时引发的异常。
+   ```python
+   try:
+       number = int('not_a_number')
+   except ValueError:
+       print("值错误")
+   ```
+
+9. **ImportError**
+   - 导入模块失败时引发的异常。
+   ```python
+   try:
+       import non_existent_module
+   except ImportError:
+       print("模块导入失败")
+   ```
+
+10. **FileNotFoundError**
+    - 尝试打开不存在的文件时引发的异常。
+    ```python
+    try:
+        with open('non_existent_file.txt', 'r') as file:
+            content = file.read()
+    except FileNotFoundError:
+        print("文件未找到")
+    ```
+
+11. **IOError**
+    - 输入/输出操作失败时引发的异常。在 Python 3 中，它是 `OSError` 的别名。
+    ```python
+    try:
+        with open('/path/to/file', 'r') as file:
+            content = file.read()
+    except IOError:
+        print("I/O 操作失败")
+    ```
+
+12. **RuntimeError**
+    - 发生不属于其他类别的运行时错误时引发的异常。
+    ```python
+    def function():
+        raise RuntimeError("运行时错误")
+    try:
+        function()
+    except RuntimeError as e:
+        print(e)
+    ```
+
+13. **StopIteration**
+    - 迭代器没有更多项目时引发的异常，用于指示迭代的结束。
+    ```python
+    my_iter = iter([1, 2, 3])
+    try:
+        while True:
+            print(next(my_iter))
+    except StopIteration:
+        print("迭代结束")
+    ```
+
+### 系统相关异常类
+1. **SystemExit**
+   - 使用 `sys.exit()` 函数时引发的异常，用于请求程序正常退出。
+   ```python
+   import sys
+   try:
+       sys.exit()
+   except SystemExit:
+       print("系统退出")
+   ```
+
+2. **KeyboardInterrupt**
+   - 用户中断程序执行（通常是通过按 `Ctrl+C`）时引发的异常。
+   ```python
+   try:
+       while True:
+           pass
+   except KeyboardInterrupt:
+       print("程序被用户中断")
+   ```
+
+3. **MemoryError**
+   - 内存分配失败时引发的异常。
+   ```python
+   try:
+       l = [1] * (10 ** 10)
+   except MemoryError:
+       print("内存不足")
+   ```
+
+### 其他常见异常类
+1. **AssertionError**
+   - 断言语句失败时引发的异常。
+   ```python
+   try:
+       assert 1 == 0
+   except AssertionError:
+       print("断言失败")
+   ```
+
+2. **EOFError**
+   - 输入函数（如 `input()`）在未读取到任何数据时引发的异常。
+   ```python
+   try:
+       input("输入点什么：")
+   except EOFError:
+       print("未读取到任何数据")
+   ```
+
+这些异常类覆盖了大多数常见的错误场景，但 Python 允许开发者定义自己的异常类来处理特定的错误条件。这些自定义异常类通常继承自 `Exception` 或其子类。
+
+------
+
+在 Django 的视图函数中，常见的异常处理主要涉及数据库操作、请求数据处理、权限验证等方面。以下是一些具体的异常类及其使用场景：
+
+### 数据库操作相关异常
+1. **DatabaseError**
+   - 所有数据库异常的基类。
+   ```python
+   from django.db import DatabaseError
+   
+   try:
+       # 数据库操作
+   except DatabaseError as e:
+       print("数据库错误:", e)
+   ```
+
+2. **IntegrityError**
+   - 数据完整性相关的异常，比如违反唯一性约束。
+   ```python
+   from django.db import IntegrityError
+   
+   try:
+       # 数据库操作
+   except IntegrityError as e:
+       print("数据完整性错误:", e)
+   ```
+
+3. **DataError**
+   - 数据库操作过程中由于无效数据引发的错误，比如数据超出字段最大长度。
+   ```python
+   from django.db import DataError
+   
+   try:
+       # 数据库操作
+   except DataError as e:
+       print("数据错误:", e)
+   ```
+
+4. **OperationalError**
+   - 数据库操作失败，比如连接丢失。
+   ```python
+   from django.db import OperationalError
+   
+   try:
+       # 数据库操作
+   except OperationalError as e:
+       print("操作错误:", e)
+   ```
+
+### 请求数据处理相关异常
+1. **ValueError**
+   - 处理请求数据时，数据类型或值不正确。
+   ```python
+   try:
+       # 处理请求数据
+       value = int(request.POST.get('value'))
+   except ValueError as e:
+       print("值错误:", e)
+   ```
+
+2. **KeyError**
+   - 请求数据中缺少必要的键。
+   ```python
+   try:
+       value = request.POST['value']
+   except KeyError as e:
+       print("键错误:", e)
+   ```
+
+3. **MultiValueDictKeyError**
+   - 请求数据中缺少多值字典的键。
+   ```python
+   from django.utils.datastructures import MultiValueDictKeyError
+   
+   try:
+       value = request.POST['value']
+   except MultiValueDictKeyError as e:
+       print("多值字典键错误:", e)
+   ```
+
+### 权限验证相关异常
+1. **PermissionDenied**
+   - 用户没有执行某个操作的权限。
+   ```python
+   from django.core.exceptions import PermissionDenied
+   
+   def my_view(request):
+       if not request.user.has_perm('app_label.permission_codename'):
+           raise PermissionDenied("没有权限")
+   ```
+
+### HTTP相关异常
+1. **Http404**
+   - 请求的资源不存在。
+   ```python
+   from django.http import Http404
+   
+   def my_view(request, pk):
+       try:
+           obj = MyModel.objects.get(pk=pk)
+       except MyModel.DoesNotExist:
+           raise Http404("对象不存在")
+   ```
+
+### Django REST framework（DRF）中的异常
+如果你使用的是 Django REST framework，这里有一些常用的异常类：
+1. **ValidationError**
+   - 序列化和反序列化时验证失败。
+   ```python
+   from rest_framework.exceptions import ValidationError
+   
+   def my_view(request):
+       try:
+           # 验证数据
+           serializer = MySerializer(data=request.data)
+           serializer.is_valid(raise_exception=True)
+       except ValidationError as e:
+           print("验证错误:", e)
+   ```
+
+2. **NotAuthenticated**
+   - 用户未进行身份验证。
+   ```python
+   from rest_framework.exceptions import NotAuthenticated
+   
+   def my_view(request):
+       if not request.user.is_authenticated:
+           raise NotAuthenticated("用户未认证")
+   ```
+
+3. **PermissionDenied**
+   - 用户没有执行某个操作的权限。
+   ```python
+   from rest_framework.exceptions import PermissionDenied
+   
+   def my_view(request):
+       if not request.user.has_perm('app_label.permission_codename'):
+           raise PermissionDenied("没有权限")
+   ```
+
+4. **NotFound**
+   - 请求的资源不存在。
+   ```python
+   from rest_framework.exceptions import NotFound
+   
+   def my_view(request, pk):
+       try:
+           obj = MyModel.objects.get(pk=pk)
+       except MyModel.DoesNotExist:
+           raise NotFound("对象不存在")
+   ```
+
+在 Django 视图函数中处理异常时，通常需要返回一个合适的 HTTP 响应，告知客户端发生了什么错误。以下是一个处理多种异常的示例：
+
+```python
+from django.http import JsonResponse, Http404
+from django.db import DatabaseError, IntegrityError
+from django.core.exceptions import PermissionDenied
+from rest_framework.exceptions import ValidationError, NotAuthenticated, NotFound
+
+def my_view(request):
+    try:
+        # 视图逻辑
+        pass
+    except ValueError as e:
+        return JsonResponse({"error": "值错误", "details": str(e)}, status=400)
+    except KeyError as e:
+        return JsonResponse({"error": "键错误", "details": str(e)}, status=400)
+    except MultiValueDictKeyError as e:
+        return JsonResponse({"error": "多值字典键错误", "details": str(e)}, status=400)
+    except DatabaseError as e:
+        return JsonResponse({"error": "数据库错误", "details": str(e)}, status=500)
+    except IntegrityError as e:
+        return JsonResponse({"error": "数据完整性错误", "details": str(e)}, status=400)
+    except PermissionDenied as e:
+        return JsonResponse({"error": "没有权限", "details": str(e)}, status=403)
+    except Http404 as e:
+        return JsonResponse({"error": "对象不存在", "details": str(e)}, status=404)
+    except ValidationError as e:
+        return JsonResponse({"error": "验证错误", "details": str(e)}, status=400)
+    except NotAuthenticated as e:
+        return JsonResponse({"error": "用户未认证", "details": str(e)}, status=401)
+    except NotFound as e:
+        return JsonResponse({"error": "对象不存在", "details": str(e)}, status=404)
+    except Exception as e:
+        return JsonResponse({"error": "未知错误", "details": str(e)}, status=500)
+```
+
+这种方式确保了视图函数在处理不同类型的异常时，能够返回合适的响应和状态码。
+
+------
+
+在 Django 视图函数中调用自行封装的 S3 删除文件函数时，可能会遇到与 S3 操作相关的异常。以下是一些常见的异常处理方法和示例代码：
+
+### 常见 S3 异常
+如果使用的是 Boto3 库与 AWS S3 交互，以下是一些常见的异常类：
+
+1. **botocore.exceptions.NoCredentialsError**
+   - 未找到 AWS 凭证。
+2. **botocore.exceptions.PartialCredentialsError**
+   - AWS 凭证不完整。
+3. **botocore.exceptions.EndpointConnectionError**
+   - 无法连接到指定的 S3 端点。
+4. **botocore.exceptions.ClientError**
+   - 通用客户端错误。
+
+### 示例代码
+以下是一个在视图函数中调用 S3 删除文件函数并处理可能的异常的示例：
+
+```python
+from django.http import JsonResponse
+from botocore.exceptions import NoCredentialsError, PartialCredentialsError, EndpointConnectionError, ClientError
+
+def delete_s3_file(file_key):
+    # 自行封装的 S3 删除文件函数
+    import boto3
+    s3_client = boto3.client('s3')
+    try:
+        s3_client.delete_object(Bucket='your-bucket-name', Key=file_key)
+        return True
+    except NoCredentialsError:
+        raise Exception("AWS 凭证未找到")
+    except PartialCredentialsError:
+        raise Exception("AWS 凭证不完整")
+    except EndpointConnectionError:
+        raise Exception("无法连接到 S3 端点")
+    except ClientError as e:
+        raise Exception(f"S3 客户端错误: {e}")
+
+def my_view(request):
+    file_key = 'path/to/your/file'
+
+    try:
+        # 调用 S3 删除文件函数
+        delete_s3_file(file_key)
+        return JsonResponse({"message": "文件删除成功"}, status=200)
+    except NoCredentialsError as e:
+        return JsonResponse({"error": "AWS 凭证未找到", "details": str(e)}, status=500)
+    except PartialCredentialsError as e:
+        return JsonResponse({"error": "AWS 凭证不完整", "details": str(e)}, status=500)
+    except EndpointConnectionError as e:
+        return JsonResponse({"error": "无法连接到 S3 端点", "details": str(e)}, status=500)
+    except ClientError as e:
+        return JsonResponse({"error": "S3 客户端错误", "details": str(e)}, status=500)
+    except Exception as e:
+        return JsonResponse({"error": "未知错误", "details": str(e)}, status=500)
+```
+
+### 异常处理的考虑
+- **统一异常处理**：为了减少重复代码，可以将 S3 异常处理提取到一个单独的函数中。
+- **日志记录**：在捕获异常时，可以使用 Django 的日志记录功能记录详细的异常信息，以便后续分析和排查问题。
+- **用户友好**：返回的错误信息应尽可能对用户友好，不泄露内部实现细节，同时保留足够的信息供开发者调试。
+
+### 统一异常处理的示例
+```python
+import logging
+from django.http import JsonResponse
+from botocore.exceptions import NoCredentialsError, PartialCredentialsError, EndpointConnectionError, ClientError
+
+logger = logging.getLogger(__name__)
+
+def handle_s3_exception(e):
+    if isinstance(e, NoCredentialsError):
+        return JsonResponse({"error": "AWS 凭证未找到"}, status=500)
+    elif isinstance(e, PartialCredentialsError):
+        return JsonResponse({"error": "AWS 凭证不完整"}, status=500)
+    elif isinstance(e, EndpointConnectionError):
+        return JsonResponse({"error": "无法连接到 S3 端点"}, status=500)
+    elif isinstance(e, ClientError):
+        return JsonResponse({"error": f"S3 客户端错误: {e}"}, status=500)
+    else:
+        return JsonResponse({"error": "未知错误", "details": str(e)}, status=500)
+
+def delete_s3_file(file_key):
+    import boto3
+    s3_client = boto3.client('s3')
+    try:
+        s3_client.delete_object(Bucket='your-bucket-name', Key=file_key)
+        return True
+    except (NoCredentialsError, PartialCredentialsError, EndpointConnectionError, ClientError) as e:
+        logger.error(f"S3 错误: {e}")
+        raise e
+    except Exception as e:
+        logger.error(f"未知错误: {e}")
+        raise e
+
+def my_view(request):
+    file_key = 'path/to/your/file'
+    try:
+        delete_s3_file(file_key)
+        return JsonResponse({"message": "文件删除成功"}, status=200)
+    except Exception as e:
+        return handle_s3_exception(e)
+```
+
+这样可以简化视图函数中的异常处理逻辑，并确保异常处理的一致性。
