@@ -450,3 +450,92 @@ curl -X POST http://localhost:8000/api/files/latest/
 4. **路由**：我们定义了一个 URL 路由来访问 `LatestFileAPIView` 视图。
 
 通过这种方式，我们可以使用窗口函数、`last_modified` 和 `get_object_or_404` 来获取每个文件名分类中最新的一条数据。
+
+------
+
+理解了，你的两个模型都通过外键关联到 `User` 模型。假设你的模型如下：
+
+### 模型定义
+#### models.py
+```python
+from django.db import models
+from django.contrib.auth.models import User
+
+class UserProfile(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    additional_info = models.TextField()
+
+class AnotherModel(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    some_data = models.CharField(max_length=100)
+```
+
+要在查询 `AnotherModel` 时同时获取关联的 `User` 数据和 `UserProfile` 数据，你可以使用 `select_related` 和 `prefetch_related`。这里是一个示例实现：
+
+### 序列化器定义
+#### serializers.py
+```python
+from rest_framework import serializers
+from myapp.models import UserProfile, AnotherModel
+from django.contrib.auth.models import User
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserProfile
+        fields = ['additional_info']
+
+class UserSerializer(serializers.ModelSerializer):
+    user_profile = UserProfileSerializer(source='userprofile_set', many=True, read_only=True)
+
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'user_profile']
+
+class AnotherModelSerializer(serializers.ModelSerializer):
+    user = UserSerializer()
+
+    class Meta:
+        model = AnotherModel
+        fields = ['id', 'some_data', 'user']
+```
+
+### 视图定义
+#### views.py
+```python
+from rest_framework import generics
+from myapp.models import AnotherModel
+from myapp.serializers import AnotherModelSerializer
+
+class AnotherModelListView(generics.ListAPIView):
+    queryset = AnotherModel.objects.all().select_related('user').prefetch_related('user__userprofile_set')
+    serializer_class = AnotherModelSerializer
+```
+
+### URL 路由
+#### urls.py
+```python
+from django.urls import path
+from myapp.views import AnotherModelListView
+
+urlpatterns = [
+    path('another-model/', AnotherModelListView.as_view(), name='another-model-list'),
+]
+```
+
+### 代码解释
+1. **模型定义**:
+   - `UserProfile` 模型包含用户的额外信息，并与 `User` 模型通过外键关联。
+   - `AnotherModel` 模型包含一个外键字段 `user`，指向 `User` 模型。
+
+2. **序列化器定义**:
+   - `UserProfileSerializer` 序列化 `UserProfile` 模型。
+   - `UserSerializer` 序列化 `User` 模型，并包含 `UserProfile` 的信息。由于外键关联的 `UserProfile` 是一个集合，我们使用 `many=True`。
+   - `AnotherModelSerializer` 序列化 `AnotherModel` 模型，并包含嵌套的 `UserSerializer`。
+
+3. **视图定义**:
+   - 在 `AnotherModelListView` 视图中，使用 `select_related` 方法预加载 `user` 外键关联的数据，使用 `prefetch_related` 方法预加载 `user__userprofile_set` 数据，以减少数据库查询次数并优化性能。
+
+4. **URL 路由**:
+   - 配置 URL 路由，将路径 `'another-model/'` 路由到 `AnotherModelListView` 视图。
+
+通过这种方式，当你访问 `AnotherModelListView` 视图时，将会返回 `AnotherModel` 数据及其关联的 `User` 数据和 `UserProfile` 数据。这样可以有效地获取用户的额外信息，并减少数据库查询次数。
