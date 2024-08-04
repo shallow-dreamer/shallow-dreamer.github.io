@@ -166,3 +166,240 @@ export default {
 - **调整 `debounce` 时间**：根据实际性能调整防抖时间，以确保滚动平滑。
 
 通过这些调整，你应该能确保条目在滚动时正确显示。如果这个实现仍然存在问题，请告诉我具体的表现或错误信息，我会根据情况进行进一步调整。
+
+------
+
+要实现自适应 `itemHeight` 的虚拟列表，需要在渲染完成后动态计算每个条目的高度，并根据这些高度来调整滚动和渲染逻辑。这种实现会稍微复杂一些，因为需要处理动态高度的情况。以下是一个解决方案：
+
+### 更新后的虚拟列表组件实现
+
+#### `VirtualList.vue`
+
+```html
+<template>
+  <div class="virtual-list-container" ref="container" @scroll="onScroll">
+    <div class="spacer" :style="{ height: totalHeight + 'px' }"></div>
+    <div class="items" :style="{ transform: `translateY(${offsetTop}px)` }" ref="items">
+      <slot v-for="(item, index) in visibleItems" :item="item" :index="index" :key="item.id" />
+    </div>
+  </div>
+</template>
+
+<script>
+import { debounce } from 'lodash';
+
+export default {
+  name: 'VirtualList',
+  props: {
+    items: {
+      type: Array,
+      required: true
+    },
+    visibleCount: {
+      type: Number,
+      default: 10
+    },
+    buffer: {
+      type: Number,
+      default: 5
+    }
+  },
+  data() {
+    return {
+      startIndex: 0,
+      heights: [],
+      offsetTop: 0,
+      totalHeight: 0,
+    };
+  },
+  computed: {
+    visibleItems() {
+      const start = Math.max(this.startIndex - this.buffer, 0);
+      const end = Math.min(this.startIndex + this.visibleCount + this.buffer, this.items.length);
+      return this.items.slice(start, end);
+    }
+  },
+  methods: {
+    onScroll: debounce(function () {
+      const container = this.$refs.container;
+      const scrollTop = container.scrollTop;
+      this.updateVisibleItems(scrollTop);
+    }, 50),
+    updateVisibleItems(scrollTop) {
+      let accumulatedHeight = 0;
+      let newStartIndex = 0;
+      
+      for (let i = 0; i < this.heights.length; i++) {
+        if (accumulatedHeight + this.heights[i] > scrollTop) {
+          newStartIndex = i;
+          break;
+        }
+        accumulatedHeight += this.heights[i];
+      }
+      
+      this.startIndex = newStartIndex;
+      this.offsetTop = accumulatedHeight;
+    },
+    calculateHeights() {
+      const items = this.$refs.items.children;
+      this.heights = Array.from(items).map(item => item.getBoundingClientRect().height);
+      this.totalHeight = this.heights.reduce((a, b) => a + b, 0);
+    }
+  },
+  watch: {
+    items: {
+      immediate: true,
+      handler() {
+        this.$nextTick(() => {
+          this.calculateHeights();
+          this.updateVisibleItems(this.$refs.container.scrollTop);
+        });
+      }
+    }
+  },
+  mounted() {
+    this.$nextTick(() => {
+      this.calculateHeights();
+      this.updateVisibleItems(this.$refs.container.scrollTop);
+    });
+    window.addEventListener('resize', this.calculateHeights);
+  },
+  beforeDestroy() {
+    window.removeEventListener('resize', this.calculateHeights);
+  }
+};
+</script>
+
+<style>
+.virtual-list-container {
+  height: 400px; /* Adjust this height as needed */
+  overflow-y: auto;
+  position: relative;
+}
+.spacer {
+  width: 100%;
+  background: transparent;
+}
+.items {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+</style>
+```
+
+### 使用虚拟列表组件
+
+以下是如何使用 `VirtualList` 组件的示例，将 `el-card` 元素作为虚拟列表中的项渲染。
+
+#### `App.vue`
+
+```html
+<template>
+  <div id="app">
+    <VirtualList :items="listData" :visibleCount="10" :buffer="5">
+      <template v-slot="{ item, index }">
+        <el-card class="item" :key="item.id">
+          <div class="card-content">
+            <el-checkbox :label="item.id" v-model="selectedItems">{{ item.text }}</el-checkbox>
+            <el-select
+              v-model="item.selectedOption"
+              filterable
+              remote
+              reserve-keyword
+              :remote-method="remoteMethod"
+              :loading="loading"
+            >
+              <el-option
+                v-for="option in options"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              ></el-option>
+            </el-select>
+          </div>
+        </el-card>
+      </template>
+    </VirtualList>
+  </div>
+</template>
+
+<script>
+import VirtualList from './components/VirtualList.vue';
+
+export default {
+  components: {
+    VirtualList
+  },
+  data() {
+    return {
+      listData: Array.from({ length: 1000 }, (_, i) => ({
+        id: i,
+        text: `Item ${i}`,
+        selectedOption: null
+      })),
+      selectedItems: [],
+      options: [],
+      loading: false
+    };
+  },
+  methods: {
+    deleteSelected() {
+      this.listData = this.listData.filter(item => !this.selectedItems.includes(item.id));
+      this.selectedItems = [];
+    },
+    remoteMethod(query) {
+      if (query !== '') {
+        this.loading = true;
+        setTimeout(() => {
+          this.loading = false;
+          this.options = this.listData.filter(item => {
+            return item.text.toLowerCase().includes(query.toLowerCase());
+          }).map(item => {
+            return { value: item.id, label: item.text };
+          });
+        }, 200);
+      } else {
+        this.options = [];
+      }
+    }
+  }
+};
+</script>
+
+<style>
+.item {
+  box-sizing: border-box;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  cursor: pointer;
+}
+.card-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+</style>
+```
+
+### 关键点解释
+
+1. **`calculateHeights` 方法**：
+   - 动态计算每个条目的高度，并存储在 `heights` 数组中，同时计算出 `totalHeight`。
+
+2. **`updateVisibleItems` 方法**：
+   - 根据滚动位置计算当前可见的条目起始索引和偏移量 `offsetTop`。
+
+3. **插槽使用**：
+   - 在 `VirtualList` 中使用插槽，可以灵活地传递任意内容作为条目渲染。
+
+### 调试建议
+
+- **检查控制台**：确保没有错误或警告。
+- **浏览器开发者工具**：查看元素的实际渲染情况，检查 `transform` 和条目的渲染位置。
+- **调整高度计算**：确保 `calculateHeights` 方法正确计算条目高度，并且 `updateVisibleItems` 正确更新可见条目。
+
+通过这种方式，可以将虚拟列表功能封装为一个可复用的组件，并在任何需要的地方使用，同时支持动态高度的条目。
