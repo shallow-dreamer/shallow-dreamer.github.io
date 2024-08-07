@@ -4253,3 +4253,116 @@ urlpatterns = [
 2. 检查产品列表中的产品是否与数据库中的现有产品重复。
 
 这样，你就能确保传入的数据在多个层面上都是唯一且有效的。
+
+------
+
+在 Django 中，虽然没有像 ORM 那样直接操作 JSON 字段的简便方法，但可以使用 Django 的 `F` 表达式和 `Func` 表达式来在数据库级别直接操作 JSON 字段。使用 PostgreSQL 数据库时，特别有一些高级的 JSON 函数和操作符，可以帮助实现直接更新 JSON 字段。
+
+以下是一个更直接的方式，通过数据库操作来更新 JSON 字段中的特定键值对。
+
+### 使用 Django ORM 直接操作 JSON 字段
+
+假设你的模型如下：
+
+```python
+from django.db import models
+from django.contrib.postgres.fields import JSONField
+
+class MyModel(models.Model):
+    data = JSONField()
+```
+
+你可以使用 `F` 表达式和 `Func` 表达式来更新 JSON 字段中的特定键值对。
+
+### 更新视图示例
+
+```python
+from django.db.models import F, Func, Value
+from django.shortcuts import get_object_or_404
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from .models import MyModel
+
+class JSONBSet(Func):
+    function = 'jsonb_set'
+    template = "%(function)s(%(expressions)s)"
+
+@api_view(['POST'])
+def update_json_field(request, pk):
+    type_to_update = request.data.get('type')
+    new_data = request.data.get('new_data')
+
+    # 验证输入
+    if not type_to_update or not isinstance(new_data, dict):
+        return Response({'error': 'Invalid input'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # 获取模型实例
+    instance = get_object_or_404(MyModel, pk=pk)
+
+    # 获取现有的 JSON 数据
+    json_data = instance.data
+
+    # 查找并更新特定类型的字典
+    updated = False
+    for index, item in enumerate(json_data):
+        if item.get('type') == type_to_update:
+            # 更新指定键值对
+            for key, value in new_data.items():
+                json_path = f'{{{index},{key}}}'
+                MyModel.objects.filter(pk=pk).update(
+                    data=JSONBSet(F('data'), Value(json_path), Value(json.dumps(value)), Value(True))
+                )
+            updated = True
+            break
+
+    if not updated:
+        return Response({'error': 'Type not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # 刷新实例以反映数据库中的更新
+    instance.refresh_from_db()
+
+    return Response({'status': 'success', 'data': instance.data}, status=status.HTTP_200_OK)
+```
+
+### 解释
+
+1. **JSONBSet**: 自定义一个函数表达式类，用于在数据库中执行 `jsonb_set` 操作。
+2. **update_json_field 视图**:
+   - 接收并验证输入。
+   - 获取模型实例和现有的 JSON 数据。
+   - 查找特定类型的字典，并使用 `JSONBSet` 函数表达式更新指定键值对。
+   - 刷新实例以反映数据库中的更新。
+   
+### 优点
+
+这种方法直接在数据库级别操作 JSON 字段，避免了从数据库中获取数据、在应用层更新数据、再保存回数据库的开销。它使用 PostgreSQL 的强大 JSONB 操作功能，可以高效地更新 JSON 字段中的特定部分。
+
+### 配置 URL
+
+确保在 `urls.py` 中配置了对应的 URL 和视图：
+
+```python
+from django.urls import path
+from .views import update_json_field
+
+urlpatterns = [
+    path('update/<int:pk>/', update_json_field, name='update-json-field'),
+]
+```
+
+### 示例请求
+
+向该视图发送一个 POST 请求来更新 JSON 字段中的特定字典：
+
+```json
+{
+    "type": "desired_type",
+    "new_data": {
+        "key1": "new_value1",
+        "key2": "new_value2"
+    }
+}
+```
+
+通过这种方法，可以直接在数据库级别高效地更新 JSON 字段中的特定键值对。
