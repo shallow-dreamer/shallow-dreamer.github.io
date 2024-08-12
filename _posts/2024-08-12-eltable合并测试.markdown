@@ -1,0 +1,111 @@
+---
+layout:     post
+title:      "eltable合并测试"
+subtitle:   ""
+date:       2024-08-12
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - eltable
+---
+
+要实现只有当数据（例如 `username`）相同时才合并单元格，可以对 `span-method` 方法进行修改。以下是一个调整后的代码示例：
+
+```vue
+<template>
+  <el-table
+    :data="tableData"
+    :span-method="mergeRows"
+    style="width: 100%">
+    
+    <!-- 合并列 -->
+    <el-table-column
+      prop="username"
+      label="Username"
+      width="180">
+    </el-table-column>
+    
+    <!-- 数据列 -->
+    <el-table-column
+      prop="name"
+      label="Name"
+      width="180">
+    </el-table-column>
+
+    <!-- 按钮列 -->
+    <el-table-column
+      label="Action"
+      width="180">
+      <template v-slot="scope">
+        <el-button 
+          @click="addRow(scope.$index)" 
+          size="small" 
+          type="primary">
+          Add Row
+        </el-button>
+      </template>
+    </el-table-column>
+  </el-table>
+</template>
+
+<script>
+export default {
+  data() {
+    return {
+      tableData: [
+        { username: 'user1', name: 'Item 1' },
+        { username: 'user1', name: 'Item 2' },
+        { username: 'user2', name: 'Item 3' },
+        { username: 'user2', name: 'Item 4' },
+      ]
+    };
+  },
+  methods: {
+    mergeRows({ row, column, rowIndex, columnIndex }) {
+      if (columnIndex === 0) { // 只在第1列进行合并
+        const current = row.username;
+        const previous = this.tableData[rowIndex - 1]?.username;
+        const next = this.tableData[rowIndex + 1]?.username;
+
+        if (rowIndex === 0 || current !== previous) {
+          let rowspan = 1;
+          for (let i = rowIndex + 1; i < this.tableData.length; i++) {
+            if (this.tableData[i].username === current) {
+              rowspan++;
+            } else {
+              break;
+            }
+          }
+          return [rowspan, 1];
+        } else {
+          return [0, 0];
+        }
+      }
+    },
+    addRow(index) {
+      const username = this.tableData[index].username;
+      const newRow = { username, name: 'New Item' };
+      
+      // 找到要添加新行的位置，即当前合并组的最后一行
+      let insertIndex = index;
+      for (let i = index + 1; i < this.tableData.length; i++) {
+        if (this.tableData[i].username === username) {
+          insertIndex = i;
+        } else {
+          break;
+        }
+      }
+
+      this.tableData.splice(insertIndex + 1, 0, newRow);
+    }
+  }
+}
+</script>
+```
+
+### 说明：
+1. **`mergeRows` 方法**: 现在只会在相邻行的 `username` 相同时合并单元格。通过比较当前行与前一行、后一行的 `username`，确定是否进行合并。
+2. **`addRow` 方法**: 在点击按钮时，新行会被添加到当前合并组的最后一行之后。
+
+这样，你的表格中的 `username` 列就会根据值相同的行进行合并，同时在合并行的最后添加新行。
+
