@@ -4309,7 +4309,7 @@ def update_json_field(request, pk):
         if item.get('type') == type_to_update:
             # 更新指定键值对
             for key, value in new_data.items():
-                json_path = f'{{{index},{key}}}'
+                json_path = f'{index},{key}'
                 MyModel.objects.filter(pk=pk).update(
                     data=JSONBSet(F('data'), Value(json_path), Value(json.dumps(value)), Value(True))
                 )
