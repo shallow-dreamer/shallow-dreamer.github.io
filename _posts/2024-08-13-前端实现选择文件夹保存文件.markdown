@@ -1,0 +1,296 @@
+---
+layout:     post
+title:      "前端实现选择文件夹保存文件"
+subtitle:   ""
+date:       2024-08-13
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - 前端
+    - file system access api
+---
+
+In web applications, including those built with Vue 3, downloading files typically saves them to the user's default download directory. Due to browser security restrictions, web applications cannot directly specify or control the client's file system paths. However, with the introduction of the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API), some modern browsers allow web applications to interact more directly with the user's file system, subject to user permissions.
+
+Here's how you can leverage the File System Access API in Vue 3 to allow users to select a specific directory to save a file:
+
+1. **Check Browser Compatibility**
+
+   First, ensure that the user's browser supports the File System Access API. As of now, this API is supported in Chromium-based browsers like Chrome and Edge.
+
+   ```javascript
+   if ('showDirectoryPicker' in window) {
+       // The API is supported
+   } else {
+       // Fallback method
+   }
+   ```
+
+2. **Implementing the Save Functionality**
+
+   ```javascript
+   <template>
+     <div>
+       <button @click="saveFile">Save File to Directory</button>
+     </div>
+   </template>
+
+   <script>
+   export default {
+     methods: {
+       async saveFile() {
+         try {
+           // Prompt the user to select a directory
+           const dirHandle = await window.showDirectoryPicker();
+
+           // Define the file name
+           const fileName = 'example.txt';
+
+           // Create or get a file handle
+           const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+
+           // Create a writable stream
+           const writableStream = await fileHandle.createWritable();
+
+           // Write data to the stream
+           await writableStream.write('Hello, this is a sample text file.');
+
+           // Close the stream
+           await writableStream.close();
+
+           alert('File saved successfully!');
+         } catch (error) {
+           console.error('Error saving file:', error);
+           alert('Failed to save the file.');
+         }
+       }
+     }
+   };
+   </script>
+   ```
+
+3. **Explanation of the Code**
+
+   - **showDirectoryPicker**: This method prompts the user to select a directory and returns a handle to that directory.
+   - **getFileHandle**: Obtains a handle to a file within the selected directory. The `{ create: true }` option ensures that the file is created if it doesn't exist.
+   - **createWritable**: Creates a writable stream to the file, allowing you to write data.
+   - **write**: Writes data to the file.
+   - **close**: Closes the writable stream, ensuring all data is flushed and written.
+
+4. **Notes**
+
+   - **Permissions**: The first time the user selects a directory, the browser will ask for permission. Subsequent accesses to the same directory might not prompt again, depending on the browser's behavior.
+   - **Fallbacks**: For browsers that do not support the File System Access API, consider providing a fallback method where the file is downloaded to the default download directory using an `<a>` tag with the `download` attribute.
+
+5. **Fallback Download Method**
+
+   If the browser doesn't support the File System Access API, you can use the traditional method:
+
+   ```javascript
+   const blob = new Blob(['Hello, this is a sample text file.'], { type: 'text/plain' });
+   const url = URL.createObjectURL(blob);
+   const link = document.createElement('a');
+   link.href = url;
+   link.download = 'example.txt';
+   document.body.appendChild(link);
+   link.click();
+   document.body.removeChild(link);
+   URL.revokeObjectURL(url);
+   ```
+
+   This will prompt the user to download the file, saving it to their default download directory.
+
+**Conclusion**
+
+While browser security restrictions limit direct control over where files are saved, the File System Access API provides a way to offer users more flexibility in selecting save locations. Always ensure to handle permissions gracefully and provide fallback methods for broader browser compatibility.
+
+------
+
+Given that you have a large number of files and also generate Excel (.xlsx) files on the front end, I'll provide a detailed implementation plan to handle file downloads and saving them to a specified directory using the File System Access API. This approach will include:
+
+1. **Handling Multiple File Downloads**
+2. **Generating and Saving Excel Files**
+
+### 1. Handling Multiple File Downloads
+
+When you have multiple files that need to be saved to a specific directory, you can loop through each file and save it individually using the File System Access API.
+
+Here's how you can implement this:
+
+```vue
+<template>
+  <div>
+    <button @click="saveFiles">Save Files to Directory</button>
+  </div>
+</template>
+
+<script>
+export default {
+  methods: {
+    async saveFiles() {
+      try {
+        // Prompt the user to select a directory
+        const dirHandle = await window.showDirectoryPicker();
+
+        // Example file data (replace this with your actual file data)
+        const files = [
+          { name: 'file1.txt', content: 'Content for file 1' },
+          { name: 'file2.txt', content: 'Content for file 2' },
+          { name: 'file3.txt', content: 'Content for file 3' }
+        ];
+
+        for (const file of files) {
+          // Create or get a file handle
+          const fileHandle = await dirHandle.getFileHandle(file.name, { create: true });
+
+          // Create a writable stream
+          const writableStream = await fileHandle.createWritable();
+
+          // Write data to the stream
+          await writableStream.write(file.content);
+
+          // Close the stream
+          await writableStream.close();
+        }
+
+        alert('All files saved successfully!');
+      } catch (error) {
+        console.error('Error saving files:', error);
+        alert('Failed to save the files.');
+      }
+    }
+  }
+};
+</script>
+```
+
+### 2. Generating and Saving Excel Files
+
+To generate Excel files on the front end, you can use libraries like [SheetJS (xlsx)](https://github.com/SheetJS/sheetjs) to create Excel files and then save them using the File System Access API.
+
+First, install the `xlsx` package:
+
+```bash
+npm install xlsx
+```
+
+Then, implement the logic for generating and saving Excel files:
+
+```vue
+<template>
+  <div>
+    <button @click="generateAndSaveExcel">Generate and Save Excel</button>
+  </div>
+</template>
+
+<script>
+import * as XLSX from 'xlsx';
+
+export default {
+  methods: {
+    async generateAndSaveExcel() {
+      try {
+        // Prompt the user to select a directory
+        const dirHandle = await window.showDirectoryPicker();
+
+        // Sample data for Excel
+        const data = [
+          { name: 'John Doe', age: 30, profession: 'Developer' },
+          { name: 'Jane Smith', age: 25, profession: 'Designer' }
+        ];
+
+        // Create a new workbook and worksheet
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+
+        // Generate a binary Excel file
+        const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+
+        // Convert the Excel file to a Blob
+        const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
+        // Define the file name
+        const fileName = 'example.xlsx';
+
+        // Create or get a file handle in the selected directory
+        const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+
+        // Create a writable stream
+        const writableStream = await fileHandle.createWritable();
+
+        // Write the Excel Blob to the stream
+        await writableStream.write(blob);
+
+        // Close the stream
+        await writableStream.close();
+
+        alert('Excel file saved successfully!');
+      } catch (error) {
+        console.error('Error saving Excel file:', error);
+        alert('Failed to save the Excel file.');
+      }
+    }
+  }
+};
+</script>
+```
+
+### 3. Combining Multiple File Types
+
+If you need to save multiple types of files (e.g., text files, Excel files) to the same directory, you can combine the above methods into a single function.
+
+### Summary
+
+This solution leverages the File System Access API to allow users to select a directory and save multiple files, including dynamically generated Excel files. The approach is flexible and can handle various file types and large quantities of data, provided that user permissions are appropriately managed.
+
+------
+
+The File System Access API allows users to select a directory to save files, but it does not provide direct access to the file system path due to security reasons. The directory is indeed chosen by the user, and the application cannot automatically generate or set a specific directory path on the user's file system. Here’s how it works:
+
+### How the File System Access API Works:
+1. **User-Selected Directory**: When the `showDirectoryPicker()` method is called, the user is prompted to select a directory. The application then gets a handle to that directory, which can be used to create and save files within it.
+  
+2. **No Access to File System Path**: The API does not expose the actual file system path of the selected directory to the web application. Instead, it provides a handle that can be used to interact with the directory.
+
+3. **No Automatic Directory Creation**: The web application cannot automatically create directories on the user's file system. The directory must be chosen by the user, and any operations like creating files or subdirectories must be done within the context of that user-selected directory.
+
+### Example Workflow:
+- **Step 1**: The user clicks a button to save files.
+- **Step 2**: The application prompts the user to choose a directory.
+- **Step 3**: The application saves files in the chosen directory using the directory handle provided by the File System Access API.
+
+Here’s a conceptual example:
+
+```javascript
+async function saveFiles() {
+  try {
+    // Prompt user to select a directory
+    const dirHandle = await window.showDirectoryPicker();
+
+    // Example: Create a subdirectory within the selected directory
+    const subDirHandle = await dirHandle.getDirectoryHandle('MySubfolder', { create: true });
+
+    // Save files in the subdirectory
+    const fileHandle = await subDirHandle.getFileHandle('example.txt', { create: true });
+    const writableStream = await fileHandle.createWritable();
+    await writableStream.write('Hello, this is a sample text file.');
+    await writableStream.close();
+
+    alert('File saved successfully!');
+  } catch (error) {
+    console.error('Error saving file:', error);
+    alert('Failed to save the file.');
+  }
+}
+```
+
+### Limitations:
+- **No Predefined Paths**: You cannot predefine or automatically set the directory where files will be saved. The user must explicitly select it.
+- **No Path Information**: The application will not have access to the actual file system path (e.g., `C:\Users\YourName\Documents`) of the chosen directory.
+
+### Why the Restriction?
+This restriction is in place to protect user privacy and security, preventing websites from accessing or modifying files and directories on a user's file system without explicit consent.
+
+### Alternative Approach:
+If you require specific directory management on the server side, consider handling file generation and saving on the backend, and then providing download links to the user. This way, you have full control over file paths and directory structures on the server, while still giving the user the ability to download files to their desired location.
