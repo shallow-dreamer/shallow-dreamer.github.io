@@ -109,3 +109,164 @@ export default {
 
 这样，你的表格中的 `username` 列就会根据值相同的行进行合并，同时在合并行的最后添加新行。
 
+------
+
+在实现表格滚动功能时，可能出现报错的原因主要有以下几点：
+
+1. **表格引用问题**：确保 `ElTable` 组件的 `ref` 正确指向，并且在表格加载完成后执行滚动操作。
+2. **滚动逻辑问题**：需要根据具体情况调整滚动的计算方式，确保能够精确滚动到目标行。
+
+下面是调整后的代码：
+
+```vue
+<template>
+  <div>
+    <!-- 表格外的按钮，用于选择并添加新用户 -->
+    <el-button @click="selectUser" type="primary">Select User</el-button>
+    
+    <!-- 用户选择器 -->
+    <el-select v-model="selectedUserId" placeholder="Select a user" style="margin-left: 10px;">
+      <el-option v-for="user in availableUsers" :key="user.user_id" :label="user.username" :value="user.user_id"></el-option>
+    </el-select>
+
+    <el-table
+      ref="userTable"
+      :data="tableData"
+      :span-method="mergeRows"
+      style="width: 100%; margin-top: 20px;">
+      
+      <!-- 合并列 -->
+      <el-table-column
+        prop="username"
+        label="Username"
+        width="180">
+      </el-table-column>
+      
+      <!-- 数据列 -->
+      <el-table-column
+        prop="name"
+        label="Name"
+        width="180">
+      </el-table-column>
+
+      <!-- 操作列 -->
+      <el-table-column
+        label="Action"
+        width="180">
+        <template v-slot="scope">
+          <el-button 
+            @click="addRow(scope.$index)" 
+            size="small" 
+            type="primary">
+            Add Row
+          </el-button>
+          <el-button 
+            @click="deleteRow(scope.$index)" 
+            size="small" 
+            type="danger">
+            Delete Row
+          </el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+  </div>
+</template>
+
+<script>
+export default {
+  data() {
+    return {
+      tableData: [
+        { user_id: 1, username: 'user1', name: 'Item 1' },
+        { user_id: 1, username: 'user1', name: 'Item 2' },
+        { user_id: 2, username: 'user2', name: 'Item 3' },
+        { user_id: 2, username: 'user2', name: 'Item 4' },
+      ],
+      selectedUserId: null, // 当前选择的用户ID
+      availableUsers: [ // 可用用户列表
+        { user_id: 1, username: 'user1' },
+        { user_id: 2, username: 'user2' },
+        { user_id: 3, username: 'user3' }
+      ]
+    };
+  },
+  methods: {
+    mergeRows({ row, column, rowIndex, columnIndex }) {
+      if (columnIndex === 0) { // 只在第1列进行合并
+        const current = row.username;
+        const previous = this.tableData[rowIndex - 1]?.username;
+
+        if (rowIndex === 0 || current !== previous) {
+          let rowspan = 1;
+          for (let i = rowIndex + 1; i < this.tableData.length; i++) {
+            if (this.tableData[i].username === current) {
+              rowspan++;
+            } else {
+              break;
+            }
+          }
+          return [rowspan, 1];
+        } else {
+          return [0, 0];
+        }
+      }
+    },
+    addRow(index) {
+      const username = this.tableData[index].username;
+      const user_id = this.tableData[index].user_id;
+      const newRow = { user_id, username, name: 'New Item' };
+      
+      // 找到要添加新行的位置，即当前合并组的最后一行
+      let insertIndex = index;
+      for (let i = index + 1; i < this.tableData.length; i++) {
+        if (this.tableData[i].user_id === user_id) {
+          insertIndex = i;
+        } else {
+          break;
+        }
+      }
+
+      this.tableData.splice(insertIndex + 1, 0, newRow);
+    },
+    deleteRow(index) {
+      this.tableData.splice(index, 1);
+    },
+    selectUser() {
+      if (this.selectedUserId) {
+        const index = this.tableData.findIndex(row => row.user_id === this.selectedUserId);
+
+        if (index !== -1) {
+          // 如果用户存在于表格中，滚动到该用户位置
+          this.$nextTick(() => {
+            this.scrollToUser(index);
+          });
+        } else {
+          // 如果用户不存在，则添加到表格
+          const user = this.availableUsers.find(user => user.user_id === this.selectedUserId);
+          this.tableData.push({ user_id: user.user_id, username: user.username, name: 'New Item' });
+          this.$nextTick(() => {
+            this.scrollToUser(this.tableData.length - 1);
+          });
+        }
+      }
+    },
+    scrollToUser(index) {
+      const table = this.$refs.userTable;
+      if (table) {
+        const row = table.$el.querySelectorAll('.el-table__body-wrapper tbody tr')[index];
+        if (row) {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    }
+  }
+}
+</script>
+```
+
+### 代码调整说明：
+1. **`$nextTick`**: 当添加新用户后，立即调用滚动功能，这样可以确保 DOM 已经更新完成。
+2. **`scrollIntoView`**: 使用原生 JavaScript 的 `scrollIntoView` 方法滚动到指定的表格行，并且使用 `block: 'center'` 选项确保目标行居中显示。
+3. **获取表格行**: 通过 `querySelectorAll` 获取表格的所有行，然后定位到特定行进行滚动。
+
+这段代码应该可以避免滚动时出现的错误，并实现预期的滚动效果。如果还有问题，可以进一步调试滚动逻辑，确保表格引用和 DOM 结构正确。
