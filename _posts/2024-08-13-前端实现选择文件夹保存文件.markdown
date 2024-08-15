@@ -294,3 +294,95 @@ This restriction is in place to protect user privacy and security, preventing we
 
 ### Alternative Approach:
 If you require specific directory management on the server side, consider handling file generation and saving on the backend, and then providing download links to the user. This way, you have full control over file paths and directory structures on the server, while still giving the user the ability to download files to their desired location.
+
+------
+
+If your Excel file contains headers or titles in Chinese, you can handle this directly when generating the file using the `xlsx` library (SheetJS). The process is similar to what we've discussed before, but with Chinese characters in the headers.
+
+Here’s how you can do it:
+
+### Step-by-Step Implementation
+
+1. **Prepare Your Data with Chinese Headers**:
+   - Define your data as a JSON object where the keys (headers) are in Chinese.
+
+2. **Generate the Excel File**:
+   - Convert the data to a worksheet using `XLSX.utils.json_to_sheet`.
+   - Append the worksheet to a new workbook.
+   - Save the workbook as a file.
+
+### Example Code
+
+Here’s an example where the Excel file contains Chinese headers:
+
+```vue
+<template>
+  <div>
+    <button @click="generateAndSaveExcel">生成并保存Excel文件</button>
+  </div>
+</template>
+
+<script>
+import * as XLSX from 'xlsx';
+
+export default {
+  methods: {
+    async generateAndSaveExcel() {
+      try {
+        // Prompt the user to select a directory
+        const dirHandle = await window.showDirectoryPicker();
+
+        // Sample data with Chinese headers
+        const data = [
+          { 姓名: '张三', 年龄: 30, 职业: '开发人员' },
+          { 姓名: '李四', 年龄: 25, 职业: '设计师' }
+        ];
+
+        // Create a new worksheet and workbook
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+
+        // Generate a binary Excel file
+        const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+
+        // Convert the Excel file to a Blob
+        const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
+        // Define the file name
+        const fileName = '示例文件.xlsx';
+
+        // Create or get a file handle in the selected directory
+        const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+
+        // Create a writable stream
+        const writableStream = await fileHandle.createWritable();
+
+        // Write the Excel Blob to the stream
+        await writableStream.write(blob);
+
+        // Close the stream
+        await writableStream.close();
+
+        alert('Excel文件保存成功！');
+      } catch (error) {
+        console.error('保存Excel文件时出错:', error);
+        alert('保存Excel文件失败。');
+      }
+    }
+  }
+};
+</script>
+```
+
+### Explanation:
+- **Chinese Headers**: The keys in the `data` array (`姓名`, `年龄`, `职业`) are the headers that will appear in the Excel file.
+- **File Name**: The generated Excel file is named `示例文件.xlsx`, which is also in Chinese.
+- **Directory Selection**: The user is prompted to choose a directory to save the file, as discussed earlier.
+
+### Handling Encoding:
+- The `xlsx` library handles different encodings well, so you should not encounter issues with Chinese characters in headers or data.
+
+### Final Notes:
+- Ensure that your application environment is set to support UTF-8 encoding, which is standard and typically handles Chinese characters correctly.
+- If you face issues with character encoding or display, ensure that your system and environment settings are correctly configured for UTF-8.
