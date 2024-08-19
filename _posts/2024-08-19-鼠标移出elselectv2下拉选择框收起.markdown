@@ -1,0 +1,111 @@
+---
+layout:     post
+title:      "鼠标移出elselectv2下拉选择框收起"
+subtitle:   ""
+date:       2024-08-19
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - elselectv2
+    - vue
+---
+
+```vue
+<template>
+  <div v-for="(item, index) in selectData" :key="index" class="select-container">
+    <el-select-v2
+      v-model="selectedValues[index]"
+      placeholder="请选择"
+      ref="elSelectRefs"
+      @visible-change="(visible) => handleVisibleChange(visible, index)"
+      :options="item.options"
+      class="custom-select"
+      multiple
+    >
+      <template #default="{ item }">
+        <span>{{ item.label }}</span>
+      </template>
+    </el-select-v2>
+  </div>
+</template>
+
+<script>
+import { ref, nextTick } from 'vue';
+
+export default {
+  setup() {
+    const selectData = ref([
+      {
+        options: [
+          { value: 'option1', label: '选项1' },
+          { value: 'option2', label: '选项2' },
+          { value: 'option3', label: '选项3' },
+        ],
+      },
+      {
+        options: [
+          { value: 'optionA', label: '选项A' },
+          { value: 'optionB', label: '选项B' },
+          { value: 'optionC', label: '选项C' },
+        ],
+      },
+    ]);
+
+    const selectedValues = ref(Array(selectData.value.length).fill(null));
+    const elSelectRefs = ref([]);
+    const dropdownRefs = ref([]);
+
+    const handleMouseLeaveDropdown = (index) => {
+      setTimeout(() => {
+        const selectRef = elSelectRefs.value[index];
+        const dropdownRef = dropdownRefs.value[index];
+        console.log(2, selectRef, dropdownRef)
+        if (selectRef && dropdownRef) {
+          console.log(selectRef)
+          // 检查是否应该关闭下拉框
+          const isMouseOutside = !dropdownRef.contains(document.activeElement);
+          if (isMouseOutside) {
+          console.log(1)
+          selectRef.blur();
+          }
+        }
+      }, 200);
+    };
+
+    const handleVisibleChange = async (visible, index) => {
+      if (visible) {
+        await nextTick();
+        const dropdown = document.querySelectorAll('.el-select-dropdown')[index];
+        dropdownRefs.value[index] = dropdown;
+        if (dropdown) {
+          dropdown.addEventListener('mouseleave', () => handleMouseLeaveDropdown(index));
+        }
+      } else {
+        dropdownRefs.value[index] = null;
+      }
+    };
+
+    return {
+      selectData,
+      selectedValues,
+      elSelectRefs,
+      dropdownRefs,
+      handleMouseLeaveDropdown,
+      handleVisibleChange,
+    };
+  },
+};
+</script>
+
+<style>
+.select-container {
+  position: relative;
+}
+
+.custom-select .el-select-dropdown {
+  position: absolute;
+}
+</style>
+
+```
+
