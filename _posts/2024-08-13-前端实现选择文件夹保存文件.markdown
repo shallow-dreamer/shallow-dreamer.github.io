@@ -386,3 +386,158 @@ export default {
 ### Final Notes:
 - Ensure that your application environment is set to support UTF-8 encoding, which is standard and typically handles Chinese characters correctly.
 - If you face issues with character encoding or display, ensure that your system and environment settings are correctly configured for UTF-8.
+
+------
+
+To handle a scenario where both single-level and multi-level headers exist simultaneously, we can modify the logic to dynamically manage the structure of the headers and the merging process. This approach allows for a mix of single-level headers (which should be merged with the row below) and multi-level headers (which should be merged horizontally if necessary).
+
+### Example Implementation
+
+Here’s how you can modify the code to accommodate both single-level and multi-level headers:
+
+#### Example Code:
+
+```vue
+<template>
+  <div>
+    <button @click="generateAndSaveExcel">生成并保存Excel文件</button>
+  </div>
+</template>
+
+<script>
+import * as XLSX from 'xlsx';
+
+export default {
+  methods: {
+    generateHeaders(data, additionalHeaders) {
+      const headers = [[], []]; // Two-level headers
+      const merges = [];
+
+      additionalHeaders.forEach((header, index) => {
+        if (!header.level2) {
+          // Handle single-level header
+          headers[0].push(header.level1);
+          headers[1].push(''); // Add an empty cell below
+
+          // Merge the single-level header with the row below it
+          merges.push({
+            s: { r: 0, c: headers[0].length - 1 },
+            e: { r: 1, c: headers[0].length - 1 }
+          });
+        } else {
+          // Handle multi-level header
+          headers[0].push(header.level1);
+          headers[1].push(header.level2);
+
+          // Check if the previous level1 header is the same to merge
+          if (index > 0 && additionalHeaders[index - 1].level1 === header.level1) {
+            const prevMerge = merges[merges.length - 1];
+
+            // Extend the previous merge if the level1 headers match
+            if (prevMerge && prevMerge.s.c === headers[0].length - 2) {
+              prevMerge.e.c++;
+            }
+          } else {
+            // Create a new merge range for level1 headers
+            merges.push({
+              s: { r: 0, c: headers[0].length - 1 },
+              e: { r: 0, c: headers[0].length - 1 }
+            });
+          }
+        }
+      });
+
+      return { headers, merges };
+    },
+
+    async generateAndSaveExcel() {
+      try {
+        // Complex data set
+        const data = [
+          { 姓名: '张三', 年龄: 30, 职业: '开发人员', 公司: 'A公司', 工资: 10000, 部门: '研发部' },
+          { 姓名: '李四', 年龄: 25, 职业: '设计师', 公司: 'B公司', 工资: 8000, 部门: '设计部' },
+          { 姓名: '王五', 年龄: 28, 职业: '产品经理', 公司: 'A公司', 工资: 12000, 部门: '产品部' },
+          { 姓名: '赵六', 年龄: 32, 职业: '开发人员', 公司: 'C公司', 工资: 11000, 部门: '研发部' },
+          { 姓名: '孙七', 年龄: 29, 职业: '设计师', 公司: 'B公司', 工资: 8500, 部门: '设计部' }
+        ];
+
+        // Mixed-level header data
+        const additionalHeaders = [
+          { level1: '个人信息', level2: '姓名' },
+          { level1: '个人信息', level2: '年龄' },
+          { level1: '工作信息', level2: '职业' },
+          { level1: '工作信息', level2: '公司' },
+          { level1: '工资信息' }, // Single-level header, should be merged vertically
+          { level1: '部门信息', level2: '部门' }
+        ];
+
+        // Generate headers and merges
+        const { headers, merges } = this.generateHeaders(data, additionalHeaders);
+
+        // Prepare the data rows
+        const dataRows = data.map(item => [
+          item.姓名,
+          item.年龄,
+          item.职业,
+          item.公司,
+          item.工资,
+          item.部门
+        ]);
+
+        // Combine headers and data into a worksheet
+        const worksheetData = [...headers, ...dataRows];
+
+        // Create the worksheet
+        const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+
+        // Apply merges to the worksheet
+        worksheet['!merges'] = merges;
+
+        // Create a new workbook and append the worksheet
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+
+        // Generate a binary Excel file
+        const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
+        // Prompt the user to select a directory and save the file
+        const dirHandle = await window.showDirectoryPicker();
+        const fileHandle = await dirHandle.getFileHandle('mixed_level_headers_example.xlsx', { create: true });
+        const writableStream = await fileHandle.createWritable();
+        await writableStream.write(blob);
+        await writableStream.close();
+
+        alert('Excel文件保存成功！');
+      } catch (error) {
+        console.error('保存Excel文件时出错:', error);
+        alert('保存Excel文件失败。');
+      }
+    }
+  }
+};
+</script>
+```
+
+### Explanation:
+
+1. **Header Structure**:
+   - The code first identifies whether each header entry is single-level or multi-level.
+   - Single-level headers are merged with the row below, while multi-level headers can be merged horizontally based on the structure provided.
+
+2. **Merging Logic**:
+   - Single-level headers: Merged vertically (spanning two rows).
+   - Multi-level headers: Merged horizontally if adjacent headers share the same `level1` value.
+
+3. **Data Handling**:
+   - The `dataRows` array corresponds to the columns defined by the combined headers.
+   - The data structure handles both single and multi-level headers dynamically.
+
+### Testing with Complex Data:
+
+The provided example includes a mix of single-level and multi-level headers. When you run this code:
+
+- **Single-Level Header**: The "工资信息" header will be merged vertically across two rows.
+- **Multi-Level Headers**: "个人信息" and "工作信息" headers will span two rows, with "姓名", "年龄", "职业", and "公司" as second-level headers under them.
+
+This solution should cover various scenarios and allow for flexible header structures in your Excel files.
