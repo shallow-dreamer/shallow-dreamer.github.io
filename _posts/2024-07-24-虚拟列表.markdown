@@ -403,3 +403,390 @@ export default {
 - **调整高度计算**：确保 `calculateHeights` 方法正确计算条目高度，并且 `updateVisibleItems` 正确更新可见条目。
 
 通过这种方式，可以将虚拟列表功能封装为一个可复用的组件，并在任何需要的地方使用，同时支持动态高度的条目。
+
+------
+
+```vue
+<template>
+  <div>
+    <virtual-list :items="items">
+      <template v-slot="{ item, index }">
+        <div :class="index % 2 == 0 ? 'custom-item' : 'custom-item1'">
+          {{ index + 1 }}. {{ item }}
+        </div>
+      </template>
+    </virtual-list>
+  </div>
+</template>
+
+<script>
+import VirtualList from '@/components/VirtualList.vue';
+
+export default {
+  components: {
+    VirtualList
+  },
+  data() {
+    return {
+      items: Array.from({ length: 999 }, (_, i) => `Item ${i + 1}`)
+    };
+  }
+};
+</script>
+
+<style>
+.custom-item {
+  padding: 20px;
+  background-color: #f5f5f5;
+  margin-bottom: 5px;
+  border-radius: 5px;
+}
+
+.custom-item1 {
+  padding: 40px;
+  background-color: #f5f5f5;
+  margin-bottom: 5px;
+  border-radius: 5px;
+}
+</style>
+```
+
+```vue
+<template>
+    <div ref="container" class="virtual-list-container" @scroll="onScroll">
+      <div class="spacer" :style="{ height: totalHeight + 'px' }"></div>
+      <div class="items" :style="{ transform: `translateY(${offsetTop}px)` }">
+        <div
+          v-for="(item, index) in visibleItems"
+          :key="startIndex + index"
+          :ref="el => setItemRef(el, startIndex + index)"
+          class="item"
+          :class="{ selected: selectedItems.includes(startIndex + index) }"
+          @click="toggleSelection(startIndex + index)"
+        >
+          <slot :item="item" :index="startIndex + index" />
+        </div>
+      </div>
+    </div>
+  </template>
+  
+  <script>
+  export default {
+    name: 'VirtualList',
+    props: {
+      items: {
+        type: Array,
+        required: true
+      },
+      buffer: {
+        type: Number,
+        default: 5
+      }
+    },
+    data() {
+      return {
+        startIndex: 0,
+        offsetTop: 0,
+        totalHeight: 0,
+        containerHeight: 0,
+        visibleCount: 0,
+        itemHeights: [],
+        selectedItems: []
+      };
+    },
+    computed: {
+      visibleItems() {
+        return this.items.slice(this.startIndex, this.startIndex + this.visibleCount);
+      }
+    },
+    methods: {
+      onScroll() {
+        const scrollTop = this.$refs.container.scrollTop;
+        this.updateVisibleRange(scrollTop);
+      },
+      updateVisibleRange(scrollTop) {
+        let sumHeight = 0;
+        let found = false;
+        
+        for (let i = 0; i < this.itemHeights.length; i++) {
+          sumHeight += this.itemHeights[i];
+          if (sumHeight > scrollTop) {
+            this.startIndex = i;
+            this.offsetTop = sumHeight - this.itemHeights[i];
+            found = true;
+            break;
+          }
+        }
+        
+        if (!found) {
+          this.startIndex = 0;
+          this.offsetTop = 0;
+        }
+  
+        this.updateVisibleCount();
+      },
+      updateVisibleCount() {
+        this.containerHeight = this.$refs.container.clientHeight;
+        let sumHeight = 0;
+        let count = 0;
+        
+        for (let i = this.startIndex; i < this.itemHeights.length; i++) {
+          sumHeight += this.itemHeights[i];
+          count++;
+          if (sumHeight > this.containerHeight) break;
+        }
+        
+        this.visibleCount = count + this.buffer;
+      },
+      toggleSelection(index) {
+        const selectedIndex = this.selectedItems.indexOf(index);
+        if (selectedIndex > -1) {
+          this.selectedItems.splice(selectedIndex, 1);
+        } else {
+          this.selectedItems.push(index);
+        }
+      },
+      setItemRef(el, index) {
+        if (el) {
+          this.$nextTick(() => {
+            this.itemHeights[index] = el.offsetHeight;
+            this.updateTotalHeight();
+            this.updateVisibleCount();
+          });
+        }
+      },
+      updateTotalHeight() {
+        this.totalHeight = this.itemHeights.reduce((acc, height) => acc + height, 0);
+      }
+    },
+    mounted() {
+      this.containerHeight = this.$refs.container.clientHeight;
+      this.updateVisibleCount();
+    }
+  };
+  </script>
+  
+  <style>
+  .virtual-list-container {
+    height: 400px;
+    overflow-y: auto;
+    position: relative;
+  }
+  .spacer {
+    width: 100%;
+  }
+  .items {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+  }
+  .item {
+    padding: 10px;
+    border-bottom: 1px solid #ccc;
+    box-sizing: border-box;
+  }
+  .item.selected {
+    background-color: #b3d4fc;
+  }
+  </style>
+```
+
+------
+
+明白了，我会提供一个只包含虚拟滚动功能的组件。这个组件将只负责渲染可视区域内的元素，而不处理选择等其他操作。这些额外的操作可以在使用该组件的地方自行实现。
+
+### 简化版 VirtualScroll.vue 组件
+
+```vue
+<template>
+  <div ref="container" class="virtual-scroll-container" @scroll="onScroll">
+    <div class="spacer" :style="{ height: totalHeight + 'px' }"></div>
+    <div class="items" :style="{ transform: `translateY(${offsetTop}px)` }">
+      <div
+        v-for="(item, index) in visibleItems"
+        :key="startIndex + index"
+        :ref="el => setItemRef(el, startIndex + index)"
+        class="item"
+      >
+        <slot :item="item" :index="startIndex + index" />
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+export default {
+  name: 'VirtualScroll',
+  props: {
+    items: {
+      type: Array,
+      required: true
+    },
+    buffer: {
+      type: Number,
+      default: 5
+    }
+  },
+  data() {
+    return {
+      startIndex: 0,
+      offsetTop: 0,
+      totalHeight: 0,
+      containerHeight: 0,
+      visibleCount: 0,
+      itemHeights: []
+    };
+  },
+  computed: {
+    visibleItems() {
+      return this.items.slice(this.startIndex, this.startIndex + this.visibleCount);
+    }
+  },
+  methods: {
+    onScroll() {
+      const scrollTop = this.$refs.container.scrollTop;
+      this.updateVisibleRange(scrollTop);
+    },
+    updateVisibleRange(scrollTop) {
+      let sumHeight = 0;
+      let found = false;
+
+      for (let i = 0; i < this.itemHeights.length; i++) {
+        sumHeight += this.itemHeights[i];
+        if (sumHeight > scrollTop) {
+          this.startIndex = i;
+          this.offsetTop = sumHeight - this.itemHeights[i];
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        this.startIndex = 0;
+        this.offsetTop = 0;
+      }
+
+      this.updateVisibleCount();
+    },
+    updateVisibleCount() {
+      this.containerHeight = this.$refs.container.clientHeight;
+      let sumHeight = 0;
+      let count = 0;
+
+      for (let i = this.startIndex; i < this.itemHeights.length; i++) {
+        sumHeight += this.itemHeights[i];
+        count++;
+        if (sumHeight > this.containerHeight) break;
+      }
+
+      this.visibleCount = count + this.buffer;
+    },
+    setItemRef(el, index) {
+      if (el) {
+        this.$nextTick(() => {
+          this.itemHeights[index] = el.offsetHeight;
+          this.updateTotalHeight();
+          this.updateVisibleCount();
+        });
+      }
+    },
+    updateTotalHeight() {
+      this.totalHeight = this.itemHeights.reduce((acc, height) => acc + height, 0);
+    }
+  },
+  mounted() {
+    this.containerHeight = this.$refs.container.clientHeight;
+    this.updateVisibleCount();
+  }
+};
+</script>
+
+<style>
+.virtual-scroll-container {
+  height: 400px;
+  overflow-y: auto;
+  position: relative;
+}
+.spacer {
+  width: 100%;
+}
+.items {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+.item {
+  box-sizing: border-box;
+}
+</style>
+```
+
+### 使用组件并实现选择操作
+
+下面是一个使用 `VirtualScroll` 组件的例子，其中在使用组件中自行实现选择操作：
+
+```vue
+<template>
+  <div>
+    <virtual-scroll :items="items">
+      <template v-slot="{ item, index }">
+        <div
+          class="custom-item"
+          :class="{ selected: selectedItems.includes(index) }"
+          @click="toggleSelection(index)"
+        >
+          {{ index + 1 }}. {{ item }}
+        </div>
+      </template>
+    </virtual-scroll>
+  </div>
+</template>
+
+<script>
+import VirtualScroll from './VirtualScroll.vue';
+
+export default {
+  components: {
+    VirtualScroll
+  },
+  data() {
+    return {
+      items: Array.from({ length: 1000 }, (_, i) => `Item ${i + 1}`),
+      selectedItems: []
+    };
+  },
+  methods: {
+    toggleSelection(index) {
+      const selectedIndex = this.selectedItems.indexOf(index);
+      if (selectedIndex > -1) {
+        this.selectedItems.splice(selectedIndex, 1); // 取消选择
+      } else {
+        this.selectedItems.push(index); // 选择
+      }
+    }
+  }
+};
+</script>
+
+<style>
+.custom-item {
+  padding: 20px;
+  background-color: #f5f5f5;
+  margin-bottom: 5px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.custom-item.selected {
+  background-color: #b3d4fc;
+}
+</style>
+```
+
+### 说明
+
+- **VirtualScroll 组件**：只处理虚拟滚动，不包括选择等其他操作。
+- **使用组件**：在 `VirtualScroll` 组件中插入自定义内容，并在此处实现选择操作或其他逻辑。
+
+这种方式可以将虚拟滚动和业务逻辑分开，实现更好的模块化和代码复用。
