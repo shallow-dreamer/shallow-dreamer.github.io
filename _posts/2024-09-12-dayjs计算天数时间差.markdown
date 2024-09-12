@@ -1,0 +1,84 @@
+---
+layout:     post
+title:      "dayjs计算天数时间差"
+subtitle:   ""
+date:       2024-09-12
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue3
+    - dayjs
+---
+
+为了实现每天只提醒一次的功能，你可以结合 `localStorage` 来存储提醒的状态，这样可以确保在浏览器中存储上一次提醒的时间，并在每次页面加载时检查是否已经提醒过。如果没有提醒，则进行提醒并记录当天的日期。以下是实现的步骤：
+
+### 代码实现
+
+```vue
+<template>
+  <div>
+    <p>当前时间: {{ currentTime }}</p>
+    <p>过期时间: {{ expirationTime }}</p>
+    <p v-if="showReminder">距离过期还有: {{ daysUntilExpiration }} 天</p>
+  </div>
+</template>
+
+<script>
+import { ref, computed, onMounted } from 'vue';
+import dayjs from 'dayjs';
+
+// 提取出计算时间差的函数
+function calculateDaysDifference(startTime, endTime) {
+  return dayjs(endTime).diff(dayjs(startTime), 'day'); // 只计算天数
+}
+
+export default {
+  setup() {
+    const currentTime = ref(dayjs());
+    const expirationTime = ref(dayjs().add(2, 'day')); // 假设过期时间是两天后
+    const showReminder = ref(false);
+
+    const daysUntilExpiration = computed(() => {
+      return calculateDaysDifference(currentTime.value, expirationTime.value);
+    });
+
+    const checkReminder = () => {
+      const lastReminderDate = localStorage.getItem('lastReminderDate');
+      const today = dayjs().format('YYYY-MM-DD');
+
+      if (lastReminderDate !== today) {
+        showReminder.value = true;
+        localStorage.setItem('lastReminderDate', today); // 更新为今天的日期，确保一天只提醒一次
+      } else {
+        showReminder.value = false; // 当天已经提醒过，则不再提醒
+      }
+    };
+
+    onMounted(() => {
+      checkReminder(); // 检查是否需要提醒
+
+      // 模拟时间更新
+      setInterval(() => {
+        currentTime.value = dayjs();
+      }, 60000); // 每分钟更新一次当前时间
+    });
+
+    return {
+      currentTime,
+      expirationTime,
+      daysUntilExpiration,
+      showReminder,
+    };
+  },
+};
+</script>
+```
+
+### 说明：
+1. **`checkReminder` 函数**：检查 `localStorage` 中存储的 `lastReminderDate`，判断是否已经提醒过。
+   - 如果 `lastReminderDate` 与当前日期不同，则更新为今天的日期，并显示提醒。
+   - 如果 `lastReminderDate` 与今天相同，则不会重复提醒。
+2. **`localStorage`**：用于存储上一次提醒的日期，确保一天只提醒一次。
+3. **`showReminder`**：一个响应式变量，用于控制提醒信息是否显示。
+
+这样，每次页面加载时都会检查是否已经在当天提醒过，如果没有提醒过则进行提醒。
