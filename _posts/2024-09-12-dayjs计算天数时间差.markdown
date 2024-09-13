@@ -82,3 +82,67 @@ export default {
 3. **`showReminder`**：一个响应式变量，用于控制提醒信息是否显示。
 
 这样，每次页面加载时都会检查是否已经在当天提醒过，如果没有提醒过则进行提醒。
+
+------
+
+在 Vue 3 中，可以使用 `dayjs` 计算过期时间与当前时间的时间差。下面是一个示例，展示如何计算时间差并以天、小时、分钟的格式输出：
+
+1. 安装 `dayjs`：
+
+```bash
+npm install dayjs
+```
+
+2. 在 Vue 组件中使用 `dayjs`：
+
+```vue
+<template>
+  <div>
+    <p>当前时间: {{ currentTime }}</p>
+    <p>过期时间: {{ expirationTime }}</p>
+    <p>距离过期还有: {{ timeDifference }}</p>
+  </div>
+</template>
+
+<script>
+import { ref, computed, onMounted } from 'vue';
+import dayjs from 'dayjs';
+
+export default {
+  setup() {
+    const currentTime = ref(dayjs());
+    const expirationTime = ref(dayjs().add(2, 'day')); // 假设过期时间是两天后
+
+    const timeDifference = computed(() => {
+      const diff = expirationTime.value.diff(currentTime.value);
+
+      const days = dayjs.duration(diff).days();
+      const hours = dayjs.duration(diff).hours();
+      const minutes = dayjs.duration(diff).minutes();
+
+      return `${days} 天 ${hours} 小时 ${minutes} 分钟`;
+    });
+
+    onMounted(() => {
+      // 模拟时间更新
+      setInterval(() => {
+        currentTime.value = dayjs();
+      }, 60000); // 每分钟更新一次当前时间
+    });
+
+    return {
+      currentTime,
+      expirationTime,
+      timeDifference,
+    };
+  },
+};
+</script>
+```
+
+### 说明：
+- `dayjs().diff()`：计算两个时间的差异，以毫秒为单位。
+- `dayjs.duration()`：将毫秒数转换为可读的时间单位，例如天、小时、分钟。
+- `computed`：响应式地计算时间差，确保每次 `currentTime` 更新时，时间差也会更新。
+
+这样你就可以动态显示当前时间与过期时间之间的时间差。
