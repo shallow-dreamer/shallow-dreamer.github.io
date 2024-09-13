@@ -1,0 +1,218 @@
+---
+layout:     post
+title:      "根据参数设置不同的权限控制"
+subtitle:   ""
+date:       2024-09-13
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - django
+---
+
+如果已经使用用户的 **session** 实现了权限控制，并且现在需要在 Django 的 `APIView` 中添加基于 **session** 的权限控制，可以结合 Django 的权限系统和 `permissions` 机制实现。具体来说，你可以基于用户的权限信息或 session 数据来决定是否允许执行某个操作。
+
+你可以通过重写 `get_permissions` 方法或直接在视图方法中手动检查用户的 session 数据来实现权限控制。
+
+### 方法1：使用 `get_permissions` 结合自定义权限类
+
+首先，你可以定义一个自定义权限类，根据用户的 session 数据来决定是否允许访问：
+
+```python
+from rest_framework.permissions import BasePermission
+
+class HasSessionPermission(BasePermission):
+    def has_permission(self, request, view):
+        # 这里假设 session 中有 'user_type' 字段来区分权限
+        user_type = request.session.get('user_type')
+        
+        # 只有 'admin' 类型的用户才允许访问
+        if user_type == 'admin':
+            return True
+        return False
+```
+
+然后在 `APIView` 中动态选择权限：
+
+```python
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+from rest_framework.response import Response
+
+class CustomSessionPermissionView(APIView):
+    # 默认权限，假设需要用户已登录
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        # 如果是POST请求，则需要额外的 session 权限控制
+        if self.request.method == 'POST':
+            return [HasSessionPermission()]
+        return super().get_permissions()
+
+    def get(self, request):
+        return Response({"message": "GET request: Access granted."})
+    
+    def post(self, request):
+        return Response({"message": "POST request: Admin access granted."})
+```
+
+### 方法2：在视图方法中直接使用 `request.session` 检查权限
+
+如果你不需要自定义权限类，直接在视图中基于 session 数据检查权限也可以：
+
+```python
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
+
+class CustomSessionCheckView(APIView):
+    def get(self, request):
+        return Response({"message": "GET request: Access granted."})
+    
+    def post(self, request):
+        user_type = request.session.get('user_type')
+        
+        # 如果用户类型不是 'admin'，抛出权限拒绝异常
+        if user_type != 'admin':
+            raise PermissionDenied("You do not have permission to perform this action.")
+        
+        return Response({"message": "POST request: Admin access granted."})
+```
+
+### 解释：
+1. **自定义权限类** (`HasSessionPermission`)：通过从 `request.session` 中获取 session 数据，判断用户是否有访问权限。
+2. **动态选择权限**：在 `get_permissions` 方法中，针对不同的请求方法（如 POST 请求）选择不同的权限类。
+3. **直接在视图中检查**：在方法内部使用 `request.session.get()` 手动检查权限，不使用额外的权限类。
+
+这种方法既可以使用 Django 的 session 控制来管理用户的权限，同时通过 DRF 的权限机制来增强安全性和灵活性。
+
+------
+
+如果你希望字典直接定义在视图中，可以将权限映射的字典 (`PERMISSION_MAPPING`) 移到视图类内部。这样，权限逻辑与视图紧密绑定，并且保持了视图的可读性和可扩展性。
+
+下面是字典在视图中的实现方式：
+
+### 示例代码：
+
+```python
+from rest_framework.permissions import IsAuthenticated, AllowAny, BasePermission
+from rest_framework.views import APIView
+from rest_framework.response import Response
+
+# 自定义权限类，作为示例
+class IsAdminUser(BasePermission):
+    def has_permission(self, request, view):
+        # 假设 session 中包含 'user_type' 字段来判断管理员身份
+        return request.session.get('user_type') == 'admin'
+
+class DynamicPermissionView(APIView):
+    # 定义权限映射字典在视图类中
+    PERMISSION_MAPPING = {
+        'authenticated': IsAuthenticated,  # 认证用户
+        'any': AllowAny,                    # 允许任何用户
+        'admin': IsAdminUser,               # 自定义的管理员权限
+    }
+
+    def get_permissions(self):
+        # 从查询参数中获取 'role' 字段，默认值为 'any'
+        role = self.request.query_params.get('role', 'any')
+
+        # 从字典中获取对应的权限类，默认为 AllowAny
+        permission_class = self.PERMISSION_MAPPING.get(role, AllowAny)
+
+        # 返回对应的权限类实例
+        return [permission_class()]
+
+    def get(self, request):
+        return Response({"message": "GET request: Access granted based on role."})
+
+    def post(self, request):
+        return Response({"message": "POST request: Access granted based on role."})
+```
+
+### 解释：
+1. **`PERMISSION_MAPPING` 字典**:
+   - 现在字典被放置在视图类的属性中，作为类的一个常量。这样权限映射逻辑更贴近视图实现，方便维护。
+   
+2. **`get_permissions` 方法**:
+   - 和之前相同，`get_permissions` 从查询参数中获取 `role`，通过 `self.PERMISSION_MAPPING` 动态选择权限类。
+   - 使用字典 `get()` 方法，提供了一个默认值 `AllowAny`，当 `role` 不存在或无效时使用。
+
+3. **权限类实例化**:
+   - `permission_class()` 这里动态实例化从字典中获取的权限类。
+   
+### 使用方式与之前相同：
+- **请求 `/api/view?role=authenticated`**：需要认证用户访问。
+- **请求 `/api/view?role=admin`**：需要管理员权限。
+- **请求 `/api/view?role=any` 或无 `role` 参数**：允许任何用户访问。
+
+这种方式将权限映射的逻辑与视图绑定在一起，代码更清晰，维护和扩展也更加方便。
+
+------
+
+如果一个视图需要根据查询参数动态地应用多个权限类，你可以修改字典的结构，使每个查询参数值映射到一个权限类的列表。这样，针对不同的 `role` 值，可以为视图动态地分配多个权限类。
+
+### 示例代码：
+
+```python
+from rest_framework.permissions import IsAuthenticated, AllowAny, BasePermission
+from rest_framework.views import APIView
+from rest_framework.response import Response
+
+# 自定义权限类，作为示例
+class IsAdminUser(BasePermission):
+    def has_permission(self, request, view):
+        # 假设 session 中有 'user_type' 字段来判断管理员身份
+        return request.session.get('user_type') == 'admin'
+
+class IsStaffUser(BasePermission):
+    def has_permission(self, request, view):
+        # 假设 session 中有 'is_staff' 字段来判断是否是员工
+        return request.session.get('is_staff') == True
+
+class DynamicPermissionView(APIView):
+    # 权限映射字典，映射到多个权限类
+    PERMISSION_MAPPING = {
+        'authenticated': [IsAuthenticated],       # 仅认证用户
+        'admin': [IsAuthenticated, IsAdminUser],  # 认证且为管理员
+        'staff': [IsAuthenticated, IsStaffUser],  # 认证且为员工
+        'any': [AllowAny],                        # 允许任何人
+    }
+
+    def get_permissions(self):
+        # 从查询参数中获取 'role' 字段，默认值为 'any'
+        role = self.request.query_params.get('role', 'any')
+
+        # 从字典中获取对应的权限类列表，默认为 [AllowAny]
+        permission_classes = self.PERMISSION_MAPPING.get(role, [AllowAny])
+
+        # 实例化并返回权限类列表
+        return [permission() for permission in permission_classes]
+
+    def get(self, request):
+        return Response({"message": "GET request: Access granted based on role."})
+
+    def post(self, request):
+        return Response({"message": "POST request: Access granted based on role."})
+```
+
+### 解释：
+1. **`PERMISSION_MAPPING` 字典**:
+   - 每个 `role` 键现在映射到一个权限类列表。例如，`'admin'` 角色需要通过 `IsAuthenticated` 和 `IsAdminUser` 两个权限类的检查。
+   - 每个角色可以有一个或多个权限类。
+
+2. **`get_permissions` 方法**:
+   - 从查询参数中获取 `role`，根据 `role` 从字典中查找对应的权限类列表。
+   - 对字典获取结果 `permission_classes` 进行实例化，返回权限类实例的列表。
+   - 如果查询参数没有指定 `role`，默认使用 `AllowAny`，即允许任何用户访问。
+
+3. **多个权限的组合**:
+   - 如果映射到多个权限类，则所有权限类都必须通过检查，才允许用户访问。
+   - 例如，`'admin'` 角色不仅需要通过认证（`IsAuthenticated`），还需要是管理员（`IsAdminUser`）。
+
+### 使用示例：
+- **请求 `/api/view?role=authenticated`**：只要用户经过认证即可访问。
+- **请求 `/api/view?role=admin`**：用户需要经过认证且是管理员才能访问。
+- **请求 `/api/view?role=staff`**：用户需要经过认证且是员工才能访问。
+- **请求 `/api/view?role=any` 或无 `role` 参数**：允许任何用户访问。
+
+这种方式支持为不同的角色动态分配多个权限类，使得权限控制更灵活和强大。
