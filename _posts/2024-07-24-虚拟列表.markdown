@@ -1004,3 +1004,185 @@ export default {
 
 ```
 
+------
+
+为了让你能够直接在 `ElTabPane` 中使用通用的虚拟列表组件，下面是一个完整的实现代码。这个虚拟列表组件将独立处理滚动和数据渲染，并在每个 tab 中显示不同的数据。
+
+### 通用虚拟列表组件：`VirtualList.vue`
+
+```vue
+<template>
+  <div ref="container" class="virtual-scroll-container" @scroll="onScroll">
+    <div class="spacer" :style="{ height: totalHeight + 'px' }"></div>
+    <div class="items" :style="{ transform: `translateY(${offsetTop}px)` }">
+      <div
+        v-for="(item, index) in visibleItems"
+        :key="startIndex + index"
+        class="item"
+      >
+        <slot :item="item" :index="startIndex + index"></slot>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+export default {
+  name: 'VirtualList',
+  props: {
+    items: {
+      type: Array,
+      required: true,
+    },
+    itemHeight: {
+      type: Number,
+      default: 50, // 每个项目的默认高度
+    },
+    buffer: {
+      type: Number,
+      default: 5, // 缓冲区大小，控制渲染时多加载的项
+    },
+  },
+  data() {
+    return {
+      startIndex: 0,
+      offsetTop: 0,
+      totalHeight: 0,
+      visibleCount: 0,
+    };
+  },
+  computed: {
+    visibleItems() {
+      return this.items.slice(this.startIndex, this.startIndex + this.visibleCount);
+    },
+  },
+  methods: {
+    onScroll() {
+      const scrollTop = this.$refs.container.scrollTop;
+      this.updateVisibleRange(scrollTop);
+    },
+    updateVisibleRange(scrollTop) {
+      this.startIndex = Math.floor(scrollTop / this.itemHeight);
+      this.offsetTop = this.startIndex * this.itemHeight;
+      this.updateVisibleCount();
+    },
+    updateVisibleCount() {
+      const containerHeight = this.$refs.container.clientHeight;
+      this.visibleCount = Math.ceil(containerHeight / this.itemHeight) + this.buffer;
+    },
+  },
+  mounted() {
+    this.$nextTick(() => {
+      const containerHeight = this.$refs.container.clientHeight;
+      this.visibleCount = Math.ceil(containerHeight / this.itemHeight) + this.buffer;
+      this.totalHeight = this.items.length * this.itemHeight;
+    });
+  },
+};
+</script>
+
+<style>
+.virtual-scroll-container {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  position: relative;
+}
+.spacer {
+  width: 100%;
+}
+.items {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+.item {
+  box-sizing: border-box;
+  padding: 10px;
+}
+</style>
+```
+
+### 主页面：`App.vue` (直接在 `ElTabPane` 中使用虚拟组件)
+
+```vue
+<template>
+  <el-tabs v-model="activeTab" class="tab-container">
+    <el-tab-pane label="Tab 1" name="1">
+      <VirtualList :items="tab1Items" :itemHeight="50">
+        <template #default="{ item, index }">
+          <div class="item-content">{{ index }}: {{ item.name }}</div>
+        </template>
+      </VirtualList>
+    </el-tab-pane>
+    <el-tab-pane label="Tab 2" name="2">
+      <VirtualList :items="tab2Items" :itemHeight="50">
+        <template #default="{ item, index }">
+          <div class="item-content">{{ index }}: {{ item.name }}</div>
+        </template>
+      </VirtualList>
+    </el-tab-pane>
+  </el-tabs>
+</template>
+
+<script>
+import { ref } from 'vue';
+import VirtualList from './components/VirtualList.vue';
+
+export default {
+  components: {
+    VirtualList,
+  },
+  setup() {
+    const tab1Items = ref(
+      Array.from({ length: 1000 }, (v, i) => ({
+        id: i,
+        name: `Tab 1 Item ${i + 1}`,
+      }))
+    );
+
+    const tab2Items = ref(
+      Array.from({ length: 800 }, (v, i) => ({
+        id: i,
+        name: `Tab 2 Item ${i + 1}`,
+      }))
+    );
+
+    const activeTab = ref('1');
+
+    return {
+      activeTab,
+      tab1Items,
+      tab2Items,
+    };
+  },
+};
+</script>
+
+<style>
+.el-tabs__content {
+  height: 400px; /* 设定Tab容器的高度 */
+}
+
+.item-content {
+  padding: 10px;
+  border-bottom: 1px solid #ddd;
+}
+.el-tab-pane{
+  height: 100%;
+}
+</style>
+```
+
+### 关键说明：
+1. **`VirtualList.vue` 通用组件**：通过 `props` 传递数据 `items` 和每个条目的高度 `itemHeight`，并通过 `slot` 来灵活定义每个条目的显示内容。
+2. **在 `ElTabPane` 中直接使用虚拟列表**：通过 `slot` 的插槽机制，你可以在 `ElTabPane` 中直接嵌入虚拟列表，而不需要额外的封装。
+3. **支持多 Tab 独立渲染**：每个 tab 页都会有独立的虚拟列表实例，并且在切换 tab 时不会相互影响。
+
+### 测试：
+1. 切换 Tab，观察每个 Tab 中的数据是否独立正常渲染。
+2. 滚动列表，确保列表项不会闪烁，滚动效果正常。
+3. 在 `ElTabPane` 中切换时，确保滚动条和数据都不会混乱。
+
+这个结构简洁地将虚拟列表逻辑封装到了通用组件 `VirtualList.vue` 中，可以复用到其他场景中，满足你的 `ElTabs` 虚拟列表需求。
