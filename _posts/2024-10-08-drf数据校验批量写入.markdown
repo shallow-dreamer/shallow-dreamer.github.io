@@ -1,0 +1,116 @@
+---
+layout:     post
+title:      "drf数据校验批量写入"
+subtitle:   ""
+date:       2024-10-08
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - django
+    - drf
+---
+
+如果你已经在 Django 项目的设置中将每个请求设置为一个事务，结合你在序列化器中的实现可以确保事务的自动管理。这意味着每个请求都将在一个数据库事务中处理，以下是如何整合这个特性：
+
+### 1. **在序列化器中进行逐一检查**
+
+你可以继续使用之前的自定义序列化器。在这里，我们不需要显式地使用 `transaction.atomic()`，因为 Django 会自动为每个请求处理事务。
+
+### 2. **序列化器的实现**
+
+确保序列化器的 `create` 方法能够处理数据的检查、删除和插入。
+
+```python
+from rest_framework import serializers
+from your_app.models import YourModel, AnotherModel
+
+class YourModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = YourModel
+        fields = '__all__'
+
+    def validate(self, attrs):
+        # 逐一检查每个字段的有效性
+        if 'field_name' not in attrs or attrs['field_name'] == '':
+            raise serializers.ValidationError({"field_name": "This field is required."})
+        return attrs
+
+    def create(self, validated_data):
+        # 删除原数据
+        YourModel.objects.all().delete()
+        # 批量创建新数据
+        return YourModel.objects.bulk_create([YourModel(**item) for item in validated_data])
+
+class AnotherModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AnotherModel
+        fields = '__all__'
+
+    def validate(self, attrs):
+        # 逐一检查另一个模型的字段有效性
+        if 'another_field' not in attrs or attrs['another_field'] == '':
+            raise serializers.ValidationError({"another_field": "This field is required."})
+        return attrs
+
+    def create(self, validated_data):
+        # 删除原数据
+        AnotherModel.objects.all().delete()
+        # 批量创建新数据
+        return AnotherModel.objects.bulk_create([AnotherModel(**item) for item in validated_data])
+```
+
+### 3. **视图的实现**
+
+在视图中，你可以简单地调用序列化器并处理响应。在每个请求中，事务会自动管理。
+
+```python
+from rest_framework import viewsets
+from your_app.models import YourModel, AnotherModel
+from your_app.serializers import YourModelSerializer, AnotherModelSerializer
+from rest_framework.response import Response
+from rest_framework import status
+
+class YourModelViewSet(viewsets.ModelViewSet):
+    queryset = YourModel.objects.all()
+    serializer_class = YourModelSerializer
+
+    def create(self, request, *args, **kwargs):
+        # 批量处理 YourModel 的数据
+        your_model_data = request.data.get('your_model_data', [])
+        another_model_data = request.data.get('another_model_data', [])
+
+        # 处理 YourModel 的数据
+        your_model_serializer = YourModelSerializer(data=your_model_data, many=True)
+        try:
+            your_model_serializer.is_valid(raise_exception=True)
+        except serializers.ValidationError as e:
+            return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
+
+        # 处理 AnotherModel 的数据
+        another_model_serializer = AnotherModelSerializer(data=another_model_data, many=True)
+        try:
+            another_model_serializer.is_valid(raise_exception=True)
+        except serializers.ValidationError as e:
+            return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
+
+        # 删除原数据和插入新数据
+        your_model_serializer.create(your_model_serializer.validated_data)
+        another_model_serializer.create(another_model_serializer.validated_data)
+
+        return Response({
+            "your_model": your_model_serializer.data,
+            "another_model": another_model_serializer.data
+        }, status=status.HTTP_201_CREATED)
+```
+
+### 4. **错误处理与事务管理**
+
+如果在 `validate` 或 `create` 方法中抛出 `ValidationError`，Django 会自动回滚事务。这意味着任何未通过验证的数据不会被保存到数据库中。
+
+### 总结
+
+- **事务管理**：由于你已经在设置中为每个请求配置了事务管理，Django 将自动处理所有事务。
+- **逐一检查**：在序列化器中使用 `validate` 方法逐一检查数据有效性。
+- **删除和插入**：在序列化器的 `create` 方法中实现删除原数据并插入新数据。
+
+这种方法确保了你的应用能够在保持数据一致性的同时，进行批量操作和错误处理。
