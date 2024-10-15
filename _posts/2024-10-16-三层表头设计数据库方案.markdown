@@ -1,0 +1,624 @@
+---
+layout:     post
+title:      "三层表头设计数据库方案"
+subtitle:   ""
+date:       2024-10-16
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - django
+---
+
+是的，除了使用单个数据表和一个表头字段对应表的方案，还有其他方式能够实现当前需求。可以根据不同的需求和复杂性选择更适合的方案。以下是几种不同的设计方案：
+
+### 方案一：多表设计（范式化数据库设计）
+这是典型的范式化设计，通过多个表来处理不同层次的数据以及表头映射关系。这种设计能更好地维护数据的完整性和查询性能，但复杂性相对较高。
+
+#### 表设计
+
+1. **Category表（大类）**
+   - 记录 `xlsx` 的第一层级——大类信息。
+
+2. **Subcategory表（小类）**
+   - 记录第二层级——小类信息，外键关联 `Category`。
+
+3. **Parameter表（参数）**
+   - 记录第三层级——参数信息，外键关联 `Subcategory`。
+
+4. **Data表（数据表）**
+   - 存储实际的业务数据，与参数表关联，数据更分层且可拓展。
+
+5. **FieldMapping表**
+   - 保存 `xlsx` 表头与数据库字段的对应关系及校验规则。
+
+#### Django模型示例
+
+```python
+from django.db import models
+
+class Category(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+
+class Subcategory(models.Model):
+    name = models.CharField(max_length=255, blank=True, null=True)
+    category = models.ForeignKey(Category, on_delete=models.CASCADE)
+
+class Parameter(models.Model):
+    name = models.CharField(max_length=255)
+    subcategory = models.ForeignKey(Subcategory, on_delete=models.CASCADE, null=True, blank=True)
+
+class Data(models.Model):
+    parameter = models.ForeignKey(Parameter, on_delete=models.CASCADE)
+    value = models.CharField(max_length=255)
+
+class FieldMapping(models.Model):
+    header_name = models.CharField(max_length=255, unique=True)
+    field_name = models.CharField(max_length=255)
+    validation_regex = models.CharField(max_length=500, blank=True, null=True)
+    data_type = models.CharField(max_length=50, choices=[('string', 'String'), ('integer', 'Integer'), ...])
+    required = models.BooleanField(default=False)
+```
+
+#### 导入与查询
+导入时，数据首先会分别插入到 `Category`、`Subcategory` 和 `Parameter` 表中，最终存储到 `Data` 表中。查询时，前端通过传入大类和参数来查询数据。
+
+##### 优点
+- 数据规范化，层次关系清晰，易于维护。
+- 能更好地处理大规模查询和过滤需求。
+
+##### 缺点
+- 设计复杂，需要多个表之间的关联，查询较复杂。
+
+---
+
+### 方案二：扁平化设计（字段独立存储）
+这种设计将 `xlsx` 文件的层级信息“平铺”，每一层级（大类、小类、参数）作为数据表的字段独立存储。每一行数据存储时会将三层级信息平铺存入字段中，并通过映射表来控制表头和字段的对应关系。
+
+#### 表设计
+
+1. **Data表**
+   - 直接存储 `xlsx` 文件的三层表头字段以及对应的数据。
+
+2. **FieldMapping表**
+   - 保存 `xlsx` 表头与数据库字段的对应关系。
+
+#### Django模型示例
+
+```python
+from django.db import models
+
+class Data(models.Model):
+    category = models.CharField(max_length=255)
+    subcategory = models.CharField(max_length=255, blank=True, null=True)
+    parameter = models.CharField(max_length=255)
+    value = models.CharField(max_length=255)
+
+class FieldMapping(models.Model):
+    header_name = models.CharField(max_length=255, unique=True)
+    field_name = models.CharField(max_length=255)
+    validation_regex = models.CharField(max_length=500, blank=True, null=True)
+    data_type = models.CharField(max_length=50, choices=[('string', 'String'), ('integer', 'Integer'), ...])
+    required = models.BooleanField(default=False)
+```
+
+#### 导入与查询
+导入时，根据 `FieldMapping` 进行校验，然后将数据分层存储到 `Data` 表中。查询时，直接根据三层字段（`category`、`subcategory`、`parameter`）进行过滤。
+
+##### 优点
+- 表结构简单，易于理解和操作。
+- 数据层次简单，查询时可以直接使用字段过滤。
+
+##### 缺点
+- 数据冗余较大，重复的 `category` 和 `subcategory` 信息在每行数据中都会存储。
+- 如果未来层级发生变化，修改表结构的代价较高。
+
+---
+
+### 方案三：混合设计（JSON字段存储层次信息 + 映射表）
+此方案是一个折衷设计，利用 JSON 字段来存储数据的层次信息，同时通过映射表来控制 `xlsx` 表头和数据表字段之间的关系。
+
+#### 表设计
+
+1. **Data表**
+   - 使用 JSON 字段存储层次化的表头和数据值。
+
+2. **FieldMapping表**
+   - 保存表头与 JSON 字段的映射关系及校验规则。
+
+#### Django模型示例
+
+```python
+from django.db import models
+
+class Data(models.Model):
+    structured_data = models.JSONField()
+
+class FieldMapping(models.Model):
+    header_name = models.CharField(max_length=255, unique=True)
+    json_path = models.CharField(max_length=255)  # 记录在 JSON 中的路径
+    validation_regex = models.CharField(max_length=500, blank=True, null=True)
+    data_type = models.CharField(max_length=50, choices=[('string', 'String'), ('integer', 'Integer'), ...])
+    required = models.BooleanField(default=False)
+```
+
+#### 导入与查询
+导入时，将数据解析成 JSON 并根据映射表将数据结构化存储。查询时，可以使用 JSON 字段的路径（`json_path`）来提取或过滤数据。
+
+##### 优点
+- 数据结构化存储，同时支持灵活的表头扩展。
+- JSON 字段方便存储动态和复杂结构的数据。
+
+##### 缺点
+- JSON 字段的查询性能较差，复杂查询可能需要额外的处理。
+- 需要对 JSON 的层次关系做出清晰的定义和规范。
+
+---
+
+### 结论
+
+- **方案一（多表设计）**：适合数据量大且查询复杂的场景，规范化设计适合高性能查询。
+- **方案二（扁平化设计）**：适合数据层次关系较简单，数据冗余可以接受的场景，简单易用。
+- **方案三（混合设计）**：适合数据结构动态变化频繁且需要灵活扩展的场景，JSON 字段能提供更多的灵活性。
+
+根据你的需求，可以权衡数据的复杂性、查询需求和扩展性来选择合适的设计方案。
+
+------
+
+
+
+### 方案1测试
+
+在使用多表设计时，如果每一条数据是由 **大类（`Category`）**、**小类（`Subcategory`）**、**参数（`Parameter`）** 的组合，并且每条数据还需要根据 **人员（`User`）** 和 **时间（`Date`）** 来区分，那么我们可以扩展现有的多表设计，将 **人员** 和 **时间** 作为数据的区分维度。
+
+具体思路是：
+
+1. **保持原有的层次结构**，即大类、小类、参数组合唯一确定一组属性。
+2. **增加用户和时间字段**，以确保数据是按用户和时间维度来区分的。
+
+### 表设计
+
+1. **Category表（大类）**：记录大类信息。
+2. **Subcategory表（小类）**：记录小类信息，外键关联 `Category` 表。
+3. **Parameter表（参数）**：记录参数信息，外键关联 `Subcategory` 表。
+4. **User表**：记录用户信息（可选：可以直接使用 Django 自带的 `User` 表）。
+5. **Data表**：存储业务数据，并通过 `category`、`subcategory`、`parameter`、`user` 和 `date` 的组合来唯一确定一条数据。
+
+### Django 模型示例
+
+```python
+from django.db import models
+from django.contrib.auth.models import User
+
+class Category(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+    def __str__(self):
+        return self.name
+
+class Subcategory(models.Model):
+    name = models.CharField(max_length=255, blank=True, null=True)
+    category = models.ForeignKey(Category, on_delete=models.CASCADE)
+    def __str__(self):
+        return f"{self.category.name} - {self.name}"
+
+class Parameter(models.Model):
+    name = models.CharField(max_length=255)
+    subcategory = models.ForeignKey(Subcategory, on_delete=models.CASCADE)
+    def __str__(self):
+        return f"{self.subcategory.name} - {self.name}"
+
+class Data(models.Model):
+    category = models.ForeignKey(Category, on_delete=models.CASCADE)
+    subcategory = models.ForeignKey(Subcategory, on_delete=models.CASCADE, null=True, blank=True)
+    parameter = models.ForeignKey(Parameter, on_delete=models.CASCADE)
+
+    # 数据的具体值
+    value = models.CharField(max_length=255)
+
+    # 用户信息，关联到 Django 自带的 User 模型
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+
+    # 数据的时间信息
+    date = models.DateField()
+
+    class Meta:
+        # category、subcategory、parameter、user 和 date 组合唯一确定一条数据
+        unique_together = ('category', 'subcategory', 'parameter', 'user', 'date')
+
+    def __str__(self):
+        return f"{self.category.name} - {self.subcategory.name} - {self.parameter.name} ({self.user.username} on {self.date})"
+```
+
+### 数据导入和重复数据判断
+
+在导入数据时，首先需要判断是否已经存在相同的 `category`、`subcategory`、`parameter`、`user` 和 `date` 组合的数据。如果存在，就可以更新这条数据；如果不存在，则创建新数据。
+
+#### 导入逻辑示例
+
+```python
+from .models import Data, Category, Subcategory, Parameter, User
+from django.core.exceptions import ObjectDoesNotExist
+
+def import_data(category_name, subcategory_name, parameter_name, value, user_id, date):
+    try:
+        # 查找 Category
+        category = Category.objects.get(name=category_name)
+        
+        # 查找 Subcategory，如果为空则使用 None
+        subcategory = Subcategory.objects.get(category=category, name=subcategory_name) if subcategory_name else None
+        
+        # 查找 Parameter
+        parameter = Parameter.objects.get(subcategory=subcategory, name=parameter_name)
+        
+        # 查找 User
+        user = User.objects.get(id=user_id)
+        
+        # 查找是否已有相同组合的数据
+        data, created = Data.objects.get_or_create(
+            category=category,
+            subcategory=subcategory,
+            parameter=parameter,
+            user=user,
+            date=date,
+            defaults={'value': value}  # 如果新建数据，设定默认值
+        )
+        
+        if not created:
+            # 如果数据已存在，更新值
+            data.value = value
+            data.save()
+        return created
+    except (Category.DoesNotExist, Subcategory.DoesNotExist, Parameter.DoesNotExist, User.DoesNotExist):
+        print("对应的类别、参数或用户不存在")
+        return False
+```
+
+### 查询逻辑
+
+查询数据时，可以通过 **大类（`Category`）**、**小类（`Subcategory`）**、**参数（`Parameter`）**、**用户（`User`）** 和 **时间（`Date`）** 来过滤数据。
+
+#### 查询逻辑示例
+
+```python
+from django.db.models import Q
+
+def query_data(category_name, parameter_name, user_id, date_range=None):
+    """
+    根据大类、参数、用户及时间范围查询数据
+    :param category_name: 大类名称
+    :param parameter_name: 参数名称
+    :param user_id: 用户 ID
+    :param date_range: 时间范围 (开始日期, 结束日期)，可选
+    :return: 查询结果
+    """
+    try:
+        category = Category.objects.get(name=category_name)
+        user = User.objects.get(id=user_id)
+        parameter = Parameter.objects.get(name=parameter_name)
+
+        query = Data.objects.filter(
+            category=category,
+            parameter=parameter,
+            user=user
+        )
+
+        if date_range:
+            query = query.filter(date__range=date_range)
+
+        return query
+    except (Category.DoesNotExist, Parameter.DoesNotExist, User.DoesNotExist):
+        return None
+```
+
+### 优化和扩展
+
+1. **索引优化**：可以为 `category`、`subcategory`、`parameter`、`user` 和 `date` 字段添加索引，以提高查询性能。
+2. **数据扩展**：可以进一步扩展 `Data` 表，增加更多的字段来记录其他相关信息，比如数据来源、状态等。
+3. **接口扩展**：可以基于 Django REST Framework 编写 RESTful API 来实现增删改查接口。
+
+### 总结
+
+在这个设计中，**数据的唯一性** 通过大类、小类、参数、人员、时间组合来保证。这样既能体现数据的层次结构，又能确保每条数据具有时间和人员维度的区分，满足你的需求。
+
+------
+
+为了满足你的需求，其中 **大类**、**小类** 和 **参数** 的组合是唯一的，另外，**人员** 和 **时间** 的组合也是唯一的，这意味着每条记录的数据是由这两个维度共同确定的。
+
+### 表设计
+
+1. **Category 表（大类）**：存储大类信息。
+2. **Subcategory 表（小类）**：存储小类信息，外键关联 `Category`。
+3. **Parameter 表（参数）**：存储参数信息，外键关联 `Subcategory`。
+4. **User 表（人员）**：存储用户信息（可以使用 Django 自带的 `User` 模型）。
+5. **Data 表（数据）**：存储实际业务数据，外键关联 **人员** 和 **时间**，通过 **大类**、**小类** 和 **参数** 组合唯一确定一组属性，通过 **人员** 和 **时间** 来区分不同数据。
+
+### Django 模型设计
+
+```python
+from django.db import models
+from django.contrib.auth.models import User
+
+class Category(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+    def __str__(self):
+        return self.name
+
+class Subcategory(models.Model):
+    name = models.CharField(max_length=255, blank=True, null=True)
+    category = models.ForeignKey(Category, on_delete=models.CASCADE)
+    def __str__(self):
+        return f"{self.category.name} - {self.name}"
+
+class Parameter(models.Model):
+    name = models.CharField(max_length=255)
+    subcategory = models.ForeignKey(Subcategory, on_delete=models.CASCADE)
+    def __str__(self):
+        return f"{self.subcategory.name} - {self.name}"
+
+class Data(models.Model):
+    category = models.ForeignKey(Category, on_delete=models.CASCADE)
+    subcategory = models.ForeignKey(Subcategory, on_delete=models.CASCADE, null=True, blank=True)
+    parameter = models.ForeignKey(Parameter, on_delete=models.CASCADE)
+    
+    # 业务数据的具体值
+    value = models.CharField(max_length=255)
+
+    # 人员和时间
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    date = models.DateField()
+
+    class Meta:
+        # category、subcategory、parameter 组合唯一，并且 user 和 date 组合唯一
+        unique_together = (('category', 'subcategory', 'parameter'), ('user', 'date'))
+
+    def __str__(self):
+        return f"{self.category.name} - {self.subcategory.name} - {self.parameter.name} ({self.user.username} on {self.date})"
+```
+
+### 重复数据判断及增删改查逻辑
+
+在数据导入时，可以根据 **大类、小类、参数组合** 和 **人员、时间组合** 的唯一性来判断数据是否已经存在。
+
+#### 导入逻辑示例
+
+```python
+from .models import Data, Category, Subcategory, Parameter, User
+
+def import_data(category_name, subcategory_name, parameter_name, value, user_id, date):
+    try:
+        # 查找或创建 Category
+        category, _ = Category.objects.get_or_create(name=category_name)
+        
+        # 查找或创建 Subcategory
+        subcategory, _ = Subcategory.objects.get_or_create(name=subcategory_name, category=category)
+        
+        # 查找或创建 Parameter
+        parameter, _ = Parameter.objects.get_or_create(name=parameter_name, subcategory=subcategory)
+        
+        # 查找 User
+        user = User.objects.get(id=user_id)
+        
+        # 查找是否已存在相同的 category, subcategory, parameter, user, date 组合的数据
+        data, created = Data.objects.get_or_create(
+            category=category,
+            subcategory=subcategory,
+            parameter=parameter,
+            user=user,
+            date=date,
+            defaults={'value': value}  # 如果新建数据，设定默认值
+        )
+        
+        if not created:
+            # 如果数据已存在，更新值
+            data.value = value
+            data.save()
+        return created
+    except (Category.DoesNotExist, Subcategory.DoesNotExist, Parameter.DoesNotExist, User.DoesNotExist):
+        print("对应的类别、参数或用户不存在")
+        return False
+```
+
+### 增删改查 API
+
+可以使用 Django REST Framework (DRF) 实现增删改查接口。
+
+```python
+from rest_framework import viewsets
+from .models import Data
+from .serializers import DataSerializer
+
+class DataViewSet(viewsets.ModelViewSet):
+    queryset = Data.objects.all()
+    serializer_class = DataSerializer
+
+# serializers.py
+from rest_framework import serializers
+from .models import Data
+
+class DataSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Data
+        fields = '__all__'
+```
+
+### 表头字段映射表
+
+如果还需要表头字段映射，可以设计一个单独的表来存储 **表头与字段的对应关系**，以及字段的校验正则表达式：
+
+```python
+class HeaderFieldMapping(models.Model):
+    xlsx_header = models.CharField(max_length=255)  # 表头
+    model_field = models.CharField(max_length=255)  # 对应数据表字段
+    validation_regex = models.CharField(max_length=255, blank=True, null=True)  # 校验正则
+
+    def __str__(self):
+        return f"{self.xlsx_header} -> {self.model_field}"
+```
+
+这样你就可以在数据导入过程中，动态地根据 xlsx 文件的表头找到对应的数据库字段，并进行数据校验。
+
+------
+
+### 方案3测试
+
+为了简化设计为只有一个数据表和一个表头字段对应表的方案，以下是具体的模型设计。
+
+### 数据表 (`Data`)
+
+这个表存储了所有从 `xlsx` 文件导入的数据，不再细分为 `Category`、`Subcategory` 和 `Parameter` 表。所有导入的数据将直接存储在一个表中，而具体的列对应关系将通过 `FieldMapping` 表来管理。
+
+```python
+from django.db import models
+
+class Data(models.Model):
+    # 动态字段存储的方式，使用 JSONField 来适应不同表头的数据
+    data = models.JSONField()
+
+    # 创建时间和更新时间
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Data ID: {self.id}"
+```
+
+### 表头字段对应表 (`FieldMapping`)
+
+这个表将 `xlsx` 文件的表头与 `Data` 表中 JSON 字段的具体键名（字段名）进行映射，并提供正则表达式校验规则和数据类型信息。
+
+```python
+from django.db import models
+
+class FieldMapping(models.Model):
+    HEADER_TYPES = [
+        ('string', 'String'),
+        ('integer', 'Integer'),
+        ('float', 'Float'),
+        ('date', 'Date'),
+        ('boolean', 'Boolean'),
+    ]
+
+    # 表头名称
+    header_name = models.CharField(max_length=255, unique=True, db_index=True)
+
+    # Data 表中的字段名称（用于 JSON key）
+    field_name = models.CharField(max_length=255)
+
+    # 校验正则表达式（可以为空）
+    validation_regex = models.CharField(max_length=500, blank=True, null=True)
+
+    # 字段数据类型
+    data_type = models.CharField(max_length=50, choices=HEADER_TYPES)
+
+    # 是否为必填字段
+    required = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.header_name} -> {self.field_name}"
+```
+
+### 导入逻辑
+
+在导入 `xlsx` 文件时，根据 `FieldMapping` 表来确定 `xlsx` 表头与 `Data` 表中 JSON 字段的对应关系，然后将数据插入或更新到 `Data` 表中。使用 JSON 字段来存储动态的数据列，方便处理不同格式的表头。
+
+```python
+import re
+from .models import FieldMapping, Data
+
+def validate_and_import_xlsx_data(parsed_data):
+    """
+    根据 FieldMapping 模型进行数据的校验和导入
+    :param parsed_data: 解析后的 xlsx 数据，每个字典代表一行数据
+    :return: 成功导入的记录数量
+    """
+    success_count = 0
+
+    # 获取所有字段映射
+    field_mappings = FieldMapping.objects.all()
+    field_mapping_dict = {mapping.header_name: mapping for mapping in field_mappings}
+
+    for row in parsed_data:
+        valid = True
+        validated_data = {}
+
+        # 遍历每一列进行验证
+        for header_name, value in row.items():
+            mapping = field_mapping_dict.get(header_name)
+
+            if not mapping:
+                print(f"未知的表头字段: {header_name}")
+                continue
+
+            field_name = mapping.field_name
+            validation_regex = mapping.validation_regex
+            data_type = mapping.data_type
+            required = mapping.required
+
+            # 检查是否为必填字段
+            if required and not value:
+                print(f"缺少必填字段：{header_name}")
+                valid = False
+                break
+
+            # 根据正则表达式进行校验
+            if validation_regex and value:
+                if not re.match(validation_regex, str(value)):
+                    print(f"字段 {header_name} 未通过校验")
+                    valid = False
+                    break
+
+            # 根据数据类型进行转换
+            if value:
+                try:
+                    if data_type == 'integer':
+                        value = int(value)
+                    elif data_type == 'float':
+                        value = float(value)
+                    elif data_type == 'boolean':
+                        value = bool(value)
+                    elif data_type == 'date':
+                        value = parse_date(value)  # 假设有日期转换函数
+                except ValueError:
+                    print(f"字段 {header_name} 无法转换为 {data_type}")
+                    valid = False
+                    break
+
+            # 如果通过校验，将数据添加到字典中
+            validated_data[field_name] = value
+
+        if valid:
+            # 插入到 Data 表中的 JSON 字段
+            Data.objects.create(data=validated_data)
+            success_count += 1
+
+    return success_count
+```
+
+### 查询逻辑
+
+查询数据时，通过前端传入的参数在 `data` 字段中进行过滤，例如通过大类和参数的字段值进行过滤。
+
+```python
+from django.db.models import Q
+
+def query_data(category, parameter):
+    """
+    根据前端传入的大类和参数查询数据
+    :param category: 大类名称
+    :param parameter: 参数名称
+    :return: 查询结果
+    """
+    # 根据 JSON 字段进行查询
+    results = Data.objects.filter(
+        Q(data__category=category) & Q(data__parameter=parameter)
+    )
+    return results
+```
+
+### 总结
+
+- **`Data` 表** 使用 JSON 字段来存储所有数据行，每行数据根据表头字段映射到不同的 JSON 键名。
+- **`FieldMapping` 表** 记录了 `xlsx` 文件表头与数据库 JSON 字段的对应关系，以及字段的校验规则和数据类型。
+- **导入时** 根据 `FieldMapping` 进行验证和字段映射，导入后将数据存入 `Data` 表中。
+- **查询时** 根据 JSON 字段进行过滤，前端可以传入大类和参数等条件来查询数据。
+
+这种设计简化了表结构，适应了表头动态变化和数据导入时的需求，同时也具有很好的扩展性。
