@@ -622,3 +622,566 @@ def query_data(category, parameter):
 - **查询时** 根据 JSON 字段进行过滤，前端可以传入大类和参数等条件来查询数据。
 
 这种设计简化了表结构，适应了表头动态变化和数据导入时的需求，同时也具有很好的扩展性。
+
+------
+
+以下是一个完整的方案，包含两个数据库设计和实现对应的增删改查接口。这个方案能够处理 xlsx 文件导入时的数据校验、字段映射以及多表关联的层次结构查询。
+
+## 方案概要
+我们将设计两张表：
+1. **`BaseInfo`**: 用于存储基础信息（如人员和创建时间）。
+2. **`Parameter` 和 `Data`**: 用于存储大类、小类、参数组合及其对应的值。
+3. **`FieldMapping`**: 用于存储 xlsx 文件中的表头与数据库字段的对应关系，并为字段添加数据校验规则。
+
+### 数据库模型设计
+
+```python
+from django.db import models
+
+# 基础信息表
+class BaseInfo(models.Model):
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE, help_text="数据导入的人员")
+    creation_time = models.DateTimeField(help_text="数据导入时间")
+
+    class Meta:
+        unique_together = ['user', 'creation_time']  # 确保人员和创建时间唯一
+        verbose_name = '基础信息'
+        verbose_name_plural = '基础信息表'
+
+    def __str__(self):
+        return f"{self.user} - {self.creation_time}"
+
+# 参数表：存储大类、小类和参数
+class Parameter(models.Model):
+    category_name = models.CharField(max_length=255, help_text="大类名称")
+    subcategory_name = models.CharField(max_length=255, null=True, blank=True, help_text="小类名称（可以为空）")
+    parameter_name = models.CharField(max_length=255, help_text="参数名称")
+
+    class Meta:
+        unique_together = ['category_name', 'subcategory_name', 'parameter_name']
+        verbose_name = '参数信息'
+        verbose_name_plural = '参数信息表'
+
+    def __str__(self):
+        return f"{self.category_name} - {self.subcategory_name} - {self.parameter_name}"
+
+# 数据表：关联基础信息和参数，并存储值
+class Data(models.Model):
+    base_info = models.ForeignKey(BaseInfo, on_delete=models.CASCADE, help_text="关联基础信息")
+    parameter = models.ForeignKey(Parameter, on_delete=models.CASCADE, help_text="关联参数")
+    value = models.CharField(max_length=255, help_text="参数值")
+
+    class Meta:
+        verbose_name = '数据'
+        verbose_name_plural = '数据表'
+
+    def __str__(self):
+        return f"{self.base_info} - {self.parameter} - {self.value}"
+
+# 字段映射表：存储xlsx表头与数据库字段的对应关系及校验规则
+class FieldMapping(models.Model):
+    xlsx_header = models.CharField(max_length=255, unique=True, help_text="xlsx 文件中的表头")
+    db_field = models.CharField(max_length=255, help_text="数据库中的字段名")
+    validation_regex = models.CharField(max_length=255, null=True, blank=True, help_text="字段的校验正则表达式")
+
+    def __str__(self):
+        return f"{self.xlsx_header} -> {self.db_field}"
+```
+
+### 数据库模型说明
+1. **`BaseInfo`**: 用来存储每条数据的基础信息，主要是导入人员和时间。
+2. **`Parameter`**: 存储大类、小类和参数的组合，每个组合是唯一的，定义了数据结构的层次。
+3. **`Data`**: 每条数据与 `BaseInfo` 和 `Parameter` 相关联，存储实际的参数值。
+4. **`FieldMapping`**: 将 xlsx 文件的表头映射到数据库的字段，并为字段提供正则校验。
+
+### 数据导入和校验
+
+当导入数据时，可以通过 `FieldMapping` 表来找到对应的数据库字段，并对值进行校验。每次数据导入时，根据导入人员和时间创建一条新的 `BaseInfo` 记录，随后插入数据。
+
+#### 数据导入函数示例
+
+```python
+import re
+
+def validate_and_import_xlsx_data(xlsx_data, user, creation_time):
+    """
+    解析并导入 xlsx 数据，根据 FieldMapping 进行字段映射，并进行校验。
+    :param xlsx_data: 解析后的 xlsx 数据，格式为 [{header: value, ...}, ...]
+    :param user: 导入的用户
+    :param creation_time: 导入时间
+    """
+    base_info = BaseInfo.objects.create(user=user, creation_time=creation_time)
+
+    for row in xlsx_data:
+        data_to_save = {}
+
+        for xlsx_header, value in row.items():
+            try:
+                # 查找对应的字段映射
+                field_mapping = FieldMapping.objects.get(xlsx_header=xlsx_header)
+
+                # 校验数据
+                if field_mapping.validation_regex:
+                    if not re.match(field_mapping.validation_regex, str(value)):
+                        raise ValueError(f"字段 '{xlsx_header}' 的值 '{value}' 不符合校验规则")
+                
+                # 查找或创建 Parameter
+                category_name = row.get('category_name', None)
+                subcategory_name = row.get('subcategory_name', None)
+                parameter_name = row.get('parameter_name', None)
+
+                if not category_name or not parameter_name:
+                    raise ValueError("大类和参数名称是必须的")
+
+                parameter, created = Parameter.objects.get_or_create(
+                    category_name=category_name,
+                    subcategory_name=subcategory_name,
+                    parameter_name=parameter_name
+                )
+
+                # 将值保存到 Data 表中
+                Data.objects.create(
+                    base_info=base_info,
+                    parameter=parameter,
+                    value=value
+                )
+
+            except FieldMapping.DoesNotExist:
+                raise ValueError(f"未找到表头 '{xlsx_header}' 的字段映射")
+```
+
+### CRUD 操作
+
+#### 增加数据
+通过 `validate_and_import_xlsx_data` 函数即可实现增量导入数据。在导入时，验证表头和字段映射关系，并将数据保存到 `Data` 表。
+
+#### 查询数据
+
+查询某个用户和创建时间下的所有数据，并构建层级化的结构：
+
+```python
+from collections import defaultdict
+
+def query_hierarchical_data(user_id, creation_time):
+    """
+    查询某个用户和创建时间下的数据，返回层级化的结构。
+    :param user_id: 人员 ID
+    :param creation_time: 创建时间
+    :return: 层级化的查询结果
+    """
+    try:
+        # 查找基础信息记录
+        base_info = BaseInfo.objects.get(user_id=user_id, creation_time=creation_time)
+
+        # 查询该基础信息下的所有数据
+        data_records = Data.objects.filter(base_info=base_info).select_related('parameter')
+
+        # 使用 defaultdict 创建层级化的结构
+        result = defaultdict(lambda: defaultdict(lambda: {}))  # 自动构建嵌套结构
+
+        # 遍历查询结果，按大类、小类、参数进行分组
+        for data_record in data_records:
+            category = data_record.parameter.category_name
+            subcategory = data_record.parameter.subcategory_name or "无"  # 小类可能为空，用 '无' 表示
+            parameter = data_record.parameter.parameter_name
+
+            # 将值放入层级结构中
+            result[category][subcategory][parameter] = data_record.value
+
+        # 构建最终返回结果
+        final_result = {
+            "base_info": {
+                "user": base_info.user.username,
+                "creation_time": base_info.creation_time
+            },
+            "data": dict(result)  # 将 defaultdict 转换为普通 dict
+        }
+
+        return final_result
+    except BaseInfo.DoesNotExist:
+        return None
+```
+
+#### 更新数据
+
+更新数据时，可以根据 `user_id` 和 `creation_time` 找到对应的 `BaseInfo`，然后在 `Data` 表中找到对应的 `Parameter` 记录并更新。
+
+```python
+def update_data(user_id, creation_time, parameter_id, new_value):
+    try:
+        base_info = BaseInfo.objects.get(user_id=user_id, creation_time=creation_time)
+        data = Data.objects.get(base_info=base_info, parameter_id=parameter_id)
+        data.value = new_value
+        data.save()
+    except BaseInfo.DoesNotExist:
+        raise ValueError("未找到对应的基础信息")
+    except Data.DoesNotExist:
+        raise ValueError("未找到对应的数据记录")
+```
+
+#### 删除数据
+
+根据 `BaseInfo` 和 `Parameter` 组合找到对应的数据并删除：
+
+```python
+def delete_data(user_id, creation_time, parameter_id):
+    try:
+        base_info = BaseInfo.objects.get(user_id=user_id, creation_time=creation_time)
+        data = Data.objects.get(base_info=base_info, parameter_id=parameter_id)
+        data.delete()
+    except BaseInfo.DoesNotExist:
+        raise ValueError("未找到对应的基础信息")
+    except Data.DoesNotExist:
+        raise ValueError("未找到对应的数据记录")
+```
+
+### 字段映射增删改查
+
+#### 创建字段映射
+```python
+def create_field_mapping(xlsx_header, db_field, validation_regex=None):
+    FieldMapping.objects.create(
+        xlsx_header=xlsx_header,
+        db_field=db_field,
+        validation_regex=validation_regex
+    )
+```
+
+#### 更新字段映射
+```python
+def update_field_mapping(xlsx_header, db_field=None, validation_regex=None):
+    field_mapping = FieldMapping.objects.get(x
+
+lsx_header=xlsx_header)
+    if db_field:
+        field_mapping.db_field = db_field
+    if validation_regex:
+        field_mapping.validation_regex = validation_regex
+    field_mapping.save()
+```
+
+#### 删除字段映射
+```python
+def delete_field_mapping(xlsx_header):
+    FieldMapping.objects.filter(xlsx_header=xlsx_header).delete()
+```
+
+#### 查询字段映射
+```python
+def get_field_mappings():
+    return FieldMapping.objects.all()
+```
+
+---
+
+该方案实现了基础数据和字段映射的设计，并提供了用于数据操作和查询的接口。数据校验通过正则表达式进行，查询时按照大类、小类和参数层次结构进行组织。
+
+------
+
+在当前设计中，每当插入一条数据时，由于每个参数都是单独存储在 `Data` 表中的，所以你在写入一条数据（即一个人员和时间的组合）时，可能会向 `Data` 表中插入上百条记录（每个参数一条数据）。当数据量非常大时，确实可能会产生以下问题：
+
+1. **写入性能问题**: 每条数据都对应多个参数，每个参数写入时都涉及到数据库的 `INSERT` 操作。当数据量变大时，大量的 `INSERT` 操作可能会影响性能。
+2. **查询性能问题**: 查询时为了重构数据的层级结构，需要遍历大量的参数记录，尤其是当单条数据包含多个参数时，查询效率可能会下降。
+3. **数据存储开销**: 由于每个参数都是一个独立记录，数据表的大小会迅速增长，尤其是当参数数量多、数据量大的情况下。
+
+### 可行的优化方案
+
+为了解决这些问题，可以考虑以下几种优化策略：
+
+#### 1. **批量插入**
+
+Django 默认会为每条记录执行单独的 `INSERT` 操作。通过使用 Django 的批量插入功能，可以将多条记录一次性插入数据库，减少 `INSERT` 操作的开销。
+
+```python
+from django.db import transaction
+
+def bulk_insert_data(base_info, parameter_values):
+    """
+    批量插入数据
+    :param base_info: 对应的 BaseInfo 对象
+    :param parameter_values: 参数和值的列表，格式为 [{'parameter': Parameter, 'value': value}, ...]
+    """
+    data_objects = []
+    for param_val in parameter_values:
+        data_objects.append(Data(base_info=base_info, parameter=param_val['parameter'], value=param_val['value']))
+
+    with transaction.atomic():
+        Data.objects.bulk_create(data_objects)
+```
+
+这样，参数的插入就会被合并为一次批量插入操作，从而提高性能。
+
+#### 2. **查询优化**
+
+当查询数据时，可以利用数据库的索引和查询优化技术来加快查询速度。例如，确保在 `Data` 表的 `base_info_id` 和 `parameter_id` 字段上加上索引，以便能够快速查询某条数据的所有参数。
+
+```python
+class Data(models.Model):
+    base_info = models.ForeignKey(BaseInfo, on_delete=models.CASCADE, help_text="关联基础信息", db_index=True)
+    parameter = models.ForeignKey(Parameter, on_delete=models.CASCADE, help_text="关联参数", db_index=True)
+    value = models.CharField(max_length=255, help_text="参数值")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['base_info', 'parameter']),
+        ]
+        verbose_name = '数据'
+        verbose_name_plural = '数据表'
+```
+
+#### 3. **存储结构优化**
+
+目前的设计是将每个参数的值存储为单独的记录。如果参数数量非常多，且每条记录包含的参数固定，可以考虑将参数数据压缩成 JSON 格式，存储在一个字段中，而不是每个参数一条记录。
+
+```python
+from django.contrib.postgres.fields import JSONField
+
+class Data(models.Model):
+    base_info = models.ForeignKey(BaseInfo, on_delete=models.CASCADE, help_text="关联基础信息")
+    parameters = JSONField(help_text="存储所有参数及其值的JSON对象")
+
+    def __str__(self):
+        return f"{self.base_info} - {self.parameters}"
+```
+
+这种方法将所有参数合并存储在一个字段中，减少了表的行数，但会增加单条记录的存储大小。对于查询来说，PostgreSQL 的 JSON 查询功能可以高效地处理这种数据结构，特别是当你需要查询单个参数时，可以使用 `->>` 操作符。
+
+**优点**:
+- 减少了 `Data` 表的记录条数，降低存储压力。
+- 查询时可以直接获取所有参数，减少复杂的 JOIN 操作。
+
+**缺点**:
+- 每次插入和更新时需要重新构建整个 JSON 对象。
+- 如果需要对单个参数进行复杂查询，性能可能不如单独存储参数的方式高效。
+
+#### 4. **分表存储**
+
+如果你的数据量非常大，还可以考虑将 `Data` 表按照某些规则进行分表存储（如按时间分表、按用户分表）。这样可以避免单表数据过大的问题，提高写入和查询的效率。
+
+---
+
+### 方案推荐
+
+综合考虑查询和写入的复杂度与性能，我建议如下方案：
+
+1. **短期**：使用批量插入和索引优化，以提升写入和查询性能。这在一定数据量下能够有效解决性能问题。
+2. **长期**：如果数据量持续增长，考虑将参数数据存储为 JSON 格式，以减少表记录数量。查询时使用 PostgreSQL 的 JSON 查询功能进行优化。同时，可以考虑分表存储，以应对极端的数据量。
+
+### 增删改查接口实现（优化批量插入）
+
+```python
+def create_or_update_data(user, creation_time, parameter_data):
+    """
+    批量创建或更新数据。
+    :param user: 导入用户
+    :param creation_time: 创建时间
+    :param parameter_data: 参数数据，格式为 [{category_name, subcategory_name, parameter_name, value}, ...]
+    """
+    base_info, _ = BaseInfo.objects.get_or_create(user=user, creation_time=creation_time)
+
+    parameters_to_insert = []
+    for param in parameter_data:
+        category = param['category_name']
+        subcategory = param.get('subcategory_name', None)
+        parameter_name = param['parameter_name']
+        value = param['value']
+
+        # 获取或创建参数
+        parameter, _ = Parameter.objects.get_or_create(
+            category_name=category,
+            subcategory_name=subcategory,
+            parameter_name=parameter_name
+        )
+
+        # 创建 Data 对象准备批量插入
+        parameters_to_insert.append({
+            'parameter': parameter,
+            'value': value
+        })
+
+    # 批量插入数据
+    bulk_insert_data(base_info, parameters_to_insert)
+```
+
+通过这个设计，数据的插入、更新、删除和查询都能够在高效和可扩展性之间取得平衡。如果未来需要进一步优化，可以通过数据压缩、分表存储来进行扩展。
+
+------
+
+在你的需求中，如果使用 JSON 存储参数数据，并且每个大类中都有一个附件的参数，附件的文件名需要与参数数据一同处理。以下是一个可行的设计方案，涵盖了数据库模型、文件上传到 S3 的处理、以及相应的增删改查操作。
+
+### 数据库设计
+
+#### 模型定义
+
+```python
+from django.db import models
+from django.contrib.postgres.fields import JSONField
+
+class BaseInfo(models.Model):
+    user = models.CharField(max_length=255, help_text="导入用户")
+    creation_time = models.DateTimeField(help_text="创建时间")
+
+    class Meta:
+        unique_together = ('user', 'creation_time')
+        verbose_name = '基础信息'
+        verbose_name_plural = '基础信息表'
+
+class Category(models.Model):
+    name = models.CharField(max_length=255, help_text="大类名称")
+    attachment = models.CharField(max_length=255, null=True, blank=True, help_text="附件文件名")
+
+    class Meta:
+        verbose_name = '大类'
+        verbose_name_plural = '大类表'
+
+class Data(models.Model):
+    base_info = models.ForeignKey(BaseInfo, on_delete=models.CASCADE, help_text="关联基础信息")
+    parameters = JSONField(help_text="参数数据，以 JSON 格式存储")
+
+    class Meta:
+        verbose_name = '数据'
+        verbose_name_plural = '数据表'
+```
+
+### 文件上传到 S3
+
+在处理文件上传时，可以使用 `boto3` 这个库来上传文件到 S3。首先，你需要安装该库：
+
+```bash
+pip install boto3
+```
+
+然后在你的视图或服务中实现文件上传逻辑：
+
+```python
+import boto3
+from django.conf import settings
+import os
+
+def upload_file_to_s3(file, bucket_name):
+    """
+    上传文件到 S3。
+    :param file: 文件对象
+    :param bucket_name: S3 桶名
+    :return: 文件名
+    """
+    s3 = boto3.client('s3', 
+                       aws_access_key_id=settings.AWS_ACCESS_KEY_ID, 
+                       aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY)
+
+    file_name = file.name
+    try:
+        s3.upload_fileobj(file, bucket_name, file_name)
+    except Exception as e:
+        print(f"上传失败: {e}")
+        return None
+
+    return file_name
+```
+
+### 完整的增删改查操作实现
+
+#### 创建或更新数据
+
+```python
+from django.db import transaction
+
+def create_or_update_data(user, creation_time, category_data, parameters):
+    """
+    创建或更新数据。
+    :param user: 导入用户
+    :param creation_time: 创建时间
+    :param category_data: 大类数据，包含大类名称和附件
+    :param parameters: 参数数据，格式为 [{parameter_name: value}, ...]
+    """
+    base_info, _ = BaseInfo.objects.get_or_create(user=user, creation_time=creation_time)
+
+    # 创建或更新大类
+    category, _ = Category.objects.get_or_create(name=category_data['name'])
+    
+    # 更新附件文件名
+    if 'attachment' in category_data:
+        category.attachment = category_data['attachment']
+        category.save()
+
+    # 准备 JSON 参数数据
+    data_object = Data(base_info=base_info, parameters=parameters)
+
+    with transaction.atomic():
+        data_object.save()
+```
+
+#### 查询数据
+
+```python
+def get_data_by_user_and_time(user, creation_time):
+    """
+    根据用户和时间查询数据，并返回层级结构
+    :param user: 导入用户
+    :param creation_time: 创建时间
+    :return: 返回层级结构的字典
+    """
+    base_info = BaseInfo.objects.get(user=user, creation_time=creation_time)
+    data_records = Data.objects.filter(base_info=base_info)
+
+    result = {
+        "base_info": {
+            "user": user,
+            "creation_time": creation_time
+        },
+        "data": []
+    }
+
+    for record in data_records:
+        result["data"].append({
+            "parameters": record.parameters,
+            "category_attachment": record.base_info.category.attachment  # 附件文件名
+        })
+
+    return result
+```
+
+#### 删除数据
+
+```python
+def delete_data_by_user_and_time(user, creation_time):
+    """
+    根据用户和时间删除数据
+    :param user: 用户
+    :param creation_time: 创建时间
+    """
+    base_info = BaseInfo.objects.get(user=user, creation_time=creation_time)
+    Data.objects.filter(base_info=base_info).delete()
+    base_info.delete()  # 删除基础信息
+```
+
+#### 更新数据
+
+```python
+def update_data(user, creation_time, parameters):
+    """
+    更新数据
+    :param user: 用户
+    :param creation_time: 创建时间
+    :param parameters: 参数数据
+    """
+    base_info = BaseInfo.objects.get(user=user, creation_time=creation_time)
+    data_record = Data.objects.filter(base_info=base_info).first()
+    if data_record:
+        data_record.parameters.update(parameters)
+        data_record.save()
+```
+
+### 使用方案总结
+
+1. **JSON 存储参数**：使用 JSON 字段来灵活存储参数数据，方便后续扩展和修改。
+2. **处理附件**：在大类模型中加入附件字段，使用 S3 存储附件，并通过 `upload_file_to_s3` 函数实现文件上传。
+3. **增删改查操作**：提供基本的 CRUD 接口，支持用户根据基本信息进行数据操作。
+4. **事务管理**：在数据创建和更新操作中使用事务，确保数据一致性。
+
+### 性能考虑
+
+- **JSON 存储**：适合存储灵活的参数数据，但要注意 JSON 字段的查询效率，尤其是在数据量较大时。
+- **附件存储**：将文件存储在 S3 中，可以减轻数据库负担，并提高文件访问的灵活性。
+
+这个方案兼顾了灵活性与可扩展性，并支持文件附件的处理。希望这能够满足你的需求！如果还有其他问题，请随时告诉我。
