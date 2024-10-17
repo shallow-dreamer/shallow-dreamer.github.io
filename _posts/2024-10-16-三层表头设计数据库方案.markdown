@@ -1185,3 +1185,402 @@ def update_data(user, creation_time, parameters):
 - **附件存储**：将文件存储在 S3 中，可以减轻数据库负担，并提高文件访问的灵活性。
 
 这个方案兼顾了灵活性与可扩展性，并支持文件附件的处理。希望这能够满足你的需求！如果还有其他问题，请随时告诉我。
+
+------
+
+为了让代码更具动态性并避免冗余，可以通过以下方法实现：
+
+1. **使用字典来映射大类到对应的模型**：将大类和小类与模型的映射存储在字典中，以便根据类别动态获取模型类。
+
+2. **通过反射动态设置字段值**：使用 `setattr` 函数根据字段名称动态设置属性值。
+
+3. **简化数据导入逻辑**：利用循环和条件逻辑替代多个 if-elif 语句来处理数据存储。
+
+以下是改进后的代码示例：
+
+### 更新后的代码
+
+```python
+import openpyxl
+from django.core.exceptions import ValidationError
+from .models import BaseInfo, CategoryA, CategoryB  # 确保引入你的模型
+
+def load_field_mappings():
+    """从数据库加载字段对应关系。"""
+    mappings = FieldMapping.objects.all()
+    mapping_dict = {}
+    for mapping in mappings:
+        key = (mapping.category, mapping.subcategory, mapping.parameter)
+        mapping_dict[key] = mapping.db_field
+    return mapping_dict
+
+def parse_xlsx(file):
+    """解析 xlsx 文件并返回数据对象列表。"""
+    wb = openpyxl.load_workbook(file)
+    sheet = wb.active
+    data_list = []
+    header_row = [cell.value for cell in sheet[1]]  # 第一行作为表头
+    field_mappings = load_field_mappings()
+
+    for row in sheet.iter_rows(min_row=2, values_only=True):
+        data_item = {
+            'user': row[0],  # 用户名
+            'creation_time': row[1],  # 创建时间
+        }
+
+        for col_idx in range(2, len(row)):
+            category = header_row[col_idx - 2]  # 大类
+            subcategory = header_row[col_idx - 1]  # 小类
+            parameter = header_row[col_idx]  # 参数
+            key = (category, subcategory, parameter)
+
+            if key in field_mappings:
+                db_field = field_mappings[key]
+                data_item[db_field] = row[col_idx]
+                data_item['category'] = category
+                data_item['subcategory'] = subcategory
+
+        data_list.append(data_item)
+
+    return data_list
+
+def import_data(file):
+    """解析 xlsx 文件，校验数据并导入数据库。"""
+    data_list = parse_xlsx(file)
+    validate_data(data_list)
+
+    # 大类到模型的映射
+    category_model_map = {
+        '大类A': CategoryA,
+        '大类B': CategoryB,
+        # 可以继续添加更多的大类和相应的模型
+    }
+
+    for data_item in data_list:
+        base_info, _ = BaseInfo.objects.get_or_create(
+            user=data_item['user'], 
+            creation_time=data_item['creation_time']
+        )
+
+        category = data_item['category']
+        model = category_model_map.get(category)
+
+        if model:
+            # 动态创建或更新对象
+            defaults = {k: v for k, v in data_item.items() if k not in ['user', 'creation_time', 'category', 'subcategory']}
+            defaults['subcategory'] = data_item['subcategory']  # 记录小类
+            model.objects.update_or_create(base_info=base_info, defaults=defaults)
+
+def validate_data(data_list):
+    """校验数据，确保数据格式正确且无重复。"""
+    seen = set()
+    for data_item in data_list:
+        key = (data_item['user'], data_item['creation_time'])
+        if key in seen:
+            raise ValidationError(f"重复数据: {key}")
+        seen.add(key)
+```
+
+### 关键改动
+
+1. **模型映射**：使用字典 `category_model_map` 将大类名称映射到相应的模型类，这样可以轻松添加新大类。
+
+2. **动态字段设置**：在导入数据时，使用字典推导式动态创建 `defaults` 字典，简化了字段处理的逻辑。
+
+3. **减少条件判断**：通过直接使用映射和动态属性设置，减少了对多个 if-elif 语句的依赖，代码更简洁。
+
+### 总结
+
+这种动态化的实现方式不仅提升了代码的可维护性和可读性，也方便了后续的扩展。你可以轻松添加新的大类和相应的模型，而无需重复编写判断逻辑。如果有其他需求或问题，请随时告诉我！
+
+------
+
+下面是一个完整的实现，包括数据库模型、数据导入逻辑、增删改查接口以及根据参数筛选的接口代码。
+
+### 数据库模型设计
+
+```python
+# models.py
+from django.db import models
+
+class BaseInfo(models.Model):
+    user = models.CharField(max_length=100)
+    creation_time = models.DateTimeField()
+
+    class Meta:
+        unique_together = ('user', 'creation_time')
+
+class Category(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+
+class SubCategory(models.Model):
+    name = models.CharField(max_length=100)
+    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='subcategories')
+
+class CategoryA(models.Model):
+    base_info = models.ForeignKey(BaseInfo, on_delete=models.CASCADE, related_name='category_a_entries')
+    sub_category = models.ForeignKey(SubCategory, on_delete=models.CASCADE, related_name='category_a_subcategories')
+    param_1 = models.CharField(max_length=100, blank=True, null=True)
+    param_2 = models.CharField(max_length=100, blank=True, null=True)
+
+class CategoryB(models.Model):
+    base_info = models.ForeignKey(BaseInfo, on_delete=models.CASCADE, related_name='category_b_entries')
+    sub_category = models.ForeignKey(SubCategory, on_delete=models.CASCADE, related_name='category_b_subcategories')
+    param_1 = models.CharField(max_length=100, blank=True, null=True)
+    param_2 = models.CharField(max_length=100, blank=True, null=True)
+```
+
+### 数据导入逻辑
+
+```python
+# utils.py
+def import_data(file):
+    data_list = parse_xlsx(file)  # 假设已有解析 XLSX 的方法
+    validate_data(data_list)  # 假设已有数据校验的方法
+
+    for data_item in data_list:
+        base_info, _ = BaseInfo.objects.get_or_create(
+            user=data_item['user'],
+            creation_time=data_item['creation_time']
+        )
+
+        # 获取或创建小类
+        sub_category, _ = SubCategory.objects.get_or_create(name=data_item['sub_category_name'])
+
+        # 创建类A数据
+        CategoryA.objects.create(
+            base_info=base_info,
+            sub_category=sub_category,
+            param_1=data_item.get('param_1', None),
+            param_2=data_item.get('param_2', None),
+        )
+
+        # 创建类B数据
+        CategoryB.objects.create(
+            base_info=base_info,
+            sub_category=sub_category,
+            param_1=data_item.get('param_1', None),
+            param_2=data_item.get('param_2', None),
+        )
+```
+
+### 增删改查接口
+
+```python
+# views.py
+from rest_framework import viewsets, status
+from rest_framework.response import Response
+from .models import BaseInfo, CategoryA, CategoryB, SubCategory
+from .serializers import BaseInfoSerializer, CategoryASerializer, CategoryBSerializer
+
+class BaseInfoViewSet(viewsets.ModelViewSet):
+    queryset = BaseInfo.objects.all()
+    serializer_class = BaseInfoSerializer
+
+class CategoryAViewSet(viewsets.ModelViewSet):
+    queryset = CategoryA.objects.all()
+    serializer_class = CategoryASerializer
+
+class CategoryBViewSet(viewsets.ModelViewSet):
+    queryset = CategoryB.objects.all()
+    serializer_class = CategoryBSerializer
+
+class RetrieveCompleteDataViewSet(viewsets.ViewSet):
+    def get(self, request, user, creation_time):
+        base_info = BaseInfo.objects.get(user=user, creation_time=creation_time)
+        
+        response_data = {
+            "base_info": {
+                "user": base_info.user,
+                "creation_time": base_info.creation_time,
+            },
+            "category_a": [],
+            "category_b": [],
+        }
+        
+        for entry in base_info.category_a_entries.all():
+            response_data["category_a"].append({
+                "sub_category": entry.sub_category.name,
+                "param_1": entry.param_1,
+                "param_2": entry.param_2,
+            })
+
+        for entry in base_info.category_b_entries.all():
+            response_data["category_b"].append({
+                "sub_category": entry.sub_category.name,
+                "param_1": entry.param_1,
+                "param_2": entry.param_2,
+            })
+
+        return Response(response_data)
+
+class FilterByParametersViewSet(viewsets.ViewSet):
+    def post(self, request):
+        params = request.data.get('params', {})
+        results = []
+
+        # 根据参数筛选数据
+        category_a_entries = CategoryA.objects.filter(**params)
+        category_b_entries = CategoryB.objects.filter(**params)
+
+        for entry in category_a_entries:
+            results.append({
+                "base_info": entry.base_info.user,
+                "creation_time": entry.base_info.creation_time,
+                "sub_category": entry.sub_category.name,
+                "param_1": entry.param_1,
+                "param_2": entry.param_2,
+            })
+
+        for entry in category_b_entries:
+            results.append({
+                "base_info": entry.base_info.user,
+                "creation_time": entry.base_info.creation_time,
+                "sub_category": entry.sub_category.name,
+                "param_1": entry.param_1,
+                "param_2": entry.param_2,
+            })
+
+        return Response(results, status=status.HTTP_200_OK)
+```
+
+### Serializer 示例
+
+确保你有适当的序列化器来处理模型数据。
+
+```python
+# serializers.py
+from rest_framework import serializers
+from .models import BaseInfo, CategoryA, CategoryB
+
+class BaseInfoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BaseInfo
+        fields = '__all__'
+
+class CategoryASerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CategoryA
+        fields = '__all__'
+
+class CategoryBSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CategoryB
+        fields = '__all__'
+```
+
+### 总结
+
+1. **数据模型**：每个大类、子类和参数字段都有清晰的结构。
+2. **数据导入**：从 XLSX 文件中解析数据并写入数据库。
+3. **增删改查接口**：提供完整的 CRUD 操作接口。
+4. **参数筛选接口**：支持根据传入的参数进行数据筛选。
+
+如果需要进一步的调整或具体功能，随时告诉我！
+
+------
+
+为了让代码更动态且减少重复，您可以将所有大类模型存储在一个列表中，然后通过循环来构建查询条件。这种方法可以让您在添加新的大类模型时只需修改列表，而无需重复代码。
+
+### 优化后的代码实现
+
+```python
+# views.py
+from django.db.models import Q
+from rest_framework import viewsets, status
+from rest_framework.response import Response
+
+def build_filter_conditions(params):
+    """动态构建筛选条件"""
+    conditions = {}
+    for key, value in params.items():
+        if value:  # 只添加非空条件
+            conditions[key] = value
+    return conditions
+
+class RetrieveCompleteDataViewSet(viewsets.ViewSet):
+    def get(self, request, user, creation_time):
+        try:
+            base_info = BaseInfo.objects.get(user=user, creation_time=creation_time)
+        except BaseInfo.DoesNotExist:
+            return Response({"detail": "Data not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        response_data = {
+            "base_info": {
+                "user": base_info.user,
+                "creation_time": base_info.creation_time,
+            },
+            "categories": {}
+        }
+
+        categories = Category.objects.prefetch_related('subcategories')
+
+        for category in categories:
+            category_name = category.name
+            response_data["categories"][category_name] = {}
+
+            for sub_category in category.subcategories.all():
+                sub_category_name = sub_category.name
+                response_data["categories"][category_name][sub_category_name] = {
+                    "params": []
+                }
+
+                entries = (CategoryA.objects.filter(base_info=base_info, sub_category=sub_category) |
+                           CategoryB.objects.filter(base_info=base_info, sub_category=sub_category))
+
+                for entry in entries:
+                    response_data["categories"][category_name][sub_category_name]["params"].append({
+                        "param_1": entry.param_1,
+                        "param_2": entry.param_2,
+                    })
+
+        return Response(response_data)
+
+class FilterByParametersViewSet(viewsets.ViewSet):
+    def post(self, request):
+        params = request.data.get('params', {})
+        filter_conditions = build_filter_conditions(params)
+        results = {}
+
+        # 将所有分类模型放在一个列表中
+        category_models = [CategoryA, CategoryB, CategoryC]  # 添加所有大类模型
+
+        # 使用 Q 对象动态构建查询条件
+        query = Q()
+        for model in category_models:
+            query |= Q(**filter_conditions)
+
+        # 根据动态条件筛选数据
+        entries = []
+        for model in category_models:
+            entries += list(model.objects.filter(query).select_related('sub_category', 'base_info'))
+
+        for entry in entries:
+            category_name = entry.sub_category.category.name
+            sub_category_name = entry.sub_category.name
+
+            if category_name not in results:
+                results[category_name] = {"sub_categories": {}}
+
+            if sub_category_name not in results[category_name]["sub_categories"]:
+                results[category_name]["sub_categories"][sub_category_name] = {"params": []}
+
+            results[category_name]["sub_categories"][sub_category_name]["params"].append({
+                "base_info_user": entry.base_info.user,
+                "creation_time": entry.base_info.creation_time,
+                "param_1": entry.param_1,
+                "param_2": entry.param_2,
+            })
+
+        return Response(results, status=status.HTTP_200_OK)
+```
+
+### 关键点
+
+1. **动态模型列表**：将所有大类模型放入 `category_models` 列表中，这样可以方便地管理和扩展模型。
+2. **循环处理查询**：通过循环处理每个模型，避免硬编码的查询条件。
+3. **结果整合**：在查询时使用 `+=` 将所有模型的结果汇总到一个列表中，保持逻辑简洁。
+
+### 总结
+
+这种方式使得代码结构更清晰，并易于扩展和维护。如果您有更多需求或想法，请随时告诉我！
