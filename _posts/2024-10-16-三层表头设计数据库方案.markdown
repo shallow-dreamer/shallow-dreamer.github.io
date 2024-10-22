@@ -2005,3 +2005,162 @@ urlpatterns = [
 ### 总结
 
 以上代码注释详细，功能清晰，实现了数据的增删改查和基于参数的筛选接口。如果有进一步的需求或需要调整的地方，请随时告诉我！
+
+------
+
+好的，既然查询参数可能比较多，且您希望使用 `POST` 请求来进行查询，我们可以创建一个自定义的 `POST` 请求来接收 JSON 格式的查询参数。这样既能保持接口简洁，也能确保层级结构的查询可以灵活地处理。
+
+### 修改查询接口支持 POST 请求
+
+#### 1. 修改 `DataEntryViewSet` 以支持 POST 请求查询
+
+我们会创建一个自定义的 `POST` 方法 `search`，接收查询参数并进行过滤。
+
+```python
+from rest_framework.decorators import action
+from rest_framework import viewsets, status
+from rest_framework.response import Response
+from your_app.models import BaseInfo, ParameterMapping, DataEntry
+from your_app.serializers import DataEntrySerializer
+
+class DataEntryViewSet(viewsets.ModelViewSet):
+    queryset = DataEntry.objects.all()
+    serializer_class = DataEntrySerializer
+
+    # 自定义 POST 查询接口
+    @action(detail=False, methods=['post'], url_path='search')
+    def search(self, request):
+        query_data = request.data  # 获取 POST 请求中的查询参数
+        
+        if not query_data:
+            return Response({"error": "No query data provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 构建查询条件
+        filter_conditions = self.build_query_conditions(query_data)
+
+        # 查询数据，使用 JSONField 查询
+        entries = DataEntry.objects.filter(data__contains=filter_conditions)
+        serializer = self.get_serializer(entries, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    # 解析并导入xlsx文件
+    def create(self, request):
+        # 处理文件上传
+        file = request.FILES.get('file')
+        if not file:
+            return Response({"error": "No file provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 解析xlsx文件
+        parse_and_import_xlsx(file)
+
+        return Response({"success": "Data imported successfully."}, status=status.HTTP_201_CREATED)
+
+    # 构建查询条件的辅助方法
+    def build_query_conditions(self, query_data):
+        filter_conditions = {}
+        for category, subcategories in query_data.items():
+            for subcategory, parameters in subcategories.items():
+                for parameter, value in parameters.items():
+                    key = f"{category}:{subcategory}:{parameter}"  # 构建映射键
+                    filter_conditions[key] = value
+        return filter_conditions
+```
+
+#### 2. 使用 `POST` 请求查询数据
+
+该接口现在支持 `POST` 请求。前端可以向 `/dataentry/search/` 发送包含嵌套 JSON 查询参数的请求。
+
+### 示例 POST 请求格式：
+
+```json
+POST /dataentry/search/
+
+{
+    "大类1": {
+        "小类1": {
+            "参数1": "值1",
+            "参数2": "值2"
+        },
+        "小类2": {
+            "参数1": "值3"
+        }
+    },
+    "大类2": {
+        "小类1": {
+            "参数1": "值4"
+        }
+    }
+}
+```
+
+### 3. Django 路由
+
+您可以在 `urls.py` 中设置路由：
+
+```python
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from your_app.views import DataEntryViewSet
+
+router = DefaultRouter()
+router.register(r'dataentry', DataEntryViewSet)
+
+urlpatterns = [
+    path('', include(router.urls)),
+]
+```
+
+### 4. 数据检查和导入逻辑
+
+为了保证导入时表头与数据库字段的映射关系一致，您可以扩展之前的数据检查和导入函数，确保在写入数据之前先检查表头与字段的对应关系，并根据表头信息完成校验。
+
+#### 示例：在 `parse_and_import_xlsx` 中加入检查逻辑
+
+```python
+import openpyxl
+
+def parse_and_import_xlsx(file):
+    workbook = openpyxl.load_workbook(file)
+    sheet = workbook.active
+
+    headers = sheet[1]  # 假设第一行是表头
+    field_mapping = get_field_mapping_from_db()  # 从数据库中获取字段映射关系
+
+    # 表头和字段映射的检查
+    for idx, cell in enumerate(headers):
+        header = cell.value
+        if header not in field_mapping:
+            raise ValueError(f"Header {header} does not match any known fields.")
+    
+    # 数据解析与导入
+    for row in sheet.iter_rows(min_row=2, values_only=True):  # 从第二行开始是数据
+        base_info = row[:3]  # 第一列到第三列为基础信息（大类、小类、参数）
+        data = row[3:]       # 后面的列为参数数据
+        
+        # 构建 JSON 数据
+        data_entry = {
+            "大类": base_info[0],
+            "小类": base_info[1],
+            "参数": base_info[2],
+            "数据": {field_mapping[headers[i].value]: data[i-3] for i in range(3, len(headers))}
+        }
+
+        # 写入数据库
+        DataEntry.objects.create(data=data_entry)
+
+def get_field_mapping_from_db():
+    # 从数据库中查询存储的表头与字段的映射关系
+    mappings = ParameterMapping.objects.all()
+    return {mapping.header: mapping.field for mapping in mappings}
+```
+
+### 5. 总结
+
+这个方案实现了：
+
+1. **通过 POST 请求进行层级查询**：允许前端传递复杂的嵌套查询条件，后端根据这些条件进行数据筛选。
+2. **动态数据导入**：确保表头与数据库字段一一对应，防止解析时出现错误。
+3. **灵活的架构**：能够轻松扩展不同的大类、小类和参数，且不会因大类数量增加导致代码臃肿。
+4. **数据检查和校验**：在导入前对表头与字段映射进行检查，确保数据完整性和正确性。
+
+请根据需求和实际项目情况微调逻辑。如果有进一步问题或需要优化的地方，请告诉我！
