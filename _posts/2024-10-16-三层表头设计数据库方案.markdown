@@ -2164,3 +2164,134 @@ def get_field_mapping_from_db():
 4. **数据检查和校验**：在导入前对表头与字段映射进行检查，确保数据完整性和正确性。
 
 请根据需求和实际项目情况微调逻辑。如果有进一步问题或需要优化的地方，请告诉我！
+
+------
+
+为处理不同长度的 `data_name`，并确保它们可以在不同分类中嵌套，我们可以调整代码，使得它能够根据每个 `data_name` 动态构建层级结构，而不受限于固定的分类。这是更新后的实现：
+
+### 更新后的完整代码
+
+```python
+import openpyxl
+from django.core.exceptions import ValidationError
+from django.db import models
+
+# 模型定义
+class ParameterMapping(models.Model):
+    data_name = models.JSONField()  # 存储层级关系 [大类, 小类, 参数]
+    field = models.CharField(max_length=100)  # 对应数据库字段
+    reg_ex = models.CharField(max_length=255, null=True, blank=True)  # 校验正则
+
+class DataEntry(models.Model):
+    data = models.JSONField()  # 存储完整的数据结构
+
+# 获取字段映射关系
+def get_field_mapping_from_db():
+    mappings = ParameterMapping.objects.all()
+    field_mapping = {}
+    for mapping in mappings:
+        field_mapping[tuple(mapping.data_name)] = mapping.field  # 使用元组作为键
+    return field_mapping
+
+# 校验数据
+def validate_data(value, reg_ex):
+    import re
+    if reg_ex and not re.match(reg_ex, str(value)):
+        raise ValidationError(f"Value '{value}' does not match the required format.")
+
+# 解析并导入 XLSX 文件
+def parse_and_import_xlsx(file):
+    workbook = openpyxl.load_workbook(file)
+    sheet = workbook.active
+
+    headers = sheet[1]  # 假设第一行是表头
+    field_mapping = get_field_mapping_from_db()  # 获取字段映射关系
+
+    # 数据解析与导入
+    for row in sheet.iter_rows(min_row=2, values_only=True):
+        base_info = row[:3]  # 第一列到第三列为基础信息
+        data = row[3:]       # 后面的列为参数数据
+        
+        # 构建 JSON 数据
+        data_entry = {
+            "基础信息": {
+                "大类": base_info[0],
+                "小类": base_info[1],
+                "参数": base_info[2]
+            },
+            "数据": {}
+        }
+
+        # 动态构建嵌套数据
+        for i, header in enumerate(headers[3:]):
+            header_key = header.value
+            if header_key in field_mapping.values():
+                # 查找该表头对应的 data_name
+                for keys, field in field_mapping.items():
+                    if field == header_key:
+                        current_data = data_entry["数据"]
+                        
+                        # 动态创建层级结构
+                        for key in keys:
+                            if key not in current_data:
+                                current_data[key] = {}
+                            current_data = current_data[key]
+
+                        # 存储对应的数据值
+                        current_data['value'] = data[i]
+
+                        # 校验数据
+                        reg_ex = ParameterMapping.objects.get(field=header_key).reg_ex
+                        validate_data(data[i], reg_ex)
+
+        # 写入数据库
+        DataEntry.objects.create(data=data_entry)
+
+# 示例使用
+# parse_and_import_xlsx("path_to_your_file.xlsx")
+```
+
+### 关键点说明
+
+1. **动态嵌套结构**：通过遍历 `data_name`，在 `data_entry["数据"]` 中动态创建嵌套层级。这使得可以根据 `data_name` 的长度和内容，灵活地生成多层结构。
+
+2. **不同分类支持**：不论 `data_name` 的长度和具体层级，代码都能动态识别并构建相应的数据结构。这意味着不同长度的 `data_name` 可以在不同分类中灵活应用。
+
+### 示例数据结构
+
+假设 `data_name` 为：
+
+- `["大类1"]`
+- `["大类2", "小类1"]`
+- `["大类2", "小类2", "参数1"]`
+
+最终构建的 JSON 数据可能如下：
+
+```json
+{
+  "基础信息": {
+    "大类": "大类2",
+    "小类": "小类2",
+    "参数": "参数1"
+  },
+  "数据": {
+    "大类1": {
+      "value": "数据值1"
+    },
+    "大类2": {
+      "小类1": {
+        "value": "数据值2"
+      },
+      "小类2": {
+        "参数1": {
+          "value": "数据值3"
+        }
+      }
+    }
+  }
+}
+```
+
+### 备注
+
+- 如果您还有其他要求或需进一步调整，请随时告诉我！
