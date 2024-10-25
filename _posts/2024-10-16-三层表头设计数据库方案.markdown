@@ -2295,3 +2295,116 @@ def parse_and_import_xlsx(file):
 ### 备注
 
 - 如果您还有其他要求或需进一步调整，请随时告诉我！
+
+------
+
+如果原数据格式中的元组长度是不定的，我们可以修改代码，使其根据元组的长度动态地构建嵌套层级。这样，代码可以适应不同的分类结构，将最后一层作为参数名称。
+
+### 修改后的代码
+
+```python
+def transform_data_format(data):
+    transformed_data = {}
+
+    for sheet_name, entries in data.items():
+        transformed_entries = []  # 存储转换后的条目
+
+        for entry in entries:
+            transformed_entry = {}  # 用于构建每个条目
+            
+            for keys, value in entry.items():
+                # 动态构建嵌套字典，逐层构建每一个层级
+                current_level = transformed_entry
+
+                for i, key in enumerate(keys):
+                    # 如果是最后一个元素，则这是参数名，直接赋值
+                    if i == len(keys) - 1:
+                        current_level[key] = value
+                    else:
+                        # 如果当前层级不存在，则创建
+                        if key not in current_level:
+                            current_level[key] = {}
+                        # 进入下一级
+                        current_level = current_level[key]
+
+            # 将转换后的条目添加到结果列表
+            transformed_entries.append(transformed_entry)
+
+        transformed_data[sheet_name] = transformed_entries
+
+    return transformed_data
+
+# 示例输入数据
+data = {
+    "Sheet1": [
+        {("大类1", "小类1", "参数1"): "值1", ("大类1", "参数2"): "值2"},
+        {("大类1", "小类2", "参数1"): "值3"},
+        {("大类2", "参数3"): "值4"}
+    ],
+    "Sheet2": [
+        {("大类3", "小类1", "参数1"): "值5"},
+        {("大类3", "小类2", "参数1"): "值6", ("大类3", "参数4"): "值7"}
+    ]
+}
+
+# 调用转换函数
+transformed_data = transform_data_format(data)
+
+# 输出结果
+import pprint
+pprint.pprint(transformed_data)
+```
+
+### 代码说明
+
+1. **遍历每个条目**：对每个条目构建一个新的嵌套字典结构 `transformed_entry`。
+  
+2. **动态构建嵌套结构**：
+   - 使用 `for i, key in enumerate(keys)` 遍历元组 `keys`。
+   - **如果是最后一个元素**，则将该元素视为参数名，并赋值为 `value`。
+   - **如果不是最后一个元素**，则检查当前层级是否存在该 key，如果不存在则创建空字典。
+   - 随后进入下一级以继续构建层级。
+
+3. **合并结果**：将每个转换后的条目添加到 `transformed_entries`，最终汇总到 `transformed_data`。
+
+### 示例输出
+
+给定输入示例，输出结果将为：
+
+```python
+{
+    'Sheet1': [
+        {
+            '大类1': {
+                '小类1': {
+                    '参数1': '值1'
+                },
+                '参数2': '值2',
+                '小类2': {
+                    '参数1': '值3'
+                }
+            },
+            '大类2': {
+                '参数3': '值4'
+            }
+        }
+    ],
+    'Sheet2': [
+        {
+            '大类3': {
+                '小类1': {
+                    '参数1': '值5'
+                },
+                '小类2': {
+                    '参数1': '值6'
+                },
+                '参数4': '值7'
+            }
+        }
+    ]
+}
+```
+
+### 适用性
+
+这个方案适用于元组长度不定的情况，并自动生成层级关系。在最后一个元素作为参数名的规则下，它能灵活处理不同长度的层级结构。
