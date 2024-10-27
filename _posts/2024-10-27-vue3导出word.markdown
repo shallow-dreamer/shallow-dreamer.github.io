@@ -1,12 +1,13 @@
 ---
 layout:     post
-title:      "三层表头设计数据库方案"
+title:      "vue3导出word"
 subtitle:   ""
-date:       2024-10-16
+date:       2024-10-27
 author:     " Shallow Dreamer"
 header-img: "img/post-bg-js-version.jpg"
 tags:
-    - django
+    - vue3
+    - word
 ---
 
 要将页面中的图片 DOM 元素和表格按顺序导出到 Word 文档中，我们可以在 `contentArray` 中添加一个标识，来处理从 DOM 中获取的图片。这是更新后的通用组件。
