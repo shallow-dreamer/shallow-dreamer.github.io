@@ -1,0 +1,188 @@
+---
+layout:     post
+title:      "三层表头设计数据库方案"
+subtitle:   ""
+date:       2024-10-16
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - django
+---
+
+要将页面中的图片 DOM 元素和表格按顺序导出到 Word 文档中，我们可以在 `contentArray` 中添加一个标识，来处理从 DOM 中获取的图片。这是更新后的通用组件。
+
+### 更新的通用组件
+
+```vue
+<template>
+    <div>
+        <button @click="exportToWord">导出 Word 文档</button>
+    </div>
+</template>
+
+<script>
+import { Document, Packer, Paragraph, Table, TableRow, TableCell, WidthType, ImageRun } from 'docx';
+import { saveAs } from 'file-saver';
+
+export default {
+    props: {
+        contentArray: {
+            type: Array,
+            required: true, // 接收一个包含表格和图片的数组
+        },
+        title: {
+            type: String,
+            default: '导出的文档',
+        },
+    },
+    methods: {
+        async exportToWord() {
+            const doc = new Document();
+
+            // 添加标题
+            doc.addSection({
+                children: [
+                    new Paragraph({
+                        text: this.title,
+                        heading: 'Heading1',
+                    }),
+                ],
+            });
+
+            // 遍历 contentArray，添加表格和图片
+            for (const item of this.contentArray) {
+                if (item.type === 'table') {
+                    this.addTableToDoc(doc, item.data);
+                } else if (item.type === 'image') {
+                    await this.addImageToDoc(doc, item.src);
+                } else if (item.type === 'dom-image') {
+                    await this.addDomImageToDoc(doc, item.domElementId);
+                }
+            }
+
+            // 导出文档
+            Packer.toBlob(doc).then(blob => {
+                saveAs(blob, `${this.title}.docx`);
+            });
+        },
+        addTableToDoc(doc, tableData) {
+            const rows = tableData.map(row => {
+                return new TableRow({
+                    children: row.map(cell => new TableCell({ children: [new Paragraph(cell)] })),
+                });
+            });
+
+            const table = new Table({
+                rows,
+                width: { size: 100, type: WidthType.PERCENTAGE },
+            });
+
+            doc.addSection({
+                children: [table],
+            });
+        },
+        async addImageToDoc(doc, imageUrl) {
+            const imageBuffer = await fetch(imageUrl).then(res => res.arrayBuffer());
+            const image = new ImageRun({
+                data: imageBuffer,
+                transformation: {
+                    width: 200, // 图片宽度
+                    height: 100, // 图片高度
+                },
+            });
+
+            doc.addSection({
+                children: [new Paragraph(image)],
+            });
+        },
+        async addDomImageToDoc(doc, domElementId) {
+            const domElement = document.getElementById(domElementId);
+            if (domElement) {
+                const images = domElement.getElementsByTagName('img');
+                for (const img of images) {
+                    await this.addImageToDoc(doc, img.src);
+                }
+            }
+        },
+    },
+};
+</script>
+
+<style scoped>
+button {
+    padding: 10px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+</style>
+```
+
+### 使用示例
+
+在父组件中，你可以这样使用这个组件：
+
+```vue
+<template>
+    <div>
+        <ExportWord
+            :contentArray="contentArray"
+            title="我的文档"
+        />
+        
+        <div id="imageContainer" style="display: none;">
+            <img src="https://example.com/image1.png" alt="Image 1" />
+            <img src="https://example.com/image2.png" alt="Image 2" />
+        </div>
+    </div>
+</template>
+
+<script>
+import ExportWord from './ExportWord.vue';
+
+export default {
+    components: {
+        ExportWord,
+    },
+    data() {
+        return {
+            contentArray: [
+                {
+                    type: 'table',
+                    data: [
+                        ['列1', '列2'],
+                        ['数据1', '数据2'],
+                    ],
+                },
+                {
+                    type: 'image',
+                    src: 'https://example.com/image3.png',
+                },
+                {
+                    type: 'dom-image',
+                    domElementId: 'imageContainer', // 指定包含图片的 DOM 元素 ID
+                },
+                {
+                    type: 'table',
+                    data: [
+                        ['列A', '列B'],
+                        ['数据A', '数据B'],
+                    ],
+                },
+            ],
+        };
+    },
+};
+</script>
+```
+
+### 说明
+
+- **contentArray**: 数组中的每个对象可以是：
+  - `type: 'table'`: 表示一个表格，`data` 是表格的二维数组。
+  - `type: 'image'`: 表示单个图片，`src` 是图片的 URL。
+  - `type: 'dom-image'`: 表示从页面 DOM 中获取的图片，`domElementId` 是包含图片的 DOM 元素 ID。
+
+这样，你可以灵活地添加多个表格、图片和从 DOM 中提取的图片，并按所需顺序导出到 Word 文档中！
