@@ -2408,3 +2408,88 @@ pprint.pprint(transformed_data)
 ### 适用性
 
 这个方案适用于元组长度不定的情况，并自动生成层级关系。在最后一个元素作为参数名的规则下，它能灵活处理不同长度的层级结构。
+
+------
+
+要将 `build_query_conditions` 方法优化成一个更加通用的函数，我们可以引入可配置的分隔符以及支持多层嵌套的结构，使其更灵活。以下是优化后的代码：
+
+### 优化后的通用函数
+
+```python
+def build_query_conditions(query_data, separator=":"):
+    """
+    构建查询条件的辅助函数。
+    
+    :param query_data: 嵌套字典，格式为 {大类: {小类: {参数: 值, ...}, ...}, ...}
+    :param separator: 用于连接键的分隔符，默认为 ":"
+    :return: 构建的查询条件字典
+    """
+    filter_conditions = {}
+
+    def recursive_build(data, current_key=""):
+        for key, value in data.items():
+            if isinstance(value, dict):
+                # 如果值是字典，递归调用
+                new_key = f"{current_key}{separator}{key}" if current_key else key
+                recursive_build(value, new_key)
+            else:
+                # 否则，添加到查询条件中
+                new_key = f"{current_key}{separator}{key}" if current_key else key
+                filter_conditions[new_key] = value
+
+    recursive_build(query_data)
+    return filter_conditions
+
+# 示例使用
+query_data = {
+    "大类1": {
+        "小类1": {
+            "参数1": "值1",
+            "参数2": "值2"
+        },
+        "小类2": {
+            "参数3": "值3"
+        }
+    },
+    "大类2": {
+        "小类3": {
+            "参数4": "值4"
+        }
+    }
+}
+
+# 调用优化后的函数
+result = build_query_conditions(query_data)
+print(result)
+```
+
+### 代码说明
+
+1. **函数参数**：
+   - `query_data`: 输入的嵌套字典。
+   - `separator`: 用于连接键的分隔符，默认值为 `":"`。
+
+2. **递归函数**：`recursive_build`：
+   - 接受当前数据和当前键（默认为空字符串）。
+   - 遍历每个键值对。
+   - 如果值是字典，则递归调用，构建新的键。
+   - 如果值不是字典，则将构建的键和值添加到 `filter_conditions`。
+
+3. **灵活性**：
+   - 通过分隔符的配置，用户可以根据需要更改键的连接方式。
+   - 适应不同层级的嵌套结构，能处理任意深度的嵌套字典。
+
+### 示例输出
+
+对于给定的示例输入，输出将为：
+
+```python
+{
+    '大类1:小类1:参数1': '值1',
+    '大类1:小类1:参数2': '值2',
+    '大类1:小类2:参数3': '值3',
+    '大类2:小类3:参数4': '值4'
+}
+```
+
+这种优化使得函数在处理多层嵌套结构时更加通用和灵活。如果您有其他要求或需要进一步修改，请随时告诉我！
