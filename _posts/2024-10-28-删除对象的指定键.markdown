@@ -94,3 +94,95 @@ pprint.pprint(result)
 ```
 
 在这个例子中，所有的 `"要删除的键"` 都被成功删除了。如果您有其他需求或需要进一步修改，请随时告诉我！
+
+------
+
+我们可以修改删除指定键的函数，使其能够判断并删除多个指定键。如果传入一个数组包含多个键，函数将检查每个键是否存在，并在存在的情况下将其删除。下面是改写后的代码：
+
+### 修改后的函数
+
+```python
+def delete_keys_from_nested_dict(nested_dict, keys_to_delete):
+    """
+    从嵌套字典中删除指定的多个键。
+    
+    :param nested_dict: 嵌套字典
+    :param keys_to_delete: 包含要删除的多个键的数组
+    :return: 修改后的嵌套字典
+    """
+    if not isinstance(nested_dict, dict):
+        return nested_dict
+    
+    # 将要删除的键转换为集合以提高查找效率
+    keys_to_delete_set = set(keys_to_delete)
+
+    # 遍历当前层级的字典
+    for key in list(nested_dict.keys()):  # 使用 list() 来避免修改字典大小时的问题
+        # 如果当前键在要删除的键集合中，删除之
+        if key in keys_to_delete_set:
+            del nested_dict[key]
+        else:
+            # 递归进入下一层
+            nested_dict[key] = delete_keys_from_nested_dict(nested_dict[key], keys_to_delete)
+
+    return nested_dict
+
+# 示例嵌套字典
+nested_dict = {
+    '大类1': {
+        '小类1': {
+            '参数1': '值1',
+            '要删除的键1': '值2'
+        },
+        '小类2': {
+            '参数1': '值3',
+            '要删除的键2': '值4'
+        }
+    },
+    '大类2': {
+        '要删除的键3': '值5'
+    }
+}
+
+# 要删除的键
+keys_to_delete = ['要删除的键1', '要删除的键2', '要删除的键3']
+
+# 删除指定键
+result = delete_keys_from_nested_dict(nested_dict, keys_to_delete)
+
+# 输出结果
+import pprint
+pprint.pprint(result)
+```
+
+### 代码说明
+
+1. **函数参数**：
+   - `nested_dict`: 输入的嵌套字典。
+   - `keys_to_delete`: 包含多个要删除的键的数组。
+
+2. **将要删除的键转换为集合**：使用 `set(keys_to_delete)` 提高查找效率。
+
+3. **遍历字典**：
+   - 使用 `for key in list(nested_dict.keys())` 遍历当前层级的所有键，以避免在字典大小发生变化时的错误。
+   - 如果当前键在要删除的键集合中，则删除该键。
+   - 否则，递归调用进入下一层。
+
+### 示例输出
+
+对于给定的示例输入，输出将为：
+
+```python
+{
+    '大类1': {
+        '小类1': {
+            '参数1': '值1'
+        },
+        '小类2': {
+            '参数1': '值3'
+        }
+    }
+}
+```
+
+在这个例子中，所有指定的键都被成功删除。如果您需要进一步修改或有其他要求，请随时告诉我！
