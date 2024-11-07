@@ -1,0 +1,197 @@
+---
+layout:     post
+title:      "分页装饰器"
+subtitle:   ""
+date:       2024-11-07
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+下面是一个完整的分页装饰器代码示例，结合了Django的`model.objects.filter()`来获取数据，并支持分页。这个装饰器会根据前端传递的分页参数和筛选条件来获取、过滤并分页返回数据。
+
+假设你的数据是通过Django模型来获取的，并且筛选参数不确定，可以用Django的`**kwargs`来动态处理筛选条件。下面是完整代码：
+
+```python
+from functools import wraps
+from math import ceil
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+
+def paginate(page_param='page', page_size_param='page_size'):
+    """
+    通用分页装饰器，用于对数据结果进行分页。
+    
+    Args:
+        page_param (str): 前端传递的页码参数名，默认为 'page'。
+        page_size_param (str): 前端传递的每页大小参数名，默认为 'page_size'。
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # 获取分页参数，默认页码为1，每页大小为10
+            page = int(kwargs.pop(page_param, 1))
+            page_size = int(kwargs.pop(page_size_param, 10))
+
+            # 调用实际获取数据的函数（应返回一个QuerySet）
+            queryset = func(*args, **kwargs)
+            
+            # 使用 Django Paginator 分页
+            paginator = Paginator(queryset, page_size)
+            try:
+                paginated_data = paginator.page(page)
+            except PageNotAnInteger:
+                paginated_data = paginator.page(1)
+            except EmptyPage:
+                paginated_data = paginator.page(paginator.num_pages)
+
+            # 构建返回结果
+            result = {
+                "total": paginator.count,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": paginator.num_pages,
+                "data": list(paginated_data.object_list)  # 将分页数据转为列表
+            }
+            return result
+        
+        return wrapper
+    return decorator
+```
+
+### 使用示例
+
+假设有一个 `MyModel` 模型，以及一个 `get_data` 函数用于从数据库中获取并过滤数据。我们可以应用分页装饰器来自动对数据进行分页：
+
+```python
+from .models import MyModel
+from .serializers import MyModelSerializer
+
+@paginate(page_param='page', page_size_param='page_size')
+def get_data(**filters):
+    """
+    获取并返回筛选后的数据。支持动态筛选参数。
+    
+    Args:
+        filters (dict): 可选的筛选条件，用于过滤查询集。
+        
+    Returns:
+        QuerySet: 筛选后的查询集
+    """
+    queryset = MyModel.objects.filter(**filters)  # 根据传入的筛选条件进行过滤
+    serialized_data = MyModelSerializer(queryset, many=True).data  # 序列化数据
+    return serialized_data
+
+# 示例调用，假设传入分页参数和筛选条件
+result = get_data(page=2, page_size=5, user_id=1, status='active')
+print(result)
+```
+
+### 功能说明
+
+1. **分页参数**：从 `kwargs` 中提取 `page` 和 `page_size`，默认页码为1，每页大小为10。
+2. **动态筛选**：可以传入任意数量的筛选参数，函数会将它们传递给 `MyModel.objects.filter(**filters)`，生成符合条件的查询集。
+3. **分页与序列化**：使用 `Django Paginator` 进行分页处理，将分页数据序列化后返回。
+4. **返回格式**：返回一个包含分页数据的字典，包括 `total`（总条数）、`page`（当前页）、`page_size`（每页大小）、`total_pages`（总页数）以及实际分页的 `data`（序列化的分页数据）。
+
+这样设计的装饰器能支持任意筛选条件，并且通过装饰器进行分页处理，非常灵活且适用于多种场景。
+
+------
+
+为了适配函数参数已经被部分指定的情况，可以在装饰器内部处理`*args`和`**kwargs`，并使用Python的`inspect`模块来确定函数参数列表，这样就可以区分传入的分页参数和实际的筛选参数了。
+
+具体实现上，分页参数可以从`**kwargs`中提取，而固定的参数通过`*args`接收，并传递给被装饰的函数。下面是针对这种情况的改进版本代码：
+
+```python
+from functools import wraps
+from math import ceil
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+import inspect
+
+def paginate(page_param='page', page_size_param='page_size'):
+    """
+    通用分页装饰器，用于对数据结果进行分页。
+    
+    Args:
+        page_param (str): 前端传递的页码参数名，默认为 'page'。
+        page_size_param (str): 前端传递的每页大小参数名，默认为 'page_size'。
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # 获取分页参数，默认页码为1，每页大小为10
+            page = int(kwargs.pop(page_param, 1))
+            page_size = int(kwargs.pop(page_size_param, 10))
+
+            # 获取函数参数名称列表，用于区分传入的筛选条件和分页参数
+            func_params = inspect.signature(func).parameters
+
+            # 将分页参数从筛选参数中分离
+            filter_kwargs = {k: v for k, v in kwargs.items() if k in func_params}
+
+            # 调用实际获取数据的函数（应返回一个QuerySet）
+            queryset = func(*args, **filter_kwargs)
+            
+            # 使用 Django Paginator 分页
+            paginator = Paginator(queryset, page_size)
+            try:
+                paginated_data = paginator.page(page)
+            except PageNotAnInteger:
+                paginated_data = paginator.page(1)
+            except EmptyPage:
+                paginated_data = paginator.page(paginator.num_pages)
+
+            # 构建返回结果
+            result = {
+                "total": paginator.count,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": paginator.num_pages,
+                "data": list(paginated_data.object_list)  # 将分页数据转为列表
+            }
+            return result
+        
+        return wrapper
+    return decorator
+```
+
+### 使用示例
+
+假设 `get_data` 函数的部分参数是固定的，比如 `user` 和 `status`，而其余筛选条件则通过 `**kwargs` 动态传入。我们可以应用分页装饰器来自动对数据进行分页：
+
+```python
+from .models import MyModel
+from .serializers import MyModelSerializer
+
+@paginate(page_param='page', page_size_param='page_size')
+def get_data(user, status, **extra_filters):
+    """
+    获取并返回筛选后的数据。支持动态筛选参数。
+    
+    Args:
+        user: 固定的用户参数。
+        status: 固定的状态参数。
+        extra_filters (dict): 额外的筛选条件。
+        
+    Returns:
+        QuerySet: 筛选后的查询集
+    """
+    queryset = MyModel.objects.filter(user=user, status=status, **extra_filters)
+    serialized_data = MyModelSerializer(queryset, many=True).data  # 序列化数据
+    return serialized_data
+
+# 示例调用，假设传入分页参数和其他筛选条件
+result = get_data(user=1, status='active', page=2, page_size=5, created_at__gte='2023-01-01')
+print(result)
+```
+
+### 代码说明
+
+1. **分页参数提取**：在`wrapper`函数中，先从`kwargs`中提取分页参数`page`和`page_size`。
+2. **筛选参数识别**：使用`inspect.signature(func).parameters`来获取原函数的参数列表，然后从`kwargs`中筛选出和原函数匹配的参数作为`filter_kwargs`。
+3. **实际查询与分页**：通过调用传入的参数和`filter_kwargs`来执行查询，然后使用`Paginator`对结果分页。
+4. **返回格式**：与之前一样，返回一个包含分页数据的字典，包括总条数、当前页、每页大小和总页数。
+
+### 总结
+
+这个实现适应了固定参数和动态筛选参数的混合情况，分页装饰器可以灵活地应用于不同的`get_data`函数，实现分页和过滤的组合功能。
