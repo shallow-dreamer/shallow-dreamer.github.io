@@ -3610,3 +3610,379 @@ class BulkDataItemSerializer(serializers.ListSerializer):
 
 ### 结果：
 前端的数据结构会按照层级顺序存储，并且每个附件字段会被替换成文件的 S3 URL。你可以在数据库中看到每个大类、小类、参数的数据，以及附件的 URL 信息。
+
+------
+
+这个方案通过添加 `hash` 和 `引用次数` 字段来优化附件管理，避免重复上传和存储同样的文件，同时能有效管理附件的生命周期。以下是完整的实现思路及代码，包括数据库设计、文件上传、数据写入逻辑，以及删除或修改操作。
+
+---
+
+### 数据库设计
+
+#### **附件模型 (Attachment)**
+
+```python
+from django.db import models
+
+class Attachment(models.Model):
+    file_name = models.CharField(max_length=255)  # 原始文件名
+    s3_object_key = models.CharField(max_length=512)  # S3 object key
+    file_url = models.URLField()  # S3 文件绝对 URL
+    file_hash = models.CharField(max_length=64, unique=True)  # 文件的唯一 Hash 值 (MD5/SHA256)
+    reference_count = models.PositiveIntegerField(default=1)  # 引用次数
+
+    def delete_s3_file(self):
+        """
+        删除 S3 中存储的文件。
+        """
+        from w3storage import W3Storage
+        storage = W3Storage()
+        storage.delete_object(self.s3_object_key)
+
+    def delete(self, *args, **kwargs):
+        """
+        重写 delete 方法，确保删除时同步删除 S3 文件。
+        """
+        self.delete_s3_file()
+        super().delete(*args, **kwargs)
+```
+
+---
+
+### 文件处理逻辑
+
+#### 文件上传时的哈希计算
+
+在上传文件到 S3 之前，先计算文件的哈希值 (`hash`)，以检测是否有重复的文件。
+
+```python
+import hashlib
+
+def calculate_file_hash(file):
+    """
+    计算文件的哈希值 (SHA256)。
+    :param file: 文件对象
+    :return: 文件的 SHA256 哈希值
+    """
+    sha256 = hashlib.sha256()
+    for chunk in file.chunks():
+        sha256.update(chunk)
+    return sha256.hexdigest()
+```
+
+#### 数据写入逻辑
+
+在数据写入时，检查 `Attachment` 表中是否已经存在相同的哈希值。如果存在，直接更新数据中的附件信息；否则，上传文件到 S3 并创建新的附件记录。
+
+```python
+from .models import Attachment
+from w3storage import W3Storage
+
+def handle_attachments(data, files):
+    """
+    处理数据中的附件。
+    :param data: 数据结构，包含附件字段
+    :param files: 上传的文件字典
+    :return: 处理后的数据结构
+    """
+    storage = W3Storage()
+
+    def process_attachment(file):
+        # 计算文件哈希
+        file_hash = calculate_file_hash(file)
+
+        # 检查是否已存在相同文件
+        attachment, created = Attachment.objects.get_or_create(file_hash=file_hash, defaults={
+            'file_name': file.name,
+            's3_object_key': storage.putobject(file.name, file),
+            'file_url': storage.get_absolute_url(file.name),
+            'reference_count': 1,
+        })
+
+        if not created:
+            # 如果文件已存在，增加引用次数
+            attachment.reference_count += 1
+            attachment.save()
+
+        return {
+            'file_name': attachment.file_name,
+            'file_url': attachment.file_url,
+            'hash': attachment.file_hash,
+        }
+
+    def traverse_and_process(data):
+        # 递归处理层级数据结构中的附件
+        for key, value in data.items():
+            if isinstance(value, dict):
+                traverse_and_process(value)
+            elif key == "附件":
+                processed_attachments = []
+                for file_name in value:
+                    if file_name in files:
+                        processed_attachments.append(process_attachment(files[file_name]))
+                data[key] = processed_attachments
+
+    traverse_and_process(data)
+    return data
+```
+
+#### 示例调用
+
+```python
+files = {
+    "file1.jpg": uploaded_file1,
+    "file2.jpg": uploaded_file2,
+}
+
+data = {
+    "大类1": {
+        "小类1": {
+            "参数1": "值1",
+            "附件": ["file1.jpg", "file2.jpg"]
+        },
+        "小类2": {
+            "参数2": "值2",
+            "附件": ["file1.jpg"]  # 重复文件
+        }
+    }
+}
+
+processed_data = handle_attachments(data, files)
+```
+
+---
+
+### 修改和删除逻辑
+
+#### 修改引用次数
+
+在数据被修改时，对附件的引用次数进行更新。如果引用次数为 0，则删除文件记录以及对应的 S3 文件。
+
+```python
+def update_attachment_references(file_hashes_to_remove):
+    """
+    更新附件的引用次数。
+    :param file_hashes_to_remove: 要减少引用次数的文件哈希列表
+    """
+    for file_hash in file_hashes_to_remove:
+        try:
+            attachment = Attachment.objects.get(file_hash=file_hash)
+            attachment.reference_count -= 1
+            if attachment.reference_count <= 0:
+                attachment.delete()  # 自动删除 S3 文件
+            else:
+                attachment.save()
+        except Attachment.DoesNotExist:
+            continue
+```
+
+---
+
+### 序列化器中的处理
+
+如果使用 `DRF` 的序列化器，可以在 `save` 方法中调用上述逻辑。
+
+```python
+from rest_framework import serializers
+
+class NestedDataSerializer(serializers.Serializer):
+    data = serializers.JSONField()
+    files = serializers.DictField(child=serializers.FileField())
+
+    def save(self, **kwargs):
+        data = self.validated_data['data']
+        files = self.validated_data['files']
+        processed_data = handle_attachments(data, files)
+        # 存储处理后的数据到数据库
+        # Your model saving logic here
+        return processed_data
+```
+
+---
+
+### 删除操作示例
+
+```python
+file_hashes_to_remove = ["existing_file_hash1", "existing_file_hash2"]
+update_attachment_references(file_hashes_to_remove)
+```
+
+---
+
+### 整体逻辑总结
+
+1. **哈希计算**：使用文件的哈希值避免重复上传。
+2. **引用计数管理**：每次新增文件时增加引用次数，修改或删除时减少引用次数。
+3. **S3 文件删除**：当引用次数为 0 时，删除附件记录和对应的 S3 文件。
+4. **数据与附件关联**：通过 `hash` 和引用逻辑简化数据和文件的绑定关系。
+
+------
+
+在修改操作时，需要先对原有的附件数据进行处理：减少引用次数，并在引用为 0 时删除对应记录；然后处理新的附件数据，增加引用次数或创建新的记录。以下是完整的实现方案和代码。
+
+---
+
+### 修改操作逻辑
+
+```python
+def update_attachments(existing_data, updated_data, files):
+    """
+    更新附件的引用计数，同时更新数据中的附件信息。
+    :param existing_data: 修改前的数据，包含附件信息
+    :param updated_data: 修改后的数据，包含附件信息
+    :param files: 上传的文件字典
+    :return: 处理后的新数据
+    """
+    def get_attachments(data):
+        """
+        提取数据中的所有附件哈希列表。
+        :param data: 数据结构
+        :return: 附件哈希列表
+        """
+        attachments = []
+
+        def traverse(data):
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    traverse(value)
+                elif key == "附件" and isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict) and 'hash' in item:
+                            attachments.append(item['hash'])
+
+        traverse(data)
+        return attachments
+
+    # 1. 提取现有数据的附件哈希
+    existing_hashes = set(get_attachments(existing_data))
+
+    # 2. 使用新数据处理附件，获取新的数据
+    updated_data = handle_attachments(updated_data, files)
+
+    # 3. 提取新数据的附件哈希
+    updated_hashes = set(get_attachments(updated_data))
+
+    # 4. 计算需要减少引用的附件和新增引用的附件
+    hashes_to_remove = existing_hashes - updated_hashes
+    hashes_to_add = updated_hashes - existing_hashes
+
+    # 5. 更新引用计数
+    update_attachment_references(hashes_to_remove)
+
+    for hash_to_add in hashes_to_add:
+        try:
+            attachment = Attachment.objects.get(file_hash=hash_to_add)
+            attachment.reference_count += 1
+            attachment.save()
+        except Attachment.DoesNotExist:
+            pass  # 这不应该发生，所有新附件应已创建
+
+    return updated_data
+```
+
+---
+
+### 修改操作调用示例
+
+```python
+existing_data = {
+    "大类1": {
+        "小类1": {
+            "参数1": "值1",
+            "附件": [
+                {"file_name": "file1.jpg", "file_url": "url1", "hash": "hash1"},
+                {"file_name": "file2.jpg", "file_url": "url2", "hash": "hash2"}
+            ]
+        }
+    }
+}
+
+updated_data = {
+    "大类1": {
+        "小类1": {
+            "参数1": "新值1",
+            "附件": [
+                "file2.jpg",  # 仍然是旧文件
+                "file3.jpg"   # 新增文件
+            ]
+        }
+    }
+}
+
+files = {
+    "file3.jpg": uploaded_file3
+}
+
+new_data = update_attachments(existing_data, updated_data, files)
+```
+
+---
+
+### 修改逻辑步骤
+
+1. **提取原有数据中的附件**：通过遍历原有数据，获取所有的附件哈希。
+2. **更新新数据的附件信息**：
+   - 处理新数据中的附件，将文件上传到 S3，并生成附件记录。
+   - 提取新数据的附件哈希列表。
+3. **对比引用差异**：
+   - 减少引用次数：对 `hashes_to_remove` 中的附件，减少引用，引用为 0 时删除记录。
+   - 增加引用次数：对 `hashes_to_add` 中的附件，增加引用次数。
+4. **返回更新后的数据**：返回处理完毕的新数据结构。
+
+---
+
+### 删除逻辑的改进
+
+删除数据时同样需要减少附件的引用次数，如果引用次数为 0，则删除附件记录和 S3 文件。
+
+```python
+def delete_attachments(data):
+    """
+    删除数据中的附件引用。
+    :param data: 数据结构
+    """
+    def get_attachments(data):
+        attachments = []
+
+        def traverse(data):
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    traverse(value)
+                elif key == "附件" and isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict) and 'hash' in item:
+                            attachments.append(item['hash'])
+
+        traverse(data)
+        return attachments
+
+    hashes_to_remove = set(get_attachments(data))
+    update_attachment_references(hashes_to_remove)
+```
+
+调用示例：
+
+```python
+data_to_delete = {
+    "大类1": {
+        "小类1": {
+            "参数1": "值1",
+            "附件": [
+                {"file_name": "file1.jpg", "file_url": "url1", "hash": "hash1"}
+            ]
+        }
+    }
+}
+
+delete_attachments(data_to_delete)
+```
+
+---
+
+### 优化点
+
+1. **引用管理**：通过 `hash` 对附件引用进行唯一标识，避免重复存储和上传。
+2. **批量处理**：`bulk_update` 和 `bulk_create` 可优化数据库操作。
+3. **并发支持**：在高并发场景下，需要为 `Attachment` 表的 `reference_count` 字段增加乐观锁机制（如 `F` 表达式）。
+
+这样设计和实现，可以确保附件在数据修改、删除时正确引用和释放，同时减少存储和网络传输的冗余。
