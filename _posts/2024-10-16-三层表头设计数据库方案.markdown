@@ -3986,3 +3986,91 @@ delete_attachments(data_to_delete)
 3. **并发支持**：在高并发场景下，需要为 `Attachment` 表的 `reference_count` 字段增加乐观锁机制（如 `F` 表达式）。
 
 这样设计和实现，可以确保附件在数据修改、删除时正确引用和释放，同时减少存储和网络传输的冗余。
+
+------
+
+```js
+// 统计rowspan并打平数据
+function calculateRowspansAndFlatten(data) {
+    // 计算rowspan的数据
+    const dataWithRowspans = JSON.parse(JSON.stringify(data)); // 深拷贝以不影响原数据
+    addRowspansToData(dataWithRowspans);
+    // 打平数据
+    const flattenedData = flattenData(data);
+    return {
+        dataWithRowspans,
+        flattenedData
+    };
+}
+
+// 计算并添加rowspan到原数据
+function addRowspansToData(data) {
+    for (const category in data) {
+        if (!data.hasOwnProperty(category)) continue;
+        
+        let categoryRowspan = 0;
+        const subcategories = data[category];
+        
+        for (const subcategory in subcategories) {
+            if (!subcategories.hasOwnProperty(subcategory)) continue;
+            
+            // 计算小类的rowspan - 只计算参数的数量
+            const subcategoryRowspan = Object.keys(subcategories[subcategory]).length;
+            categoryRowspan += subcategoryRowspan;
+            
+            // 添加rowspan到小类
+            subcategories[subcategory]._rowspan = subcategoryRowspan;
+        }
+        
+        // 添加rowspan到大类
+        data[category]._rowspan = categoryRowspan;
+    }
+}
+
+// 打平数据并保留层级信息
+function flattenData(data) {
+    const flattened = [];
+    
+    // 处理参数和附件
+    const processParams = (category, subcategory, params) => {
+        for (const param in params) {
+            if (!params.hasOwnProperty(param)) continue;
+            
+            const value = params[param];
+            if (param === "附件" && Array.isArray(value)) {
+                value.forEach(attachment => {
+                    flattened.push({
+                        level1: category,
+                        level2: subcategory,
+                        level3: param,
+                        value: attachment
+                    });
+                });
+            } else {
+                flattened.push({
+                    level1: category,
+                    level2: subcategory,
+                    level3: param,
+                    value: value
+                });
+            }
+        }
+    };
+
+    // 遍历数据结构
+    for (const category in data) {
+        if (!data.hasOwnProperty(category)) continue;
+        
+        for (const subcategory in data[category]) {
+            if (!data[category].hasOwnProperty(subcategory)) continue;
+            processParams(category, subcategory, data[category][subcategory]);
+        }
+    }
+    
+    return flattened;
+}
+
+// 处理数据
+const { dataWithRowspans, flattenedData } = calculateRowspansAndFlatten(dataToDelete);
+```
+
