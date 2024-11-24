@@ -187,3 +187,114 @@ export default {
   - `type: 'dom-image'`: 表示从页面 DOM 中获取的图片，`domElementId` 是包含图片的 DOM 元素 ID。
 
 这样，你可以灵活地添加多个表格、图片和从 DOM 中提取的图片，并按所需顺序导出到 Word 文档中！
+
+------
+
+```js
+// loading状态管理 - 使用Vue3 响应式API
+import { ref } from 'vue'
+import { ElLoading } from 'element-plus'
+
+class LoadingManager {
+    constructor() {
+        this.loadingInstance = null;
+        this.loadingText = ref('加载中...');
+    }
+
+    // 显示loading
+    showLoading(text) {
+        if(text) {
+            this.loadingText.value = text;
+        }
+        this.loadingInstance = ElLoading.service({
+            lock: true,
+            text: this.loadingText.value,
+            background: 'rgba(0, 0, 0, 0.7)'
+        });
+    }
+
+    // 更新loading文本
+    updateLoadingText(text) {
+        if(this.loadingInstance) {
+            this.loadingText.value = text;
+            this.loadingInstance.setText(text);
+        }
+    }
+
+    // 关闭loading
+    closeLoading() {
+        if(this.loadingInstance) {
+            this.loadingInstance.close();
+            this.loadingInstance = null;
+        }
+    }
+}
+
+// 创建loading管理实例
+const loadingManager = new LoadingManager();
+
+// 全局路由守卫中使用
+router.beforeEach(async (to, from, next) => {
+    // 白名单路由直接放行
+    const whiteList = ['/login', '/register', '/404'];
+    if (whiteList.includes(to.path)) {
+        next();
+        return;
+    }
+
+    try {
+        loadingManager.showLoading('验证登录中...');
+        
+        // 验证登录请求
+        const response = await fetch('/api/verify-login', {
+            method: 'POST',
+            credentials: 'include'
+        });
+        
+        if (!response.ok) {
+            throw new Error('登录验证失败');
+        }
+        
+        const result = await response.json();
+        
+        // 可以根据需要更新loading文本
+        loadingManager.updateLoadingText('验证成功，正在跳转...');
+        
+        if (result.isLoggedIn) {
+            next();
+        } else {
+            ElMessage.error('请先登录');
+            next('/login');
+        }
+        
+    } catch (error) {
+        console.error('登录验证出错:', error);
+        ElMessage.error(error.message);
+        next('/login');
+    } finally {
+        loadingManager.closeLoading();
+    }
+});
+
+// 在Vue组件中使用示例:
+const useLoading = () => {
+    const showPageLoading = (text) => {
+        loadingManager.showLoading(text);
+    };
+    
+    const updateLoadingText = (text) => {
+        loadingManager.updateLoadingText(text);
+    };
+    
+    const closePageLoading = () => {
+        loadingManager.closeLoading();
+    };
+    
+    return {
+        showPageLoading,
+        updateLoadingText,
+        closePageLoading
+    };
+};
+```
+
