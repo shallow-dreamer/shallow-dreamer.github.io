@@ -1,0 +1,84 @@
+---
+layout:     post
+title:      "使用原生api清空剪切板"
+subtitle:   ""
+date:       2024-12-03
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - js
+---
+
+```js
+// 清空剪贴板的函数
+export const clearClipboard = async () => {
+  // 创建空白图片
+      const canvas = document.createElement('canvas')
+      canvas.width = 1
+      canvas.height = 1
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = 'white'
+      ctx.fillRect(0, 0, 1, 1)
+
+      // 转换为 blob 并写入剪贴板
+      canvas.toBlob(async (blob) => {
+        try {
+          const item = new ClipboardItem({ 'image/png': blob })
+          await navigator.clipboard.write([item])
+          console.log('Image clipboard cleared')
+        } catch (err) {
+          console.error('Failed to clear image clipboard:', err)
+        }
+      }, 'image/png')
+  try {
+    await navigator.clipboard.writeText('')
+    console.log('Clipboard cleared')
+    return true
+  } catch (err) {
+    console.error('Failed to clear clipboard:', err)
+    return false
+  }
+  try {
+        // 尝试方法3：使用 document.execCommand (已废弃但兼容性好)
+        const textArea = document.createElement('textarea')
+        textArea.value = ''
+        document.body.appendChild(textArea)
+        textArea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textArea)
+        console.log('Cleared using execCommand')
+      } catch (err3) {
+        console.error('execCommand failed:', err3)
+        throw new Error('All clipboard clearing methods failed')
+      }
+}
+
+// 检查剪贴板权限
+export const checkClipboardPermission = async () => {
+  try {
+    const result = await navigator.permissions.query({ name: 'clipboard-write' })
+    console.log('Clipboard permission status:', result.state)
+    return result.state
+  } catch (err) {
+    console.error('Clipboard permission check failed:', err)
+    return 'denied'
+  }
+}
+
+// 处理 PrintScreen 按键事件
+export const handlePrintScreen = async (e) => {
+  console.log('Key up detected:', {
+    key: e.key,
+    keyCode: e.keyCode,
+    code: e.code
+  })
+
+  if (e.key === 'PrintScreen' || e.keyCode === 44 || e.code === 'PrintScreen') {
+    console.log('PrintScreen key detected')
+    e.preventDefault()
+    return await clearClipboard()
+  }
+  return false
+} 
+```
+
