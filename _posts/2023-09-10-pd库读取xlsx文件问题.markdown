@@ -188,3 +188,310 @@ df = df.reset_index(drop=True)
    这将把所有缺失的列名称填充为自定义列名。
 
 根据您的需求，选择上述任何一种方法来处理缺失的列名称。这样，您可以更灵活地控制数据帧的结构。
+
+------
+
+明白了，如果是处理前端传递的文件并存储到S3，我们可以直接处理文件对象，不需要考虑本地路径。以下是修改后的代码：
+
+```python
+import msoffcrypto
+import openpyxl
+from io import BytesIO
+
+def read_encrypted_excel(file_object, password):
+    """
+    处理加密的Excel文件
+    :param file_object: 文件对象（可以是BytesIO或文件流）
+    :param password: Excel文件的密码
+    :return: (workbook, decrypted_buffer)
+    """
+    try:
+        # 创建msoffcrypto对象
+        office_file = msoffcrypto.OfficeFile(file_object)
+        # 设置密码
+        office_file.load_key(password=password)
+        
+        # 解密到内存缓冲区
+        decrypted_buffer = BytesIO()
+        office_file.decrypt(decrypted_buffer)
+        
+        # 将指针移到开始位置
+        decrypted_buffer.seek(0)
+        
+        # 使用openpyxl读取解密后的数据
+        wb = openpyxl.load_workbook(decrypted_buffer, read_only=True, data_only=True)
+        return wb, decrypted_buffer
+            
+    except Exception as e:
+        print(f"处理Excel文件时出错: {str(e)}")
+        raise
+
+# 示例：处理上传的文件并保存到S3
+def process_uploaded_excel(file_object, password, s3_client, bucket_name, s3_key):
+    try:
+        # 读取加密文件
+        wb, decrypted_buffer = read_encrypted_excel(file_object, password)
+        
+        # 处理Excel数据
+        ws = wb.active
+        data = []
+        for row in ws.iter_rows(values_only=True):
+            data.append(row)
+            
+        # 可选：将解密后的文件上传到S3
+        decrypted_buffer.seek(0)
+        s3_client.upload_fileobj(
+            decrypted_buffer,
+            bucket_name,
+            s3_key
+        )
+        
+        return data
+        
+    except Exception as e:
+        print(f"处理上传文件时出错: {str(e)}")
+        raise
+        
+    finally:
+        if 'decrypted_buffer' in locals():
+            decrypted_buffer.close()
+
+"""
+# FastAPI示例用法：
+from fastapi import UploadFile, File
+
+@app.post("/upload-excel/")
+async def upload_excel(
+    file: UploadFile = File(...),
+    password: str = Form(...),
+    s3_client = Depends(get_s3_client)
+):
+    try:
+        # 读取上传的文件内容
+        file_content = await file.read()
+        file_object = BytesIO(file_content)
+        
+        # 处理Excel文件
+        data = process_uploaded_excel(
+            file_object,
+            password,
+            s3_client,
+            "your-bucket-name",
+            f"excels/{file.filename}"
+        )
+        
+        return {"status": "success", "data": data}
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+"""
+```
+
+这个版本的代码：
+1. 直接处理文件对象而不是文件路径
+2. 支持处理前端上传的文件
+3. 可以直接与S3集成
+4. 使用内存缓冲区处理文件，不需要写入本地文件系统
+5. 包含了适当的异常处理和资源清理
+
+注意事项：
+1. 确保服务器有足够的内存处理上传的文件
+2. 对于特别大的文件，可能需要考虑流式处理或分块处理
+3. 建议设置文件大小限制
+4. 可以根据需要添加文件类型验证
+
+这个实现应该可以很好地配合你的S3存储方案工作。如果你需要其他特定的处理逻辑，可以根据需要进行调整。
+
+------
+
+以下是一个可以根据工作表名获取特定工作表数据的实现：
+
+```python
+import msoffcrypto
+import openpyxl
+from io import BytesIO
+from typing import Generator, Any, Dict, List, Optional
+
+def stream_encrypted_excel_by_sheet(
+    file_object, 
+    password: str, 
+    sheet_names: List[str] = None,
+    chunk_size: int = 1000
+) -> Generator[Dict[str, List], None, None]:
+    """
+    流式处理加密Excel文件中的指定工作表
+    :param file_object: 文件对象
+    :param password: Excel密码
+    :param sheet_names: 需要读取的工作表名列表，如果为None则读取所有工作表
+    :param chunk_size: 每次处理的行数
+    :yield: 返回包含工作表名和数据的字典
+    """
+    try:
+        # 创建msoffcrypto对象并解密
+        office_file = msoffcrypto.OfficeFile(file_object)
+        office_file.load_key(password=password)
+        
+        # 解密到内存缓冲区
+        decrypted_buffer = BytesIO()
+        office_file.decrypt(decrypted_buffer)
+        decrypted_buffer.seek(0)
+        
+        # 使用openpyxl以只读模式打开
+        wb = openpyxl.load_workbook(
+            decrypted_buffer, 
+            read_only=True, 
+            data_only=True
+        )
+        
+        # 获取所有工作表名
+        available_sheets = wb.sheetnames
+        
+        # 如果未指定工作表名，则处理所有工作表
+        if sheet_names is None:
+            sheet_names = available_sheets
+        
+        # 验证请求的工作表是否存在
+        invalid_sheets = [name for name in sheet_names if name not in available_sheets]
+        if invalid_sheets:
+            raise ValueError(f"工作表 {', '.join(invalid_sheets)} 不存在。可用的工作表: {', '.join(available_sheets)}")
+        
+        # 处理每个工作表
+        for sheet_name in sheet_names:
+            ws = wb[sheet_name]
+            current_chunk = []
+            
+            # 逐行读取数据
+            for row in ws.iter_rows(values_only=True):
+                current_chunk.append(row)
+                
+                if len(current_chunk) >= chunk_size:
+                    yield {
+                        'sheet_name': sheet_name,
+                        'data': current_chunk
+                    }
+                    current_chunk = []
+            
+            # 处理最后剩余的数据
+            if current_chunk:
+                yield {
+                    'sheet_name': sheet_name,
+                    'data': current_chunk
+                }
+            
+    except Exception as e:
+        print(f"处理Excel文件时出错: {str(e)}")
+        raise
+        
+    finally:
+        if 'decrypted_buffer' in locals():
+            decrypted_buffer.close()
+        if 'wb' in locals():
+            wb.close()
+
+# 使用示例
+def process_excel_sheets(file_object, password: str, sheet_names: List[str] = None):
+    try:
+        # 处理指定工作表的数据
+        for chunk in stream_encrypted_excel_by_sheet(file_object, password, sheet_names):
+            sheet_name = chunk['sheet_name']
+            data = chunk['data']
+            print(f"Processing sheet: {sheet_name}")
+            for row in data:
+                # 处理每一行数据
+                print(row)
+                
+    except ValueError as ve:
+        print(f"工作表错误: {str(ve)}")
+    except Exception as e:
+        print(f"处理文件时出错: {str(e)}")
+
+# FastAPI示例用法
+"""
+from fastapi import UploadFile, File, Form
+from typing import List
+
+@app.post("/process-excel-sheets/")
+async def process_sheets(
+    file: UploadFile = File(...),
+    password: str = Form(...),
+    sheet_names: List[str] = Form(...)
+):
+    try:
+        # 读取上传的文件内容
+        file_content = await file.read()
+        file_object = BytesIO(file_content)
+        
+        # 存储处理结果
+        results = {}
+        
+        # 处理指定的工作表
+        for chunk in stream_encrypted_excel_by_sheet(file_object, password, sheet_names):
+            sheet_name = chunk['sheet_name']
+            if sheet_name not in results:
+                results[sheet_name] = []
+            results[sheet_name].extend(chunk['data'])
+        
+        return {"status": "success", "data": results}
+        
+    except ValueError as ve:
+        return {"status": "error", "message": str(ve)}
+    except Exception as e:
+        return {"status": "error", "message": f"处理文件时出错: {str(e)}"}
+    finally:
+        file_object.close()
+"""
+
+# 示例：获取工作表名列表
+def get_sheet_names(file_object, password: str) -> List[str]:
+    """
+    获取Excel文件中所有工作表的名称
+    """
+    try:
+        office_file = msoffcrypto.OfficeFile(file_object)
+        office_file.load_key(password=password)
+        
+        decrypted_buffer = BytesIO()
+        office_file.decrypt(decrypted_buffer)
+        decrypted_buffer.seek(0)
+        
+        wb = openpyxl.load_workbook(decrypted_buffer, read_only=True)
+        return wb.sheetnames
+        
+    finally:
+        if 'decrypted_buffer' in locals():
+            decrypted_buffer.close()
+```
+
+主要特点：
+
+1. **灵活的工作表选择**：
+   - 可以指定要读取的工作表
+   - 如果不指定，则读取所有工作表
+   - 包含工作表存在性验证
+
+2. **流式处理**：
+   - 每个工作表的数据都是分块处理的
+   - 减少内存使用
+   - 支持大文件处理
+
+3. **错误处理**：
+   - 详细的错误信息
+   - 包含工作表验证
+   - 资源正确释放
+
+使用示例：
+
+```python
+# 读取特定工作表
+sheet_names = ['Sheet1', 'Sheet2']
+process_excel_sheets(file_object, password, sheet_names)
+
+# 读取所有工作表
+process_excel_sheets(file_object, password)
+
+# 获取所有工作表名
+sheet_names = get_sheet_names(file_object, password)
+print(f"可用的工作表: {sheet_names}")
+```
+
+这个实现可以帮助你有效地处理多工作表的Excel文件，同时保持内存使用效率。
