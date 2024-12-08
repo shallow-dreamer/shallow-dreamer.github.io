@@ -260,3 +260,267 @@ defineExpose({
 </template>
 ```
 
+------
+
+```vue
+<script setup>
+import { defineProps, defineEmits, useAttrs, ref, defineComponent } from 'vue'
+import { ElTable, ElTableColumn, ElPagination } from 'element-plus'
+
+const props = defineProps({
+  tableData: {
+    type: Array,
+    required: true,
+    default: () => []
+  },
+  columns: {
+    type: Array,
+    required: true,
+    default: () => []
+  },
+  customProps: {
+    type: Object,
+    default: () => ({})
+  },
+  total: {
+    type: Number,
+    default: 0
+  },
+  currentPage: {
+    type: Number,
+    default: 1
+  },
+  pageSize: {
+    type: Number,
+    default: 10
+  },
+  // 新增分页相关配置
+  pagination: {
+    type: Object,
+    default: () => ({
+      enable: false, // 是否启用分页
+      position: 'bottom', // 分页位置: top/bottom/both
+      pageSizes: [10, 20, 30, 50], // 每页显示个数选择器的选项
+      layout: 'total, sizes, prev, pager, next, jumper', // 组件布局
+      justifyContent: 'flex-end', // 分页对齐方式: left/center/right
+      alignItems: 'center',
+      paginationProps: {}, // 用于传递给 el-pagination 的其他属性，
+      padding: '0'
+    })
+  }
+})
+
+const emit = defineEmits([
+  'select',
+  'select-all',
+  'selection-change',
+  'cell-click', 
+  'cell-dblclick',
+  'cell-contextmenu',
+  'cell-mouse-enter',
+  'cell-mouse-leave',
+  'row-click',
+  'row-dblclick',
+  'row-contextmenu',
+  'header-click',
+  'header-contextmenu',
+  'sort-change',
+  'filter-change',
+  'current-change',
+  'header-dragend',
+  'expand-change',
+  'update:currentPage',
+  'update:pageSize',
+  'pagination-change',
+  // 新增 el-pagination 的所有事件
+  'size-change',
+  'prev-click',
+  'next-click'
+])
+
+const attrs = useAttrs()
+
+const RecursiveColumn = defineComponent({
+  name: 'RecursiveColumn',
+  props: {
+    column: {
+      type: Object,
+      required: true
+    }
+  },
+  template: `
+    <el-table-column
+      v-if="column.children && column.children.length"
+      :label="column.label"
+      :align="column.align"
+      :width="column.width"
+      :min-width="column.minWidth"
+      :fixed="column.fixed"
+      :show-overflow-tooltip="column.showOverflowTooltip"
+      v-bind="column.customAttrs"
+    >
+      <template v-if="column.headerSlot" #header="scope">
+        <slot :name="column.headerSlot" v-bind="scope"></slot>
+      </template>
+      
+      <recursive-column
+        v-for="child in column.children"
+        :key="child.prop"
+        :column="child"
+      >
+        <template v-for="(_, name) in $slots" #[name]="slotData">
+          <slot :name="name" v-bind="slotData"></slot>
+        </template>
+      </recursive-column>
+    </el-table-column>
+    <el-table-column
+      v-else
+      :prop="column.prop"
+      :label="column.label"
+      :align="column.align"
+      :width="column.width"
+      :min-width="column.minWidth"
+      :fixed="column.fixed"
+      :sortable="column.sortable"
+      :filters="column.filters"
+      :filter-method="column.filterMethod"
+      :show-overflow-tooltip="column.showOverflowTooltip"
+      v-bind="column.customAttrs"
+    >
+      <template v-if="column.slot" #default="scope">
+        <slot :name="column.slot" v-bind="scope"></slot>
+      </template>
+      
+      <template v-if="column.headerSlot" #header="scope">
+        <slot :name="column.headerSlot" v-bind="scope"></slot>
+      </template>
+      
+      <template v-for="(slotName, slotKey) in column.slots" :key="slotKey" #[slotKey]="scope">
+        <slot :name="slotName" v-bind="scope"></slot>
+      </template>
+    </el-table-column>
+  `
+})
+
+const tableRef = ref(null)
+
+const handleCurrentChange = (val) => {
+  emit('update:currentPage', val)
+  emit('pagination-change', { page: val, pageSize: props.pageSize })
+  emit('current-change', val)
+}
+
+const handleSizeChange = (val) => {
+  emit('update:pageSize', val)
+  emit('pagination-change', { page: props.currentPage, pageSize: val })
+  emit('size-change', val)
+}
+
+const handlePrevClick = (val) => {
+  emit('prev-click', val)
+}
+
+const handleNextClick = (val) => {
+  emit('next-click', val)
+}
+
+defineExpose({
+  clearSort: () => tableRef.value?.clearSort(),
+  clearFilter: (columnKeys) => tableRef.value?.clearFilter(columnKeys),
+  toggleRowExpansion: (row, expanded) => tableRef.value?.toggleRowExpansion(row, expanded),
+  toggleAllSelection: () => tableRef.value?.toggleAllSelection(),
+  setCurrentRow: (row) => tableRef.value?.setCurrentRow(row),
+  clearSelection: () => tableRef.value?.clearSelection(),
+  sort: (prop, order) => tableRef.value?.sort(prop, order),
+  getTableRef: () => tableRef.value
+})
+</script>
+
+<template>
+  <div class="table-wrapper">
+    <!-- 上方分页 -->
+    <div v-if="pagination?.enable && ['top', 'both'].includes(pagination.position)" class="pagination-wrapper" :style="{display: 'flex', justifyContent: pagination.align || 'right'}">
+      <el-pagination
+        v-bind="pagination.paginationProps"
+        :current-page="currentPage"
+        :page-size="pageSize"
+        :page-sizes="pagination.pageSizes"
+        :total="total"
+        :layout="pagination.layout"
+        @current-change="handleCurrentChange"
+        @size-change="handleSizeChange"
+        @prev-click="handlePrevClick"
+        @next-click="handleNextClick"
+      >
+        <template v-for="(_, name) in $slots" #[name]="slotData">
+          <slot :name="name" v-bind="slotData"></slot>
+        </template>
+      </el-pagination>
+    </div>
+
+    <el-table 
+      ref="tableRef"
+      :data="tableData"
+      v-bind="{ ...attrs, ...customProps }"
+      @select="(selection, row) => emit('select', selection, row)"
+      @select-all="(selection) => emit('select-all', selection)"
+      @selection-change="(selection) => emit('selection-change', selection)"
+      @cell-click="(row, column, cell, event) => emit('cell-click', row, column, cell, event)"
+      @cell-dblclick="(row, column, cell, event) => emit('cell-dblclick', row, column, cell, event)"
+      @cell-contextmenu="(row, column, cell, event) => emit('cell-contextmenu', row, column, cell, event)"
+      @cell-mouse-enter="(row, column, cell, event) => emit('cell-mouse-enter', row, column, cell, event)"
+      @cell-mouse-leave="(row, column, cell, event) => emit('cell-mouse-leave', row, column, cell, event)"
+      @row-click="(row, column, event) => emit('row-click', row, column, event)"
+      @row-dblclick="(row, column, event) => emit('row-dblclick', row, column, event)"
+      @row-contextmenu="(row, column, event) => emit('row-contextmenu', row, column, event)"
+      @header-click="(column, event) => emit('header-click', column, event)"
+      @header-contextmenu="(column, event) => emit('header-contextmenu', column, event)"
+      @sort-change="(obj) => emit('sort-change', obj)"
+      @filter-change="(filters) => emit('filter-change', filters)"
+      @current-change="(currentRow, oldCurrentRow) => emit('current-change', currentRow, oldCurrentRow)"
+      @header-dragend="(newWidth, oldWidth, column, event) => emit('header-dragend', newWidth, oldWidth, column, event)"
+      @expand-change="(row, expanded) => emit('expand-change', row, expanded)"
+    >
+      <slot name="selection"></slot>
+      <slot name="index"></slot>
+      <slot name="expand"></slot>
+      
+      <template v-for="column in columns" :key="column.prop">
+        <recursive-column :column="column">
+          <template v-for="(_, name) in $slots" #[name]="slotData">
+            <slot :name="name" v-bind="slotData"></slot>
+          </template>
+        </recursive-column>
+      </template>
+      
+      <template #empty>
+        <slot name="empty"></slot>
+      </template>
+      <template #append>
+        <slot name="append"></slot>
+      </template>
+    </el-table>
+
+    <!-- 下方分页 -->
+    <div v-if="pagination?.enable && ['bottom', 'both'].includes(pagination.position)" class="pagination-wrapper" :style="{display: 'flex', justifyContent: pagination.align || 'right', padding: pagination.padding || '0'}">
+      <el-pagination
+        v-bind="pagination.paginationProps"
+        :current-page="currentPage"
+        :page-size="pageSize"
+        :page-sizes="pagination.pageSizes"
+        :total="total"
+        :layout="pagination.layout"
+        @current-change="handleCurrentChange"
+        @size-change="handleSizeChange"
+        @prev-click="handlePrevClick"
+        @next-click="handleNextClick"
+      >
+        <template v-for="(_, name) in $slots" #[name]="slotData">
+          <slot :name="name" v-bind="slotData"></slot>
+        </template>
+      </el-pagination>
+    </div>
+  </div>
+</template>
+```
+
