@@ -1186,3 +1186,416 @@ export default {
 3. 在 `ElTabPane` 中切换时，确保滚动条和数据都不会混乱。
 
 这个结构简洁地将虚拟列表逻辑封装到了通用组件 `VirtualList.vue` 中，可以复用到其他场景中，满足你的 `ElTabs` 虚拟列表需求。
+
+------
+
+虚拟列表hooks
+
+```js
+import { ref, onMounted, onBeforeUnmount, nextTick, watch } from "vue";
+
+export default function useVirtualList(config) {
+  // 获取元素
+  let actualHeightContainerEl = null,
+    translateContainerEl = null,
+    scrollContainerEl = null;
+
+  let size = 10; // 可视区展示列表项个数
+
+  // 数据源，便于后续直接访问
+  let dataSource = [];
+
+  onMounted(() => {
+    scrollContainerEl = document.querySelector(config.scrollContainer);
+    actualHeightContainerEl = document.querySelector(config.actualHeightContainer);
+    translateContainerEl = document.querySelector(config.translateContainer);
+
+    // 获取可视区的高度，用于计算可视区的展示列表项个数
+    size = Math.ceil(scrollContainerEl.clientHeight / config.itemHeight);
+
+    dataSource = config.data.value;
+    // 根据滚动高度计算需要渲染的数据
+    updateActualRenderData(0);
+  });
+
+  // 数据源发生变动
+  watch(
+    () => config.data.value,
+    newVal => {
+      // 更新数据源
+      dataSource = newVal;
+
+      // 计算需要渲染的数据
+      updateActualRenderData(0);
+    }
+  );
+
+  // 缓存已渲染元素的高度
+  const renderedItemsCache = {};
+
+  // 获取缓存高度，无缓存，取配置项的 itemHeight
+  const getItemHeightFromCache = (index) => {
+    const val = renderedItemsCache[index];
+    return val === undefined ? config.itemHeight : val;
+  };
+
+  /**
+   * 更新虚拟区实际高度
+   */
+  const updateActualHeight = () => {
+    // 计算所有项目的总高度
+    const totalHeight = dataSource.reduce((accumulator, _, index) => {
+      try {
+        // 从缓存中获取每个项目的高度并累加
+        return accumulator + getItemHeightFromCache(index);
+      } catch (error) {
+        // 如果获取项目高度时发生错误，打印错误信息并保持当前累加值不变
+        console.error(`Error getting height for item ${index}:`, error);
+        return accumulator;
+      }
+    }, 0);
+
+    // 更新容器的高度
+    if (actualHeightContainerEl) {
+      // 如果容器元素存在，则设置其高度为计算出的总高度
+      actualHeightContainerEl.style.height = totalHeight + "px";
+    } else {
+      // 如果容器元素未定义，则打印错误信息
+      console.error("actualHeightContainerEl is not defined");
+    }
+  };
+
+  // 更新已渲染列表项的缓存高度
+  const updateRenderedItemCache = (index) => {
+    const start = index;
+    // 当所有元素的实际高度更新完毕，就不需要重新计算高度
+    const shouldUpdate = Object.keys(renderedItemsCache).length < dataSource.length;
+    if (!shouldUpdate) return;
+
+    nextTick(() => {
+      // 获取所有列表项元素
+      const Items = Array.from(document.querySelectorAll(config.itemContainer));
+
+      // 进行缓存
+      Items.forEach(el => {
+        if (!renderedItemsCache[index]) {
+          renderedItemsCache[index] = el.offsetHeight;
+        }
+        index++;
+      });
+
+      // 更新实际高度
+      updateActualHeight();
+
+      // 更新偏移值
+      getOffsetY(start);
+    });
+  };
+
+  // 实际渲染的数据
+  const actualRenderData = ref([]);
+
+  // 更新实际渲染数据
+  const updateActualRenderData = (scrollTop) => {
+    // 异常处理
+    if (!dataSource || !config) {
+      console.error("dataSource or config is undefined");
+      return;
+    }
+
+    let startIndex = 0;
+    let endIndex = 0;
+    let offsetHeight = 0;
+
+    // 使用二分查找来加速 startIndex 的计算
+    let low = 0;
+    let high = dataSource.length - 1;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      offsetHeight = getAccumulatedHeight(mid);
+      if (offsetHeight >= scrollTop) {
+        high = mid - 1;
+      } else {
+        low = mid + 1;
+      }
+    }
+    startIndex = low;
+    endIndex = startIndex + size;
+
+    // 边界条件处理 确保 startIndex 和 endIndex 在有效范围内
+    startIndex = Math.max(0, startIndex);
+    endIndex = Math.min(dataSource.length, endIndex);
+
+    // 起始缓冲数量
+    const aboveCount = Math.min(startIndex, size * config.bufferRatio);
+    // 终止缓冲数量
+    const belowCount = Math.min(config.data.value.length - endIndex, size * config.bufferRatio);
+    // 计算得出的渲染数据
+    let start = startIndex - aboveCount;
+    const end = endIndex + belowCount;
+    actualRenderData.value = dataSource.slice(start, end);
+
+    // 缓存渲染列表中各个列表项高度
+    updateRenderedItemCache(start);
+
+    nextTick(() => {
+      // 更新偏移值
+      getOffsetY(start);
+    });
+  };
+
+  // 辅助函数：获取累积高度
+  const getAccumulatedHeight = (index) => {
+    let height = 0;
+    for (let i = 0; i <= index; i++) {
+      height += getItemHeightFromCache(i);
+    }
+    return height;
+  };
+
+  // 获取偏移量
+  const getOffsetY = (start) => {
+    let startOffset = 0;
+    if (start >= 1) {
+      startOffset = new Array(start).fill("").reduce((acc, _, index) => {
+        return acc + getItemHeightFromCache(index);
+      }, 0);
+    }
+    translateContainerEl.style.transform = `translateY(${startOffset}px)`;
+  };
+
+  // 滚动事件
+  const handleScroll = (e) => {
+    // 渲染正确的数据
+    updateActualRenderData(e.target.scrollTop);
+  };
+
+  // 注册滚动事件
+  onMounted(() => {
+    scrollContainerEl?.addEventListener("scroll", throttle(handleScroll, 100));
+  });
+
+  // 移除滚动事件
+  onBeforeUnmount(() => {
+    scrollContainerEl?.removeEventListener("scroll", handleScroll);
+  });
+
+  function throttle(fn, delay) {
+    // last为上一次触发回调的时间, timer是定时器
+    let last = 0,
+      timer = null;
+    // 将throttle处理结果当作函数返回
+
+    return function (...args) {
+      // 保留调用时的this上下文
+      const context = this;
+      // 记录本次触发回调的时间
+      let now = +new Date();
+
+      // 判断上次触发的时间和本次触发的时间差是否小于时间间隔的阈值
+      if (now - last < delay) {
+        // 如果时间间隔小于我们设定的时间间隔阈值，则为本次触发操作设立一个新的定时器
+        clearTimeout(timer);
+        timer = setTimeout(function () {
+          last = now;
+          fn.apply(context, args);
+        }, delay);
+      } else {
+        // 如果时间间隔超出了我们设定的时间间隔阈值，那就不等了，无论如何要反馈给用户一次响应
+        last = now;
+        fn.apply(context, args);
+      }
+    };
+  }
+
+  return { actualRenderData };
+}
+```
+
+用法
+
+```vue
+<template>
+  <div class="virtual-list-container" ref="scrollContainer">
+    <div class="virtual-list-actual" ref="actualContainer">
+      <div class="virtual-list-translate" ref="translateContainer">
+        <div v-for="item in actualRenderData" 
+             :key="item.id" 
+             class="list-item">
+          <div class="item-content">
+            <h3>{{ item.title }}</h3>
+            <p>{{ item.content }}</p>
+            <div class="item-images" v-if="item.images?.length">
+              <img v-for="(img, index) in item.images" 
+                   :key="index" 
+                   :src="img" 
+                   :alt="item.title">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { ref } from 'vue'
+import useVirtualList from '@/hooks/useVirtualList'
+
+export default {
+  name: 'VirtualList',
+  setup() {
+    const scrollContainer = ref(null)
+    const actualContainer = ref(null)
+    const translateContainer = ref(null)
+
+    const listData = ref(Array.from({ length: 1000 }, (_, index) => ({
+      id: index,
+      title: `标题 ${index}`,
+      content: `这是一段动态内容 ${index} ${Math.random() > 0.5 ? '包含很多很多文字'.repeat(Math.floor(Math.random() * 3)) : '短文本'}`,
+      images: Math.random() > 0.7 ? [
+        'https://placeholder.com/150',
+        'https://placeholder.com/150'
+      ] : []
+    })))
+
+    const { actualRenderData } = useVirtualList({
+      data: listData,
+      scrollContainer: '.virtual-list-container',
+      actualHeightContainer: '.virtual-list-actual',
+      translateContainer: '.virtual-list-translate',
+      itemContainer: '.list-item',
+      itemHeight: 100,
+      bufferRatio: 1
+    })
+
+    return {
+      actualRenderData
+    }
+  }
+}
+</script>
+
+<style scoped>
+.virtual-list-container {
+  height: 600px;
+  overflow-y: auto;
+}
+
+.virtual-list-actual {
+  position: relative;
+}
+
+.virtual-list-translate {
+  position: absolute;
+  width: 100%;
+  left: 0;
+}
+
+.list-item {
+  padding: 16px;
+  border-bottom: 1px solid #eee;
+}
+
+.item-content h3 {
+  margin: 0 0 8px;
+}
+
+.item-content p {
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.item-images {
+  display: flex;
+  gap: 8px;
+}
+
+.item-images img {
+  width: 100px;
+  height: 100px;
+  object-fit: cover;
+}
+</style>
+
+```
+
+```vue
+<template>
+  <div class="virtual-table-container" ref="scrollContainer">
+    <div class="virtual-table-actual" ref="actualContainer">
+      <div class="virtual-table-translate" ref="translateContainer">
+        <el-table :data="actualRenderData" style="width: 100%">
+          <el-table-column prop="name" label="姓名" />
+          <el-table-column prop="description" label="描述">
+            <template #default="{ row }">
+              <div class="dynamic-height-cell">
+                {{ row.description }}
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" />
+        </el-table>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { ref } from 'vue'
+import useVirtualList from '@/hooks/useVirtualList'
+
+export default {
+  name: 'VirtualTable',
+  setup() {
+    const scrollContainer = ref(null)
+    const actualContainer = ref(null)
+    const translateContainer = ref(null)
+
+    const tableData = ref(Array.from({ length: 10000 }, (_, index) => ({
+      id: index,
+      name: `用户${index}`,
+      description: `这是一段不定长的描述文本，可能会有${Math.random() > 0.5 ? '很长很长的内容。'.repeat(Math.floor(Math.random() * 5)) : '短文本'}`,
+      status: Math.random() > 0.5 ? '活跃' : '离线'
+    })))
+
+    const { actualRenderData } = useVirtualList({
+      data: tableData,
+      scrollContainer: '.virtual-table-container',
+      actualHeightContainer: '.virtual-table-actual',
+      translateContainer: '.virtual-table-translate',
+      itemContainer: '.el-table__row',
+      itemHeight: 50,
+      bufferRatio: 1
+    })
+
+    return {
+      actualRenderData
+    }
+  }
+}
+</script>
+
+<style scoped>
+.virtual-table-container {
+  height: 400px;
+  overflow-y: auto;
+}
+
+.virtual-table-actual {
+  position: relative;
+}
+
+.virtual-table-translate {
+  position: absolute;
+  width: 100%;
+  left: 0;
+}
+
+.dynamic-height-cell {
+  padding: 8px 0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+</style>
+```
