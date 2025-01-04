@@ -1,0 +1,400 @@
+---
+layout:     post
+title:      "循环任务的操作"
+subtitle:   ""
+date:       2025-01-04
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - js
+---
+
+增加对任务的完全中断处理：
+
+1. **停止任务**：不仅仅是停止轮询，还需要确保任务执行的逻辑停止（例如停止 `for` 循环，跳出任务执行过程）。
+2. **任务标志位**：通过检查标志 `isProcessing` 来控制是否继续当前任务。
+
+### 完善后的代码
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务执行模拟</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        .output {
+            margin-top: 20px;
+        }
+        .task-log {
+            margin-bottom: 10px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+        }
+        .task-log.success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+        .task-log.failure {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <h1>任务执行模拟</h1>
+    <button onclick="handleMultipleTasks(3)">启动任务</button>
+
+    <div class="output">
+        <div id="task-output"></div>
+    </div>
+
+    <script>
+        let currentTaskInterval = null;  // 当前任务的状态检查定时器
+        let isProcessing = false;  // 标识任务是否正在处理中
+        let currentTaskId = null;  // 当前任务的ID
+        let currentTaskPromise = null; // 当前任务的执行 Promise，用于控制任务执行
+
+        // 模拟任务的状态和结果
+        function startTask() {
+            return new Promise((resolve, reject) => {
+                setTimeout(() => {
+                    // 模拟任务ID返回
+                    const taskId = Math.floor(Math.random() * 1000);
+                    console.log(`任务启动，ID: ${taskId}`);
+                    resolve(taskId);
+                }, 1000);  // 启动请求延迟1秒
+            });
+        }
+
+        // 模拟获取任务的状态
+        function checkTaskStatus(taskId) {
+            return new Promise((resolve, reject) => {
+                const statusList = ['pending', 'started', 'success', 'failure'];
+                let attempt = 0;
+
+                // 如果已经有定时器在运行，取消上一个任务的状态检查
+                if (currentTaskInterval) {
+                    clearInterval(currentTaskInterval);
+                    console.log("取消上一个任务的状态检查");
+                }
+
+                currentTaskInterval = setInterval(() => {
+                    attempt++;
+                    const status = statusList[Math.floor(Math.random() * statusList.length)];
+                    console.log(`任务 ${taskId} 当前状态: ${status}`);
+
+                    if (status === 'success' || status === 'failure') {
+                        clearInterval(currentTaskInterval);
+                        currentTaskInterval = null;  // 清除定时器
+                        resolve(status);
+                    }
+
+                    if (attempt > 5) {
+                        clearInterval(currentTaskInterval);
+                        currentTaskInterval = null;  // 清除定时器
+                        reject(`任务 ${taskId} 状态检查超时`);
+                    }
+                }, 2000);  // 每2秒检查一次任务状态
+            });
+        }
+
+        // 模拟获取任务的结果
+        function getTaskResult(taskId) {
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    // 模拟任务结果
+                    const result = `任务 ${taskId} 执行成功！`;
+                    console.log(result);
+                    resolve(result);
+                }, 1000);  // 获取任务结果延迟1秒
+            });
+        }
+
+        // 停止当前任务的处理
+        function stopCurrentTask() {
+            if (currentTaskInterval) {
+                clearInterval(currentTaskInterval);  // 停止当前定时器
+                console.log(`任务 ${currentTaskId} 被撤销`);
+            }
+            isProcessing = false;  // 重置任务处理状态
+            currentTaskId = null;  // 清除任务ID
+            currentTaskInterval = null;  // 清除定时器
+            if (currentTaskPromise) {
+                // 如果当前任务有挂起的 Promise，拒绝它，表示任务已被取消
+                currentTaskPromise = null;
+            }
+        }
+
+        // 任务处理逻辑
+        async function handleMultipleTasks(taskCount) {
+            const outputDiv = document.getElementById('task-output');
+            outputDiv.innerHTML = '';  // 清空之前的输出
+
+            // 检查是否有任务正在执行
+            if (isProcessing) {
+                const userResponse = confirm("当前有任务正在执行，是否要撤销并启动新任务？");
+
+                if (userResponse) {
+                    // 用户选择撤销任务
+                    stopCurrentTask();  // 停止当前任务
+                } else {
+                    // 用户选择不操作
+                    console.log("任务未被撤销，保持当前任务");
+                    return;
+                }
+            }
+
+            isProcessing = true;  // 设置正在处理状态
+
+            for (let i = 0; i < taskCount; i++) {
+                const taskId = await startTask();  // 启动任务
+                outputDiv.innerHTML += `<div class="task-log">任务 ${taskId} 启动成功</div>`;
+
+                currentTaskId = taskId;  // 设置当前任务ID
+
+                try {
+                    const status = await checkTaskStatus(taskId);  // 轮询任务状态
+                    outputDiv.innerHTML += `<div class="task-log ${status}">任务 ${taskId} 最终状态: ${status}</div>`;
+
+                    if (status === 'success' || status === 'failure') {
+                        await getTaskResult(taskId);  // 获取任务结果
+                        outputDiv.innerHTML += `<div class="task-log ${status}">任务 ${taskId} 结果: 执行完成</div>`;
+                    }
+                } catch (error) {
+                    outputDiv.innerHTML += `<div class="task-log failure">任务 ${taskId} 处理失败: ${error}</div>`;
+                }
+
+                // 如果任务被中止，跳出循环
+                if (!isProcessing) {
+                    outputDiv.innerHTML += `<div class="task-log failure">任务 ${taskId} 被中止</div>`;
+                    break;
+                }
+            }
+
+            outputDiv.innerHTML += `<div class="task-log">所有任务处理完毕</div>`;
+            isProcessing = false;  // 重置任务处理状态
+            currentTaskId = null;  // 清除任务ID
+        }
+    </script>
+</body>
+</html>
+```
+
+### 改进要点：
+
+1. **`currentTaskPromise`**：用来追踪当前任务的执行。如果任务正在进行时用户决定撤销，它会通过 `stopCurrentTask` 来中止任务执行，并使当前的任务 `Promise` 被 "打破"。我们可以通过该标志确保不再继续任务循环。
+2. **`stopCurrentTask()`**：这是一个新增加的函数，除了停止定时器外，它还会清除 `isProcessing` 标志，确保任务执行流程可以彻底停止。任务执行的 **循环** 也会根据标志中止。也确保了 `currentTaskPromise` 被设为 `null`，从而“打破”当前的任务。
+3. **任务循环中断**：在任务循环 (`for` 循环) 中增加了一个检查 `isProcessing` 的条件。如果 `isProcessing` 为 `false`（即任务已被撤销），则跳出循环，表示任务已被中断。
+
+### 测试步骤：
+
+1. 将代码粘贴到一个 `.html` 文件中。
+2. 打开浏览器并访问该文件。
+3. 点击“启动任务”时，如果任务正在执行，会弹出一个对话框询问是否撤销。如果选择“是”，会中断当前任务及其状态检查。
+4. 任务被撤销后，会打印“任务 X 被撤销”以及“任务 X 被中止”的消息，并且不会继续执行后续任务。
+
+### 效果：
+
+- 当有任务正在执行时，点击“启动任务”会提示用户是否撤销当前任务。如果用户选择撤销，当前任务将被彻底停止，包括其状态检查和结果获取。
+- 如果任务被撤销，任务循环会中断，不再继续。
+
+------
+
+以下是转换后的 Vue 3 代码：
+
+```vue
+<template>
+  <div>
+    <h1>任务执行模拟</h1>
+    <button @click="handleMultipleTasks(3)">启动任务</button>
+
+    <div class="output">
+      <div v-for="log in taskLogs" :key="log.id" :class="['task-log', log.status]">
+        {{ log.message }}
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { ref } from 'vue';
+
+export default {
+  name: 'TaskSimulator',
+  setup() {
+    const taskLogs = ref([]);  // 任务日志
+    const isProcessing = ref(false);  // 是否正在处理任务
+    const currentTaskId = ref(null);  // 当前任务ID
+    const currentTaskInterval = ref(null);  // 当前任务的状态检查定时器
+    const currentTaskPromise = ref(null);  // 当前任务的执行 Promise
+
+    // 模拟任务的状态和结果
+    const startTask = () => {
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          // 模拟任务ID返回
+          const taskId = Math.floor(Math.random() * 1000);
+          console.log(`任务启动，ID: ${taskId}`);
+          resolve(taskId);
+        }, 1000);  // 启动请求延迟1秒
+      });
+    };
+
+    // 模拟获取任务的状态
+    const checkTaskStatus = (taskId) => {
+      return new Promise((resolve, reject) => {
+        const statusList = ['pending', 'started', 'success', 'failure'];
+        let attempt = 0;
+
+        // 如果已经有定时器在运行，取消上一个任务的状态检查
+        if (currentTaskInterval.value) {
+          clearInterval(currentTaskInterval.value);
+          console.log("取消上一个任务的状态检查");
+        }
+
+        currentTaskInterval.value = setInterval(() => {
+          attempt++;
+          const status = statusList[Math.floor(Math.random() * statusList.length)];
+          console.log(`任务 ${taskId} 当前状态: ${status}`);
+
+          if (status === 'success' || status === 'failure') {
+            clearInterval(currentTaskInterval.value);
+            currentTaskInterval.value = null;  // 清除定时器
+            resolve(status);
+          }
+
+          if (attempt > 5) {
+            clearInterval(currentTaskInterval.value);
+            currentTaskInterval.value = null;  // 清除定时器
+            reject(`任务 ${taskId} 状态检查超时`);
+          }
+        }, 2000);  // 每2秒检查一次任务状态
+      });
+    };
+
+    // 模拟获取任务的结果
+    const getTaskResult = (taskId) => {
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          // 模拟任务结果
+          const result = `任务 ${taskId} 执行成功！`;
+          console.log(result);
+          resolve(result);
+        }, 1000);  // 获取任务结果延迟1秒
+      });
+    };
+
+    // 停止当前任务的处理
+    const stopCurrentTask = () => {
+      if (currentTaskInterval.value) {
+        clearInterval(currentTaskInterval.value);  // 停止当前定时器
+        console.log(`任务 ${currentTaskId.value} 被撤销`);
+      }
+      isProcessing.value = false;  // 重置任务处理状态
+      currentTaskId.value = null;  // 清除任务ID
+      currentTaskInterval.value = null;  // 清除定时器
+      if (currentTaskPromise.value) {
+        // 如果当前任务有挂起的 Promise，拒绝它，表示任务已被取消
+        currentTaskPromise.value = null;
+      }
+    };
+
+    // 任务处理逻辑
+    const handleMultipleTasks = async (taskCount) => {
+      taskLogs.value = [];  // 清空之前的输出
+
+      // 检查是否有任务正在执行
+      if (isProcessing.value) {
+        const userResponse = confirm("当前有任务正在执行，是否要撤销并启动新任务？");
+
+        if (userResponse) {
+          // 用户选择撤销任务
+          stopCurrentTask();  // 停止当前任务
+        } else {
+          // 用户选择不操作
+          console.log("任务未被撤销，保持当前任务");
+          return;
+        }
+      }
+
+      isProcessing.value = true;  // 设置正在处理状态
+
+      for (let i = 0; i < taskCount; i++) {
+        const taskId = await startTask();  // 启动任务
+        taskLogs.value.push({ id: i, status: 'info', message: `任务 ${taskId} 启动成功` });
+
+        currentTaskId.value = taskId;  // 设置当前任务ID
+
+        try {
+          const status = await checkTaskStatus(taskId);  // 轮询任务状态
+          taskLogs.value.push({ id: i, status, message: `任务 ${taskId} 最终状态: ${status}` });
+
+          if (status === 'success' || status === 'failure') {
+            await getTaskResult(taskId);  // 获取任务结果
+            taskLogs.value.push({ id: i, status, message: `任务 ${taskId} 结果: 执行完成` });
+          }
+        } catch (error) {
+          taskLogs.value.push({ id: i, status: 'failure', message: `任务 ${taskId} 处理失败: ${error}` });
+        }
+
+        // 如果任务被中止，跳出循环
+        if (!isProcessing.value) {
+          taskLogs.value.push({ id: i, status: 'failure', message: `任务 ${taskId} 被中止` });
+          break;
+        }
+      }
+
+      taskLogs.value.push({ id: taskCount, status: 'info', message: '所有任务处理完毕' });
+      isProcessing.value = false;  // 重置任务处理状态
+      currentTaskId.value = null;  // 清除任务ID
+    };
+
+    return {
+      taskLogs,
+      handleMultipleTasks
+    };
+  }
+};
+</script>
+
+<style scoped>
+body {
+  font-family: Arial, sans-serif;
+}
+.output {
+  margin-top: 20px;
+}
+.task-log {
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  background-color: #f9f9f9;
+}
+.task-log.success {
+  background-color: #d4edda;
+  border-color: #c3e6cb;
+}
+.task-log.failure {
+  background-color: #f8d7da;
+  border-color: #f5c6cb;
+}
+</style>
+```
+
+### 主要变化：
+
+1. **Vue 响应式**：使用 `ref()` 来管理响应式数据，例如任务日志 (`taskLogs`)、是否正在处理任务 (`isProcessing`)、当前任务 ID (`currentTaskId`) 等。
+2. **模板渲染**：使用 `v-for` 渲染任务日志，并通过动态绑定类来根据任务状态调整显示的样式。
+3. **方法替代事件处理**：将原本的函数改为 Vue 方法，使用 `@click` 来绑定点击事件。
+
+### 使用步骤：
+
+1. 将代码保存为一个 `.vue` 文件。
+2. 在 Vue 3 项目中使用该组件，确保已经安装并配置了 Vue 环境。
+3. 点击“启动任务”按钮时，任务会按顺序执行，并显示相关日志。
