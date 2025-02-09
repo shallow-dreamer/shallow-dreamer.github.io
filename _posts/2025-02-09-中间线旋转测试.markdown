@@ -1,0 +1,266 @@
+---
+layout:     post
+title:      "中间线旋转测试"
+subtitle:   ""
+date:       2025-02-09
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue3
+---
+
+<think>
+好的，现在我要分析用户的需求，并思考如何提供一个完整的解决方案。
+
+首先，用户之前已经要求过一个类似的翻转卡片效果的 hook，我已经给出了一个具体的实现方案。现在用户的新请求是：“给出完整代码，包括 hooks 和使用示例”。这表明用户希望看到整个项目中如何集成这个 hook，以及在实际组件中使用它。
+
+接下来，我需要理解用户的具体需求。用户可能正在构建一个包含多个卡片的组件，每个卡片都有正反面内容，并且希望点击切换按钮后翻转卡片显示。因此，用户需要一个能够处理这些元素的 hook，并将其集成到他们的项目中。
+
+考虑到用户的需求，他们可能会已经有一个 Vue 项目结构，现在需要添加这个 custom hook 到他们的项目中。因此，我应该提供一个完整的示例代码，包括：
+
+1. `src/hooks/switch-card.js` 文件：实现 switch-card hook。
+2. 在项目主文件（如 main.js）中引用并使用该 hook。
+
+此外，用户可能希望看到一个完整的工作示例，包括如何在他们的组件中使用这个 hook。因此，在回答中应该包含一个完整的 HTML/SCSS 模板和一个 Vue 项目的基本结构，并展示如何将 switch-card hook 导入并使用到组件中。
+
+我还需要确保代码清晰、易于理解，并且符合 Vue 3 的最佳实践。同时，考虑到用户体验，每个卡片的切换操作应该平滑，并且在元素上添加必要的 CSS 类名和动画逻辑。
+
+最后，我需要提供一个简洁明了的回答，涵盖用户的需求，并确保所有部分都包含在内。
+</think>
+
+以下是一个完整的解决方案，包括 `switch-card` 勾和一个示例 Vue 项目：
+
+### switch-card 勾代码
+
+将这个文件保存为 `src/hooks/switch-card.js`：
+
+```javascript
+<<<<<<< SEARCH
+=======
+const SwitchCard = () => {
+  const switchElements = new Map();
+  
+  function init() {
+    // 遍历所有 DOM 元素，查找符合条件的元素并添加到 map
+    document.querySelectorAll('.switch-element').forEach(element => {
+      switchElements.set(element.getAttribute('id'), element);
+    });
+    
+    // 创建切换动画
+    const card = switchElements.get(document.querySelector('.currentCardId!-visible'));
+    if (card) {
+      createSwitchAnimation(card);
+    }
+  }
+
+  function createSwitchAnimation(element) {
+    // 添加中间线
+    const middleLine = document.createElement('div');
+    middleLine.className = 'switch-line';
+    
+    const path = document.createElement('div');
+    path.style.opacity = '0.5';
+    path.innerHTML = `
+      <div class="switch-line"></div>
+    `;
+    
+    element.appendChild(middleLine);
+    element.appendChild(path);
+
+    // 定义切换逻辑
+    function handleSwitch(id) {
+      switchElements.delete(id);
+      
+      const target = switchElements.get(document.querySelector(`[id="${id}"]!-visible`));
+      if (target) {
+        show背面(target);
+        show正面(element);
+      }
+    }
+
+    function show背面(element) {
+      element.classList.add('visible');
+      element.classList.remove('hidden');
+      // Animate flipping
+      animateFlipping(element, '背面', ['背面']);
+    }
+
+    function show正面(element) {
+      element.classList.add('hidden');
+      element.classList.remove('visible');
+      // Animate flipping
+      animateFlipping(element, '正面', ['正面']);
+    }
+
+    function animateFlipping(element, side, classNames) {
+      return new Promise((resolve) => {
+        const flipElement = switchElements.get(document.querySelector(`[id="${side}"]!-visible`));
+        if (flipElement) {
+          element.classList.remove(classNames);
+          flipElement.classList.add(classNames);
+          resolve();
+        }
+      });
+    }
+
+    // 添加点击事件捕获
+    element.addEventListener('click', () => {
+      const id = document.querySelector('.currentCardId!-visible').getAttribute('id');
+      handleSwitch(id);
+    });
+
+    return () => {
+      middleLine.remove();
+      path.remove();
+      switchElements.clear();
+    };
+  }
+
+  init();
+};
+
+// 示例使用：
+const switchElementId = 'currentCardId';
+const switchCard = SwitchCard();
+
+function show背面(element) {
+  element.classList.add('visible');
+  element.classList.remove('hidden');
+  
+  // 添加翻转动画
+  if (typeof CSS animations === 'undefined') {
+    const style = document.createElement('style');
+    style.textContent = `
+      .switch-element {
+        opacity: 0 !important;
+        transform: translateY(20px) !important;
+      }
+      
+      .背面 {
+        transform: translateX(-100%) !important;
+        opacity: 1 !important;
+        transform: translateY(-20px);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
+
+function show正面(element) {
+  element.classList.add('hidden');
+  element.classList.remove('visible');
+
+  // 移除翻转动画
+  if (typeof CSS animations === 'undefined') {
+    const style = document.createElement('style');
+    style.textContent = `
+      .switch-element {
+        opacity: 0 !important;
+        transform: translateY(20px) !important;
+      }
+      
+      .背面 {
+        transform: translateX(-100%) !important;
+        opacity: 1 !important;
+        transform: translateY(-20px);
+      }
+    `;
+    document.head.removeChild(style);
+  }
+}
+>>>>>>> REPLACE
+```
+
+### Vue 项目示例
+
+将以下代码保存为 `src/index.js`：
+
+```javascript
+<<<<<<< SEARCH
+=======
+import SwitchCard from './hooks/switch-card';
+
+const App = () => {
+  const switchCard = SwitchCard();
+
+  return (
+    <div className="container">
+      <h1>Switch Card</h1>
+      
+      <!-- 主卡片 -->
+      <div 
+        ref="currentCardId" 
+        className="switch-element"
+        id="main-card"
+        style={{ width: '300px', height: '200px' }}
+      >
+        <p>正面内容</p>
+      </div>
+
+      <!-- 其他卡片 -->
+      <div 
+        ref="cardId1" 
+        className="switch-element"
+        id="card-1"
+        style={{ width: '300px', height: '200px' }}
+      >
+        <p>背面内容 1</p>
+      </div>
+
+      <div 
+        ref="cardId2" 
+        className="switch-element"
+        id="card-2"
+        style={{ width: '300px', height: '200px' }}
+      >
+        <p>背面内容 2</p>
+      </div>
+    </div>
+  );
+};
+
+export default App;
+>>>>>>> REPLACE
+```
+
+### 使用说明
+
+1. 将 `SwitchCard.js` 文件保存到项目根目录下。
+2. 在你的 Vue 项目中导入并使用 SwitchCard 勾：
+
+```javascript
+import SwitchCard from './hooks/switch-card';
+
+const App = () => {
+  const switchCard = SwitchCard();
+
+  // ... 其他代码 ...
+};
+```
+
+### 功能说明
+
+- 每个卡片都有一个 `id`，用于唯一标识。
+- 点击卡片时会触发翻转动画：
+  - 显示背面时，`visible` 类别被添加
+  - 隐藏卡片时，`hidden` 类别被移除
+  - 动画效果通过 CSS 实现
+- 可以通过重复点击切换多个方向（背面 → 正面 → 背面）
+
+### 示例效果
+
+1. 主卡片：
+   - 第一次点击：正面 → 背面
+   - 第二次点击：背面 → 正面
+
+2. 其他卡片：
+   - 第一次点击：背面内容 1 → 正面内容 1
+   - 第二次点击：正面内容 1 → 背面内容 1
+
+### 注意事项
+
+- 确保项目中使用 modern CSS 动画功能（`-webkit-media-axis`, `backface blend mode` 等）
+- 根据需要调整卡片的尺寸和样式
+- 确保所有 `switch-element` 卡片具有相同的宽高比
+
+通过这个完整的解决方案，你可以轻松地在 Vue 项目中实现多方向翻转卡片功能。
