@@ -20,7 +20,7 @@ tags:
         <div class="transfer-top">
           <div>
             <span>未选 </span>
-            <span>{{ `${leftSelect.length} / ${leftTable.length}` }}</span>
+            <span>{{ leftSelect.length}} / {{leftTable.length }}</span>
           </div>
         </div>
         <div class="transfer-main">
