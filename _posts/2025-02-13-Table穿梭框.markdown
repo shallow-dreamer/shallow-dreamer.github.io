@@ -1,0 +1,319 @@
+---
+layout:     post
+title:      "Table穿梭框"
+subtitle:   ""
+date:       2025-02-13
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue3
+---
+
+```vue
+<template>
+  <div class="transfer-table">
+    <div v-if="props.type === 'default'" class="comp-default">
+      <el-transfer v-model="rightTable" :data="leftTable"></el-transfer>
+    </div>
+    <div v-else-if="props.type === 'table'" class="comp-table" :class="{ disabled: props.disabled }">
+      <div class="transfer-left">
+        <div class="transfer-top">
+          <div>
+            <span>未选 </span>
+            <span>{{ `${leftSelect.length} / ${leftTable.length}` }}</span>
+          </div>
+        </div>
+        <div class="transfer-main">
+          <el-table
+            :height="props.height"
+            :data="leftTable"
+            :stripe="props.stripe"
+            :border="props.border"
+            @selection-change="selectLeftChange"
+          >
+            <el-table-column
+              type="selection"
+              width="55"
+              :selectable="() => props.disabled === true ? false : true"
+            />
+            <el-table-column
+              v-for="(item, index) in props.column"
+              :key="index"
+              :prop="item.prop"
+              :label="item.label"
+              :width="item.width"
+              :minWidth="item.width"
+              :align="props.align || item.align"
+            >
+              <template
+                v-if="item.leftSlot"
+                #default="{ row, column, $index }"
+              >
+                <slot
+                  :name="item.leftSlot.render"
+                  :row="row"
+                  :column="column"
+                  :index="$index"
+                ></slot>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+        <div class="transfer-bottom">
+          <span>总条数：{{ leftTable.length }}</span>
+        </div>
+      </div>
+      <div class="transfer-btn">
+        <div class="btn-add">
+          <el-button
+            type="primary"
+            size="small"
+            @click="add"
+            :disabled="leftSelect.length > 0 ? false : true"
+            >添加 ></el-button
+          >
+        </div>
+        <div class="btn-del">
+          <el-button
+            type="primary"
+            size="small"
+            @click="del"
+            :disabled="rightSelect.length > 0 ? false : true"
+            >移除 &lt</el-button
+          >
+        </div>
+      </div>
+      <div class="transfer-right">
+        <div class="transfer-top">
+          <div>
+            <span>已选 </span>
+            <span>{{ `${rightSelect.length} / ${rightTable.length}` }}</span>
+          </div>
+          <div>
+            <el-button link type="primary" :disabled="props.disabled" @click="clearRight">清除</el-button>
+          </div>
+        </div>
+        <div class="transfer-main">
+          <el-table
+            height="400px"
+            :data="rightTable"
+            :stripe="props.stripe"
+            :border="props.border"
+            @selection-change="selectRightChange"
+          >
+            <el-table-column 
+              type="selection" 
+              width="55" 
+              :selectable="() => props.disabled === true ? false : true"            
+            />
+            <el-table-column
+              v-for="(item, index) in props.column"
+              :key="index"
+              :prop="item.prop"
+              :label="item.label"
+              :width="item.width"
+              :minWidth="item.width"
+              :align="props.align || item.align"
+            >
+              <template
+                v-if="item.rightSlot"
+                #default="{ row, column, $index }"
+              >
+                <slot
+                  :name="item.rightSlot.render"
+                  :row="row"
+                  :column="column"
+                  :index="$index"
+                ></slot>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+        <div class="transfer-bottom">
+          <span>总条数：{{ rightTable.length }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+```
+
+```typescript
+import {
+  ref,
+  PropType,
+} from "vue";
+interface Column {
+  prop: string;
+  label: string;
+  width?: string;
+  minWidth?: string;
+  align?: string;
+  leftSlot?: {
+    render: string;
+  };
+  rightSlot?: {
+    render: string;
+  };
+}
+
+interface Data {
+  name?: string;
+}
+
+const emits = defineEmits(["update:modelValue"]);
+const props = defineProps({
+  modelValue: {
+    type: Array,
+    default: () => []
+  },
+  type: {
+    type: String,
+    default: "default",
+  },
+  data: {
+    type: Array,
+    default: () => [],
+  },
+  column: {
+    type: Array as PropType<Column[]>,
+    default: () => [],
+  },
+  align: {
+    type: String,
+  },
+  stripe: {
+    type: Boolean,
+    default: true,
+  },
+  border: {
+    type: Boolean,
+    default: true,
+  },
+  height: {
+    type: String,
+    default: "400px",
+  },
+  disabled: {
+    type: Boolean,
+    default: false,
+  },
+});
+
+// 初始值赋值index用来移除恢复默认排序，show用来控制编辑表格项
+const leftTable = ref<any[]>(
+  props.data.map((el: Data, index: number) => {
+    return {
+      ...el,
+      index,
+      show: false,
+    };
+  })
+);
+// 这一步初始值赋值为了达到双向绑定的结果表现在右侧数据中
+const rightTable = ref<any[]>(props.modelValue);
+const leftSelect = ref<number[]>([]);
+const rightSelect = ref<number[]>([]);
+
+// 将选中的元素从源数组中移除，并添加到目标数组中
+const moveItems = (
+  type: string,
+  sourceArray: any[],
+  destinationArray: any[],
+  selectedItems: any[]
+) => {
+  for (let item of selectedItems) {
+    const index = sourceArray.indexOf(item);
+    if (index !== -1) {
+      sourceArray.splice(index, 1);
+      destinationArray.push(item);
+    }
+  }
+  // 移除时保证默认排序
+  if (type == "del") {
+    destinationArray.sort((a, b) => a.index - b.index);
+  }
+  // 触发双向绑定
+  emits(
+    "update:modelValue",
+    destinationArray.map((el) => {
+      const { index, show, ...newObj } = el;
+      return newObj;
+    })
+  );
+};
+
+const add = () => {
+  if (leftSelect.value.length > 0) {
+    moveItems("add", leftTable.value, rightTable.value, leftSelect.value);
+  }
+};
+
+const del = () => {
+  if (rightSelect.value.length > 0) {
+    moveItems("del", rightTable.value, leftTable.value, rightSelect.value);
+  }
+};
+
+const selectLeftChange = (val: any[]) => {
+  leftSelect.value = val;
+};
+
+const selectRightChange = (val: any[]) => {
+  rightSelect.value = val;
+};
+
+// 一键清除右侧table
+const clearRight = () => {
+  for(let i = 0; i <= rightTable.value.length; i++) {
+    moveItems('del', rightTable.value, leftTable.value, rightTable.value)
+  }
+}
+```
+
+```scss
+.transfer-container {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-columns: 650px 70px 450px;
+    grid-gap: 10px;
+    .btn {
+      display: grid;
+      align-content: center;
+      grid-gap: 10px;
+    }
+    .left-header,
+    .right-header {
+      height: 40px;
+      padding: 0 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: #f5f7fa;
+      border-top: 1px solid #eee;
+      border-left: 1px solid #eee;
+      border-right: 1px solid #eee;
+      border-top-left-radius: 4px;
+      border-top-right-radius: 4px;
+      .top-note {
+        font-size: 16px;
+      }
+      .length-num {
+        margin-left: 5px;
+        color: #909399;
+      }
+    }
+  }
+  .disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  ::v-deep .el-date-editor.el-input,
+  .el-date-editor.el-input__inner {
+    width: 200px;
+  }
+```
+
+作者：cooltian
+链接：https://juejin.cn/post/7270026656662700093
+来源：稀土掘金
