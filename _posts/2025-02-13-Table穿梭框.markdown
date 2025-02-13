@@ -87,7 +87,7 @@ tags:
         <div class="transfer-top">
           <div>
             <span>已选 </span>
-            <span>{{ `${rightSelect.length} / ${rightTable.length}` }}</span>
+            <span>{{ rightSelect.length}} / {{rightTable.length }}</span>
           </div>
           <div>
             <el-button link type="primary" :disabled="props.disabled" @click="clearRight">清除</el-button>
