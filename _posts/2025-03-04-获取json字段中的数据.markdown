@@ -1,0 +1,214 @@
+---
+layout:     post
+title:      "获取json字段中的数据"
+subtitle:   ""
+date:       2025-03-04
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - django
+    - pgsql
+---
+
+如果你已经知道 JSON 字段中的 key 路径，并且需要使用 Django ORM 获取指定数据并自定义别名，可以使用 `annotate` 和 `F` 来实现。
+
+------
+
+### **示例模型**
+
+假设你的 `data` 字段如下：
+
+```json
+{
+    "name": "Alice",
+    "age": 25,
+    "details": {
+        "email": "alice@example.com",
+        "phone": "123456789"
+    }
+}
+```
+
+对应的 Django 模型：
+
+```python
+from django.db import models
+
+class MyModel(models.Model):
+    data = models.JSONField()
+```
+
+------
+
+### **1. 获取 JSON 字段中的单个 key**
+
+如果你想获取 `data` 中的 `name` 并自定义别名：
+
+```python
+from django.db.models import F
+
+queryset = MyModel.objects.annotate(user_name=F("data__name")).values("user_name")
+print(queryset)
+```
+
+**等价 SQL：**
+
+```sql
+SELECT data->>'name' AS user_name FROM mymodel;
+```
+
+------
+
+### **2. 获取嵌套 JSON 数据**
+
+如果你想获取 `details` 里面的 `email` 并命名为 `user_email`：
+
+```python
+queryset = MyModel.objects.annotate(user_email=F("data__details__email")).values("user_email")
+print(queryset)
+```
+
+**等价 SQL：**
+
+```sql
+SELECT data->'details'->>'email' AS user_email FROM mymodel;
+```
+
+------
+
+### **3. 获取 JSON 数组中的某个 key**
+
+假设你的 `data` 结构如下：
+
+```json
+{
+    "contacts": [
+        {"type": "email", "value": "alice@example.com"},
+        {"type": "phone", "value": "123456789"}
+    ]
+}
+```
+
+如果你想获取 `contacts` 数组中 **第一个元素的 `value`**：
+
+```python
+queryset = MyModel.objects.annotate(first_contact=F("data__contacts__0__value")).values("first_contact")
+print(queryset)
+```
+
+**等价 SQL：**
+
+```sql
+SELECT data->'contacts'->0->>'value' AS first_contact FROM mymodel;
+```
+
+------
+
+### **总结**
+
+| 需求                          | Django ORM                      | PostgreSQL SQL                  |
+| ----------------------------- | ------------------------------- | ------------------------------- |
+| 获取 `data.name`              | `F("data__name")`               | `data->>'name'`                 |
+| 获取 `data.details.email`     | `F("data__details__email")`     | `data->'details'->>'email'`     |
+| 获取 `data.contacts[0].value` | `F("data__contacts__0__value")` | `data->'contacts'->0->>'value'` |
+
+这样就能直接使用 ORM 获取 JSON 数据，并且可以自定义字段别名，无需额外使用 `RawSQL`。
+
+如果你需要获取 JSON 数组 `contacts` 中所有 `value` 值，可以使用 **PostgreSQL 的 `jsonb_array_elements`**，并结合 Django ORM 的 `RawSQL` 实现。
+
+------
+
+### **1. 使用 `jsonb_path_query_array` 获取所有 `value`**
+
+```python
+from django.db.models.expressions import RawSQL
+
+queryset = MyModel.objects.annotate(
+    all_values=RawSQL("jsonb_path_query_array(data, '$.contacts[*].value')", [])
+).values("all_values")
+
+print(queryset)
+```
+
+**等价 SQL：**
+
+```sql
+SELECT jsonb_path_query_array(data, '$.contacts[*].value') AS all_values FROM mymodel;
+```
+
+**返回示例：**
+
+```python
+[{'all_values': ['alice@example.com', '123456789']}]
+```
+
+这会返回一个 JSON 数组，包含 `contacts` 数组中所有 `value` 值。
+
+------
+
+### **2. 使用 `jsonb_array_elements` 拆分数组（返回多个行）**
+
+如果你希望每个 `value` 作为单独的行返回：
+
+```python
+queryset = MyModel.objects.raw("""
+    SELECT id, jsonb_array_elements(data->'contacts')->>'value' AS value
+    FROM mymodel
+""")
+
+for row in queryset:
+    print(row.value)
+```
+
+**等价 SQL：**
+
+```sql
+SELECT jsonb_array_elements(data->'contacts')->>'value' AS value FROM mymodel;
+```
+
+**返回示例（每个 `value` 一行）：**
+
+```
+alice@example.com
+123456789
+```
+
+------
+
+### **3. 使用 `ArrayAgg` 聚合**
+
+如果你希望仍然使用 ORM 而不使用 `RawSQL`：
+
+```python
+from django.contrib.postgres.aggregates import ArrayAgg
+
+queryset = MyModel.objects.annotate(
+    all_values=ArrayAgg("data__contacts__value")
+).values("all_values")
+
+print(queryset)
+```
+
+**等价 SQL：**
+
+```sql
+SELECT array_agg(data->'contacts'->>'value') FROM mymodel;
+```
+
+**返回示例：**
+
+```python
+[{'all_values': ['alice@example.com', '123456789']}]
+```
+
+------
+
+### **总结**
+
+| 需求                        | Django ORM                                                   | SQL 语句                                              |
+| --------------------------- | ------------------------------------------------------------ | ----------------------------------------------------- |
+| 获取所有 `value`（数组）    | `RawSQL("jsonb_path_query_array(data, '$.contacts[*].value')")` | `jsonb_path_query_array(data, '$.contacts[*].value')` |
+| 拆分数组，每个 `value` 一行 | `RawSQL("SELECT jsonb_array_elements(data->'contacts')->>'value'")` | `jsonb_array_elements(data->'contacts')->>'value'`    |
+| 使用 `ArrayAgg` 聚合        | `ArrayAgg("data__contacts__value")`                          | `array_agg(data->'contacts'->>'value')`               |
+
+如果你希望所有值返回在一个 JSON 数组里，推荐 **方法 1**（`jsonb_path_query_array`）。如果你希望每个 `value` 作为一行返回，推荐 **方法 2**（`jsonb_array_elements`）。如果你想用纯 ORM 实现，推荐 **方法 3**（`ArrayAgg`）。
