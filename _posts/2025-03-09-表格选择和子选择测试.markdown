@@ -1,0 +1,173 @@
+---
+layout:     post
+title:      "表格选择和子选择测试"
+subtitle:   ""
+date:       2025-03-04
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - elementplus
+    - eltable
+    - elpopover
+    - vue3
+---
+
+```vue
+<template>
+  <el-table :data="tableData" border style="width: 100%" row-key="id" ref="mainTable">
+    <el-table-column
+        type="selection"
+        width="55"
+        :reserve-selection="true"
+        @select="handleParentSelect"
+        @select-all="handleParentSelectAll"
+    />
+    <el-table-column prop="group" label="组" />
+
+    <el-table-column label="thru">
+      <template #default="{ row }">
+        <el-popover
+            placement="right"
+            title="thru 详情"
+            width="400"
+            trigger="click"
+        >
+          <template #reference>
+            <el-button type="primary">查看</el-button>
+          </template>
+          <el-table
+              :data="row.thru"
+              border
+              row-key="id"
+              ref="getThruRef(row.id)"
+              @selection-change="(val) => handleInnerSelectionChange(val, row, 'thru')"
+          >
+            <el-table-column type="selection" width="50" />
+            <el-table-column prop="name" label="文件名" />
+          </el-table>
+        </el-popover>
+      </template>
+    </el-table-column>
+
+    <el-table-column label="xtalk">
+      <template #default="{ row }">
+        <el-popover
+            placement="right"
+            title="xtalk 详情"
+            width="400"
+            trigger="click"
+        >
+          <template #reference>
+            <el-button type="primary">查看</el-button>
+          </template>
+          <el-table
+              :data="row.xtalk"
+              border
+              row-key="id"
+              ref="getXtalkRef(row.id)"
+              @selection-change="(val) => handleInnerSelectionChange(val, row, 'xtalk')"
+          >
+            <el-table-column type="selection" width="50" />
+            <el-table-column prop="name" label="文件名" />
+          </el-table>
+        </el-popover>
+      </template>
+    </el-table-column>
+  </el-table>
+
+  <pre>{{ JSON.stringify(selectedItems, null, 2) }}</pre>
+</template>
+
+<script setup>
+import { ref, nextTick } from "vue";
+
+const mainTable = ref(null);
+const tableData = ref([
+      {
+        "id": 1,
+        "group": "组 A",
+        "thru": [
+          { "id": "a1", "name": "thru_file1", "extraInfo": "info1", "selected": false },
+          { "id": "a2", "name": "thru_file2", "extraInfo": "info2", "selected": false }
+        ],
+        "xtalk": [
+          { "id": "a3", "name": "xtalk_file1", "extraInfo": "info3", "selected": false }
+        ],
+        "selected": false
+      },
+      {
+        "id": 2,
+        "group": "组 B",
+        "thru": [
+          { "id": "b1", "name": "thru_file3", "extraInfo": "info4", "selected": false }
+        ],
+        "xtalk": [
+          { "id": "b2", "name": "xtalk_file2", "extraInfo": "info5", "selected": false },
+          { "id": "b3", "name": "xtalk_file3", "extraInfo": "info6", "selected": false }
+        ],
+        "selected": false
+      }
+    ]
+);
+
+const selectedItems = ref([]);
+
+const tableRefs = ref({});
+
+const getThruRef = (id) => (el) => tableRefs.value[`thru-${id}`] = el;
+const getXtalkRef = (id) => (el) => tableRefs.value[`xtalk-${id}`] = el;
+
+const updateSelectedData = () => {
+  selectedItems.value = tableData.value.map(row => ({
+    id: row.id,
+    group: row.group,
+    thru: row.thru.map(file => ({ ...file })),
+    xtalk: row.xtalk.map(file => ({ ...file }))
+  }));
+};
+
+const handleParentSelectAll = async (isSelected) => {
+  tableData.value.forEach(row => {
+    row.selected = isSelected;
+    row.thru.forEach(file => (file.selected = isSelected));
+    row.xtalk.forEach(file => (file.selected = isSelected));
+  });
+
+  await nextTick();
+  Object.values(tableRefs.value).forEach(ref => ref?.toggleAllSelection?.());
+  mainTable.value.toggleAllSelection();
+
+  updateSelectedData();
+};
+
+const handleParentSelect = (selection, row) => {
+  const isSelected = selection.some(item => item.id === row.id);
+  row.selected = isSelected;
+  row.thru.forEach(file => (file.selected = isSelected));
+  row.xtalk.forEach(file => (file.selected = isSelected));
+  updateSelectedData();
+};
+
+const handleInnerSelectionChange = (selectedRows, row, type) => {
+  row[type].forEach(file => {
+    file.selected = selectedRows.some(selected => selected.id === file.id);
+  });
+
+  const allSelected = [...row.thru, ...row.xtalk].every(file => file.selected);
+  const anySelected = [...row.thru, ...row.xtalk].some(file => file.selected);
+
+  row.selected = allSelected;
+
+  const elTable = document.querySelector(".el-table__body-wrapper table");
+  const rowIndex = tableData.value.findIndex(item => item.id === row.id);
+  const checkbox = elTable.querySelectorAll(".el-checkbox__input")[rowIndex];
+
+  checkbox.classList.toggle("is-indeterminate", !allSelected && anySelected);
+  checkbox.classList.toggle("is-checked", allSelected);
+
+  updateSelectedData();
+};
+</script>
+
+```
+
