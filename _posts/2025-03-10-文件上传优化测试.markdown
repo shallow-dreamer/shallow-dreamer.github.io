@@ -1,0 +1,245 @@
+---
+layout:     post
+title:      "文件上传优化测试"
+subtitle:   ""
+date:       2025-03-10
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - 文件上传
+---
+
+在这种情况下，您的需求可以总结为：
+
+✅ **前端需要读取和处理大量文件**
+ ✅ **处理后的数据与原始文件一起上传到后端**
+ ✅ **保证性能，避免 UI 卡顿或浏览器崩溃**
+ ✅ **确保上传过程稳定，支持进度反馈、断点续传等机制**
+
+------
+
+## 🛠️ **推荐解决方案**
+
+### 🔄 **整体流程**
+
+1. **选择文件夹并获取文件**
+2. **在前端进行文件预处理（如压缩、加密、重命名、提取元数据等）**
+3. **将处理后的数据和原始文件整合，准备上传**
+4. **分片上传（若文件较大）**
+5. **提供进度反馈及失败重试机制**
+
+------
+
+## 🚀 **实现步骤**
+
+### **✅ 1. 选择文件夹并获取文件**
+
+使用 `<input type="file" webkitdirectory multiple>` 标签选择文件夹并获取文件列表。
+
+```html
+<input 
+  type="file" 
+  webkitdirectory 
+  multiple 
+  @change="handleFileSelection" 
+/>
+const MAX_BATCH_SIZE = 100; // 每次处理的最大文件数
+
+async function handleFileSelection(event) {
+    const files = Array.from(event.target.files);
+
+    if (!files.length) return;
+
+    // 分批处理，避免主线程阻塞
+    for (let i = 0; i < files.length; i += MAX_BATCH_SIZE) {
+        const batch = files.slice(i, i + MAX_BATCH_SIZE);
+        await processBatch(batch);  
+    }
+
+    console.log("✅ 所有文件处理完成");
+}
+```
+
+------
+
+### **✅ 2. 文件预处理**
+
+在预处理阶段，您可以：
+
+- ✅ **压缩图片**
+- ✅ **读取文件内容并生成摘要（如 MD5、SHA256）**
+- ✅ **提取文件元数据（如创建时间、大小）**
+- ✅ **重新命名或规范化路径**
+
+**示例代码：压缩图片**
+
+```javascript
+async function compressImage(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+
+            img.onload = () => {
+                const canvas = document.createElement("canvas");
+                const ctx = canvas.getContext("2d");
+
+                // 降低分辨率以压缩
+                canvas.width = img.width / 2;
+                canvas.height = img.height / 2;
+
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                canvas.toBlob((blob) => {
+                    resolve(blob);
+                }, "image/jpeg", 0.7);  // 质量 70%
+            };
+        };
+    });
+}
+```
+
+------
+
+### **✅ 3. 构造上传数据**
+
+将原始文件、处理后的数据、额外信息整合为 `FormData` 对象，以便便捷地上传。
+
+**示例代码**
+
+```javascript
+async function buildFormData(files) {
+    const formData = new FormData();
+
+    for (const file of files) {
+        // 示例：压缩图片并附加元数据
+        const compressedImage = await compressImage(file);
+        formData.append("file", compressedImage, file.name);
+
+        // 附加元数据信息
+        const metadata = {
+            name: file.name,
+            size: file.size,
+            lastModified: file.lastModified,
+            type: file.type,
+        };
+
+        formData.append(`metadata_${file.name}`, JSON.stringify(metadata));
+    }
+
+    return formData;
+}
+```
+
+------
+
+### **✅ 4. 分片上传**
+
+当某些文件较大时，推荐使用分片上传提高稳定性。
+
+**示例代码**
+
+```javascript
+async function uploadInChunks(file, url, chunkSize = 5 * 1024 * 1024) {
+    const totalChunks = Math.ceil(file.size / chunkSize);
+
+    for (let i = 0; i < totalChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(start + chunkSize, file.size);
+        const chunk = file.slice(start, end);
+
+        const formData = new FormData();
+        formData.append("chunk", chunk);
+        formData.append("index", i);
+        formData.append("totalChunks", totalChunks);
+
+        await axios.post(url, formData);
+    }
+
+    console.log(`✅ ${file.name} 上传完成`);
+}
+```
+
+------
+
+### **✅ 5. 提供上传进度与反馈**
+
+实现进度条、上传完成提示、失败重试等功能，提升用户体验。
+
+**示例代码**
+
+```javascript
+async function uploadWithProgress(formData, url) {
+    await axios.post(url, formData, {
+        onUploadProgress: (progressEvent) => {
+            const percentCompleted = Math.round(
+                (progressEvent.loaded * 100) / progressEvent.total
+            );
+            console.log(`进度: ${percentCompleted}%`);
+        },
+    });
+}
+```
+
+------
+
+### **✅ 6. 断点续传（可选）**
+
+对于特别大的数据集，推荐使用以下策略：
+
+- ✅ 为每个文件生成唯一标识（如 `MD5` 或 `UUID`）
+- ✅ 记录已上传的分片索引
+- ✅ 失败时可从断点继续上传
+
+------
+
+### **✅ 7. 后端数据处理建议**
+
+在后端，您可以：
+
+1. 解析 `FormData` 数据
+2. 根据 `metadata` 提取文件信息
+3. 根据前端逻辑将大文件分片重新合并
+
+**Django 示例代码**
+
+```python
+from django.http import JsonResponse
+from django.views import View
+from django.core.files.storage import default_storage
+
+class FileUploadView(View):
+    def post(self, request):
+        file = request.FILES.get("file")
+        metadata = request.POST.get("metadata")
+
+        if not file or not metadata:
+            return JsonResponse({"error": "缺少文件或元数据"}, status=400)
+
+        # 示例：保存文件
+        file_path = default_storage.save(f"uploads/{file.name}", file)
+
+        # 示例：处理元数据
+        metadata_dict = json.loads(metadata)
+        print(f"文件名: {metadata_dict['name']}")
+        print(f"大小: {metadata_dict['size']} 字节")
+
+        return JsonResponse({"message": "文件上传成功", "path": file_path})
+```
+
+------
+
+## 🔥 **完整流程总结**
+
+✅ 使用 `<input type="file" webkitdirectory>` 选择文件夹
+ ✅ 使用 `Web Worker` 进行复杂预处理，避免主线程阻塞
+ ✅ 将处理后的数据和原始文件整合到 `FormData` 中
+ ✅ 使用 `分片上传` 避免超大文件的上传失败
+ ✅ 实现 `进度反馈` 提高用户体验
+ ✅ 可选：结合 `断点续传` 提升稳定性
+
+这套方案兼具**性能**、**稳定性**、**易维护性**，并确保在文件数量庞大时仍能高效完成任务。如需进一步优化某一环节，欢迎继续探讨。 😊
+
