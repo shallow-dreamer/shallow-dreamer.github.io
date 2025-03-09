@@ -2,7 +2,7 @@
 layout:     post
 title:      "表格选择和子选择测试"
 subtitle:   ""
-date:       2025-03-04
+date:       2025-03-09
 author:     " Shallow Dreamer"
 header-img: "img/post-bg-js-version.jpg"
 tags:
@@ -14,6 +14,7 @@ tags:
 
 ```vue
 <template>
+  <input type="file" webkitdirectory directory multiple @change="handleFolderUpload" />
   <el-table :data="tableData" border style="width: 100%" row-key="id" ref="mainTable">
     <el-table-column
         type="selection"
@@ -79,36 +80,10 @@ tags:
 </template>
 
 <script setup>
-import { ref, nextTick } from "vue";
+import {ref, nextTick} from "vue";
 
 const mainTable = ref(null);
-const tableData = ref([
-      {
-        "id": 1,
-        "group": "组 A",
-        "thru": [
-          { "id": "a1", "name": "thru_file1", "extraInfo": "info1", "selected": false },
-          { "id": "a2", "name": "thru_file2", "extraInfo": "info2", "selected": false }
-        ],
-        "xtalk": [
-          { "id": "a3", "name": "xtalk_file1", "extraInfo": "info3", "selected": false }
-        ],
-        "selected": false
-      },
-      {
-        "id": 2,
-        "group": "组 B",
-        "thru": [
-          { "id": "b1", "name": "thru_file3", "extraInfo": "info4", "selected": false }
-        ],
-        "xtalk": [
-          { "id": "b2", "name": "xtalk_file2", "extraInfo": "info5", "selected": false },
-          { "id": "b3", "name": "xtalk_file3", "extraInfo": "info6", "selected": false }
-        ],
-        "selected": false
-      }
-    ]
-);
+const tableData = ref([]);
 
 const selectedItems = ref([]);
 
@@ -117,12 +92,55 @@ const tableRefs = ref({});
 const getThruRef = (id) => (el) => tableRefs.value[`thru-${id}`] = el;
 const getXtalkRef = (id) => (el) => tableRefs.value[`xtalk-${id}`] = el;
 
+const parseFolderStructure = (folderFiles) => {
+  const data = [];
+
+  folderFiles.forEach(filePath => {
+    const parts = filePath.split('/');
+    const groupName = parts[1]; // 修改为从第二层开始作为组
+    const subFolder = parts[2];
+    const fileName = parts.slice(3).join('/');
+
+    let group = data.find(group => group.group === groupName);
+    if (!group) {
+      group = {
+        id: data.length + 1,
+        group: groupName,
+        thru: [],
+        xtalk: [],
+        selected: false
+      };
+      data.push(group);
+    }
+
+    const fileData = {
+      id: `${group.id}-${fileName}`,
+      name: fileName,
+      extraInfo: `来自 ${subFolder}`,
+      selected: false
+    };
+
+    if (subFolder === 'thru') {
+      group.thru.push(fileData);
+    } else if (subFolder === 'xtalk') {
+      group.xtalk.push(fileData);
+    }
+  });
+
+  return data;
+};
+
+const handleFolderUpload = (event) => {
+  const folderFiles = Array.from(event.target.files).map(file => file.webkitRelativePath);
+  tableData.value = parseFolderStructure(folderFiles);
+};
+
 const updateSelectedData = () => {
   selectedItems.value = tableData.value.map(row => ({
     id: row.id,
     group: row.group,
-    thru: row.thru.map(file => ({ ...file })),
-    xtalk: row.xtalk.map(file => ({ ...file }))
+    thru: row.thru.map(file => ({...file})),
+    xtalk: row.xtalk.map(file => ({...file}))
   }));
 };
 
