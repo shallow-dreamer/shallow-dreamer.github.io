@@ -1355,3 +1355,25 @@ print(cache.get("config_key"))  # ✅ 这个时候 Redis 连接已建立，缓�
 - **确保缓存可用，即使 Redis 配置未就绪也不会崩溃**
 
 ✅ **是完美适用的**！ 🚀
+
+```python
+class LazyCacheWrapper(LazyObject):
+    def __init__(self, alias="default"):
+        """不在初始化时固定 alias，而是在访问时动态获取"""
+        super().__init__()
+        object.__setattr__(self, "_alias", alias)  # 避免 LazyObject 机制干扰
+
+    def _setup(self):
+        """在真正访问缓存时，确保配置已经从配置中心加载"""
+        alias = object.__getattribute__(self, "_alias")
+
+        # 这里检查 Django 是否已经完全加载了缓存配置
+        if alias not in caches:
+            print(f"⚠️ Warning: Cache alias '{alias}' is not available yet. Using DummyCache.")
+            cache = DummyCache()  # 兜底，防止缓存不可用
+        else:
+            cache = caches[alias]  # 获取正确的缓存实例
+
+        object.__setattr__(self, "_wrapped", cache)  # 直接赋值，避免 LazyObject 递归问题
+```
+
