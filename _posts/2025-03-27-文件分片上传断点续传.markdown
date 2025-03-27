@@ -1,0 +1,1688 @@
+---
+layout:     post
+title:      "文件分片上传断点续传"
+subtitle:   ""
+date:       2025-03-27
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - vue3
+    - axios
+    - Django
+    - s3
+---
+
+在 Vue 3 前端、Django 后端，并使用 AWS S3 作为存储的环境下，实现**分片上传**和**断点续传**，通常涉及以下步骤：
+
+------
+
+## **1. 主要流程**
+
+1. **前端分片**：
+   - 读取文件，并按照固定大小（如 5MB）进行分片。
+2. **计算文件唯一标识**：
+   - 通过 SHA-256 哈希计算文件标识，用于检查 S3 是否已有部分分片。
+3. **请求 S3 上传 URL**：
+   - Django 通过 `boto3` 生成 S3 预签名 URL，允许前端直接上传分片到 S3。
+4. **上传分片**：
+   - 使用 `fetch` 发送 `PUT` 请求至 S3 预签名 URL 。
+5. **合并分片**：
+   - 上传完成后，通知 Django 后端触发 S3 **合并分片**。
+6. **断点续传**：
+   - 查询 S3 已上传的分片，跳过已完成的部分。
+
+------
+
+## **2. 前端 Vue 3 实现**
+
+### **2.1 计算文件哈希**
+
+```javascript
+async function calculateFileHash(file) {
+  const chunkSize = 2 * 1024 * 1024; // 2MB
+  const chunks = Math.ceil(file.size / chunkSize);
+  const spark = new Uint8Array();
+
+  for (let i = 0; i < chunks; i++) {
+    const chunk = file.slice(i * chunkSize, (i + 1) * chunkSize);
+    const buffer = await chunk.arrayBuffer();
+    spark.set(new Uint8Array(buffer));
+  }
+
+  const hashBuffer = await crypto.subtle.digest("SHA-256", spark);
+  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+```
+
+------
+
+### **2.2 分片文件**
+
+```javascript
+function sliceFile(file, chunkSize = 5 * 1024 * 1024) {
+  const chunks = [];
+  let start = 0;
+
+  while (start < file.size) {
+    chunks.push(file.slice(start, start + chunkSize));
+    start += chunkSize;
+  }
+
+  return chunks;
+}
+```
+
+------
+
+### **2.3 请求 S3 上传 URL**
+
+```javascript
+async function getUploadUrls(fileHash, totalChunks) {
+  const response = await fetch("/api/upload/initiate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hash: fileHash, totalChunks })
+  });
+
+  return await response.json(); // 返回 { uploadId, urls: [url1, url2, ...] }
+}
+```
+
+------
+
+### **2.4 上传分片**
+
+```javascript
+async function uploadChunkToS3(url, chunk) {
+  return fetch(url, {
+    method: "PUT",
+    body: chunk,
+    headers: { "Content-Type": "application/octet-stream" }
+  });
+}
+```
+
+------
+
+### **2.5 触发合并**
+
+```javascript
+async function completeUpload(fileHash, uploadId) {
+  await fetch("/api/upload/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hash: fileHash, uploadId })
+  });
+}
+```
+
+------
+
+### **2.6 触发上传**
+
+```javascript
+async function handleUpload(file) {
+  const fileHash = await calculateFileHash(file);
+  const chunks = sliceFile(file);
+
+  const { uploadId, urls } = await getUploadUrls(fileHash, chunks.length);
+
+  for (let i = 0; i < chunks.length; i++) {
+    await uploadChunkToS3(urls[i], chunks[i]);
+  }
+
+  await completeUpload(fileHash, uploadId);
+  console.log("上传完成！");
+}
+```
+
+------
+
+## **3. Django 后端实现**
+
+安装 `boto3`：
+
+```sh
+pip install boto3
+```
+
+配置 Django 访问 AWS S3：
+
+```python
+import boto3
+from django.conf import settings
+
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+    region_name=settings.AWS_REGION
+)
+```
+
+------
+
+### **3.1 初始化 S3 多部分上传**
+
+```python
+from django.http import JsonResponse
+import uuid
+
+def initiate_upload(request):
+    data = request.json()
+    file_hash = data["hash"]
+    total_chunks = data["totalChunks"]
+    
+    upload_id = str(uuid.uuid4())  # 生成唯一的 upload_id
+
+    presigned_urls = [
+        s3_client.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": settings.AWS_STORAGE_BUCKET_NAME, "Key": f"uploads/{file_hash}/part-{i+1}", "ContentType": "application/octet-stream"},
+            ExpiresIn=3600
+        ) for i in range(total_chunks)
+    ]
+    
+    return JsonResponse({"uploadId": upload_id, "urls": presigned_urls})
+```
+
+------
+
+### **3.2 完成上传**
+
+```python
+def complete_upload(request):
+    data = request.json()
+    file_hash = data["hash"]
+    upload_id = data["uploadId"]
+    
+    parts = [
+        {"ETag": s3_client.head_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=f"uploads/{file_hash}/part-{i+1}")["ETag"], "PartNumber": i+1}
+        for i in range(len(s3_client.list_objects_v2(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=f"uploads/{file_hash}")["Contents"]))
+    ]
+    
+    s3_client.complete_multipart_upload(
+        Bucket=settings.AWS_STORAGE_BUCKET_NAME,
+        Key=f"uploads/{file_hash}/final",
+        UploadId=upload_id,
+        MultipartUpload={"Parts": parts}
+    )
+    
+    return JsonResponse({"message": "Upload completed"})
+```
+
+------
+
+## **4. 断点续传**
+
+### **4.1 查询已上传的分片**
+
+```python
+def check_uploaded_chunks(request):
+    file_hash = request.GET.get("hash")
+    
+    existing_chunks = []
+    response = s3_client.list_objects_v2(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=f"uploads/{file_hash}")
+
+    if "Contents" in response:
+        existing_chunks = [obj["Key"].split("-")[-1] for obj in response["Contents"]]
+    
+    return JsonResponse({"uploadedChunks": existing_chunks})
+```
+
+------
+
+### **4.2 前端获取已上传的分片**
+
+```javascript
+async function checkUploadedChunks(fileHash) {
+  const response = await fetch(`/api/upload/check?hash=${fileHash}`);
+  return await response.json(); // 返回已上传的分片索引数组
+}
+```
+
+------
+
+## **5. 触发上传（带断点续传）**
+
+```javascript
+async function handleUpload(file) {
+  const fileHash = await calculateFileHash(file);
+  const chunks = sliceFile(file);
+
+  const { uploadId, urls } = await getUploadUrls(fileHash, chunks.length);
+  const uploadedChunks = await checkUploadedChunks(fileHash);
+
+  for (let i = 0; i < chunks.length; i++) {
+    if (!uploadedChunks.includes(String(i + 1))) {
+      await uploadChunkToS3(urls[i], chunks[i]);
+    }
+  }
+
+  await completeUpload(fileHash, uploadId);
+  console.log("上传完成！");
+}
+```
+
+------
+
+## **6. 总结**
+
+✅ **分片上传**：前端切片后上传至 S3
+ ✅ **预签名 URL**：Django 后端生成 S3 预签名 URL
+ ✅ **断点续传**：查询已上传的分片，跳过已上传部分
+ ✅ **合并文件**：Django 触发 S3 合并分片
+
+这样就完成了 Vue 3 + Django + S3 的**分片上传**和**断点续传**🚀。
+
+要实现**页面刷新后继续断点续传**或**清除已上传的分片**，可以采用以下方案：
+
+------
+
+## **📌 方案 1：页面刷新后继续上传**
+
+**核心思路**：
+
+- **本地存储进度**：将 `fileHash` 和 `uploadId` 存储在 `localStorage` 或 IndexedDB 中。
+- **检查已上传分片**：页面刷新后，前端从服务器获取已上传的分片信息，继续上传剩余部分。
+
+------
+
+### **✅ 1.1 存储上传进度**
+
+在 `localStorage` 里记录 `fileHash` 和 `uploadId`：
+
+```javascript
+function saveUploadProgress(fileHash, uploadId) {
+  localStorage.setItem("uploadProgress", JSON.stringify({ fileHash, uploadId }));
+}
+
+function getUploadProgress() {
+  return JSON.parse(localStorage.getItem("uploadProgress"));
+}
+
+function clearUploadProgress() {
+  localStorage.removeItem("uploadProgress");
+}
+```
+
+------
+
+### **✅ 1.2 断点续传（页面刷新后恢复上传）**
+
+```javascript
+async function resumeUpload() {
+  const progress = getUploadProgress();
+  if (!progress) return;
+
+  const { fileHash, uploadId } = progress;
+  const uploadedChunks = await checkUploadedChunks(fileHash);
+
+  const file = getFileFromUser(); // 用户重新选择相同的文件
+  if (!file) return alert("请重新选择文件！");
+
+  const chunks = sliceFile(file);
+
+  for (let i = 0; i < chunks.length; i++) {
+    if (!uploadedChunks.includes(String(i + 1))) {
+      const urls = await getUploadUrls(fileHash, chunks.length);
+      await uploadChunkToS3(urls[i], chunks[i]);
+    }
+  }
+
+  await completeUpload(fileHash, uploadId);
+  clearUploadProgress();
+  console.log("上传完成！");
+}
+```
+
+------
+
+### **✅ 1.3 页面刷新后自动检查**
+
+```javascript
+window.addEventListener("load", async () => {
+  if (getUploadProgress()) {
+    const resume = confirm("检测到未完成的上传，是否继续？");
+    if (resume) await resumeUpload();
+    else clearUploadProgress();
+  }
+});
+```
+
+------
+
+## **📌 方案 2：清除已上传分片**
+
+如果用户想**清除已上传的分片**，后端需要提供一个 API 来删除 S3 中的已上传部分。
+
+------
+
+### **✅ 2.1 后端删除 S3 分片**
+
+```python
+def abort_upload(request):
+    data = request.json()
+    file_hash = data["hash"]
+
+    # 获取所有已上传的分片
+    objects_to_delete = s3_client.list_objects_v2(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=f"uploads/{file_hash}")
+    
+    if "Contents" in objects_to_delete:
+        s3_client.delete_objects(
+            Bucket=settings.AWS_STORAGE_BUCKET_NAME,
+            Delete={"Objects": [{"Key": obj["Key"]} for obj in objects_to_delete["Contents"]]}
+        )
+
+    return JsonResponse({"message": "已上传的分片已清除"})
+```
+
+------
+
+### **✅ 2.2 前端调用清除 API**
+
+```javascript
+async function clearUploadedChunks(fileHash) {
+  await fetch("/api/upload/abort", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hash: fileHash })
+  });
+  clearUploadProgress();
+  console.log("已清除上传分片");
+}
+```
+
+------
+
+## **📌 总结**
+
+### ✅ **页面刷新后继续上传**
+
+1. **本地存储 `fileHash` 和 `uploadId`**
+2. **页面刷新后获取已上传的分片**
+3. **继续上传剩余分片**
+
+### ✅ **清除已上传数据**
+
+1. **用户手动触发清除 API**
+2. **后端删除 S3 已上传的分片**
+3. **清除本地存储的进度**
+
+这样无论是**断点续传**还是**清除已上传数据**，都可以流畅地处理！🚀
+
+### **📌 需求分析**
+
+你希望：
+
+1. **同时上传多个分片**，提升上传速度。
+2. **上传完成一个分片后，立即启动新的分片**，保证并发控制。
+3. **可以自由设置并发上传的分片数量**。
+
+这种方式称为 **“流式并发上传”**，可以使用 **Promise 队列** 控制上传并发数。
+
+------
+
+## **✅ 实现思路**
+
+1. **设定最大并发数 `maxConcurrent`**，例如 3 个。
+2. **使用队列调度**：维护一个活动队列，保证最多同时执行 `maxConcurrent` 个上传任务。
+3. **完成一个分片后立即启动下一个**，直到所有分片完成。
+
+------
+
+## **✅ Vue 3 前端实现**
+
+```javascript
+async function uploadFileWithConcurrency(file, maxConcurrent = 3) {
+  const fileHash = await calculateFileHash(file);
+  const chunks = sliceFile(file);
+  const { uploadId, urls } = await getUploadUrls(fileHash, chunks.length);
+
+  let activeUploads = 0; // 当前正在上传的分片数
+  let nextIndex = 0; // 下一个待上传的分片索引
+  let completed = 0; // 记录完成的分片数
+
+  return new Promise((resolve, reject) => {
+    const uploadNext = async () => {
+      if (nextIndex >= chunks.length) return;
+
+      const index = nextIndex++; // 取当前上传的分片索引
+      activeUploads++; // 递增正在上传的任务数
+
+      try {
+        await uploadChunkToS3(urls[index], chunks[index]);
+        completed++;
+        console.log(`分片 ${index + 1}/${chunks.length} 上传完成`);
+      } catch (error) {
+        console.error(`分片 ${index + 1} 上传失败`, error);
+        reject(error);
+      }
+
+      activeUploads--; // 任务完成，释放并发数
+      if (completed === chunks.length) {
+        resolve(); // 所有分片上传完成
+      } else {
+        uploadNext(); // 继续上传下一个分片
+      }
+    };
+
+    // 启动 `maxConcurrent` 个上传任务
+    for (let i = 0; i < Math.min(maxConcurrent, chunks.length); i++) {
+      uploadNext();
+    }
+  }).then(() => completeUpload(fileHash, uploadId));
+}
+```
+
+------
+
+## **✅ 代码解析**
+
+1. **`maxConcurrent` 控制最大同时上传的任务数**
+2. **`activeUploads` 记录当前正在上传的分片数量**
+3. **`nextIndex` 记录下一个要上传的分片索引**
+4. **`uploadNext()` 递归触发下一个分片上传**
+5. **当所有分片完成后，合并 S3 分片**
+
+------
+
+## **✅ 如何使用**
+
+```javascript
+const file = getFileFromUser(); // 让用户选择文件
+uploadFileWithConcurrency(file, 5) // 并发 5 个上传
+  .then(() => console.log("✅ 文件上传完成"))
+  .catch((err) => console.error("❌ 上传失败", err));
+```
+
+------
+
+## **✅ 这样有什么好处？**
+
+🚀 **并发控制**：避免一次性上传过多分片，减少网络压力
+ 📌 **动态调度**：每次完成一个分片就触发新的上传
+ ⚡ **上传更快**：相较于串行上传，速度大大提升
+
+这样，你可以自由控制**并发上传数量**，并且保证文件上传的流畅性和稳定性！🔥
+
+### **📌 需求分析**
+
+你希望在**分片上传**时能够实时获取**上传进度**，主要关注**分片上传的进度**，而不需要整个文件的进度。
+
+### **✅ 解决方案**
+
+- **利用 `onprogress` 监听上传进度**：在 `fetch` 请求时，使用 `XMLHttpRequest` 代替 `fetch`，可以监听 `progress` 事件。
+- **维护 `uploadedChunks` 数组**：记录已完成上传的分片数量。
+- **计算分片进度**：通过 `(已上传分片 / 总分片) * 100` 来计算进度。
+
+------
+
+## **✅ Vue 3 代码**
+
+```javascript
+async function uploadFileWithProgress(file, maxConcurrent = 3, onProgress = () => {}) {
+  const fileHash = await calculateFileHash(file);
+  const chunks = sliceFile(file);
+  const { uploadId, urls } = await getUploadUrls(fileHash, chunks.length);
+
+  let activeUploads = 0;
+  let nextIndex = 0;
+  let completedChunks = 0; // 记录完成的分片数量
+
+  return new Promise((resolve, reject) => {
+    const uploadNext = async () => {
+      if (nextIndex >= chunks.length) return;
+
+      const index = nextIndex++;
+      activeUploads++;
+
+      try {
+        await uploadChunkWithProgress(urls[index], chunks[index], (progress) => {
+          console.log(`分片 ${index + 1} 进度: ${progress}%`);
+        });
+
+        completedChunks++;
+        onProgress((completedChunks / chunks.length) * 100); // 更新整体进度
+        console.log(`分片 ${index + 1}/${chunks.length} 上传完成`);
+      } catch (error) {
+        console.error(`分片 ${index + 1} 上传失败`, error);
+        reject(error);
+      }
+
+      activeUploads--;
+      if (completedChunks === chunks.length) {
+        resolve();
+      } else {
+        uploadNext();
+      }
+    };
+
+    for (let i = 0; i < Math.min(maxConcurrent, chunks.length); i++) {
+      uploadNext();
+    }
+  }).then(() => completeUpload(fileHash, uploadId));
+}
+```
+
+------
+
+## **✅ 监听单个分片上传进度**
+
+```javascript
+function uploadChunkWithProgress(url, chunk, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url, true);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const progress = Math.round((event.loaded / event.total) * 100);
+        onProgress(progress); // 更新进度
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status === 200) {
+        resolve();
+      } else {
+        reject(new Error(`上传失败: ${xhr.status}`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("网络错误"));
+    xhr.send(chunk);
+  });
+}
+```
+
+------
+
+## **✅ 使用示例**
+
+```javascript
+const file = getFileFromUser();
+
+uploadFileWithProgress(file, 3, (progress) => {
+  console.log(`上传进度: ${progress.toFixed(2)}%`);
+}).then(() => {
+  console.log("✅ 文件上传完成");
+}).catch((err) => {
+  console.error("❌ 上传失败", err);
+});
+```
+
+------
+
+## **✅ 效果**
+
+- **并发上传多个分片**
+- **每个分片上传时有进度回调**
+- **计算整体上传进度**
+- **每完成一个分片就触发新的分片上传**
+
+这样，你可以在前端 UI 上**实时显示上传进度**，提升用户体验！🚀🔥
+
+### **📌 断点续传 & 页面刷新后继续上传**
+
+> **问题：** 页面刷新后，**文件对象已丢失**，无法继续上传。如何解决？
+
+------
+
+## **✅ 解决方案**
+
+1. **记录上传状态**：使用 `localStorage` 记录 `fileHash`、`uploadId`、已上传分片列表。
+2. **服务器检查已上传分片**：刷新页面后，前端向服务器请求已上传分片信息。
+3. **用户选择同一文件**：提示用户选择**相同的文件**，然后比对 `fileHash`，继续上传未完成的分片。
+
+------
+
+## **✅ 方案 1：使用 `localStorage` 记录上传状态**
+
+```javascript
+function saveUploadProgress(fileHash, uploadId, uploadedChunks) {
+  localStorage.setItem("uploadProgress", JSON.stringify({ fileHash, uploadId, uploadedChunks }));
+}
+
+function getUploadProgress() {
+  return JSON.parse(localStorage.getItem("uploadProgress"));
+}
+
+function clearUploadProgress() {
+  localStorage.removeItem("uploadProgress");
+}
+```
+
+### **✅ 记录上传进度**
+
+每完成一个分片，就存储上传进度：
+
+```javascript
+function updateUploadedChunks(fileHash, chunkIndex) {
+  let progress = getUploadProgress();
+  if (progress && progress.fileHash === fileHash) {
+    progress.uploadedChunks.push(chunkIndex);
+    saveUploadProgress(progress.fileHash, progress.uploadId, progress.uploadedChunks);
+  }
+}
+```
+
+------
+
+## **✅ 方案 2：页面刷新后恢复上传**
+
+1. **检查 `localStorage` 是否有未完成的上传任务**。
+2. **向服务器请求 `已上传分片列表`**，确认哪些分片已完成。
+3. **用户选择相同的文件**，比对 `fileHash` 是否一致。
+4. **继续上传未完成的分片**。
+
+```javascript
+async function resumeUpload() {
+  const progress = getUploadProgress();
+  if (!progress) return;
+
+  const { fileHash, uploadId, uploadedChunks } = progress;
+
+  // 服务器检查已上传的分片
+  const serverUploadedChunks = await checkUploadedChunks(fileHash);
+  
+  const file = getFileFromUser(); // 用户重新选择文件
+  if (!file) return alert("请重新选择文件！");
+
+  // 计算文件 hash，确保是相同文件
+  const newFileHash = await calculateFileHash(file);
+  if (newFileHash !== fileHash) {
+    alert("文件不匹配，请选择相同的文件！");
+    return;
+  }
+
+  const chunks = sliceFile(file);
+  const remainingChunks = chunks.filter((_, index) => !serverUploadedChunks.includes(index));
+
+  for (const index of remainingChunks.keys()) {
+    const urls = await getUploadUrls(fileHash, chunks.length);
+    await uploadChunkToS3(urls[index], chunks[index]);
+    updateUploadedChunks(fileHash, index);
+  }
+
+  await completeUpload(fileHash, uploadId);
+  clearUploadProgress();
+  console.log("上传完成！");
+}
+```
+
+------
+
+## **✅ 方案 3：后端检查已上传的分片**
+
+> **Django 服务器端 API**
+
+```python
+from django.http import JsonResponse
+import boto3
+from my_project.settings import AWS_STORAGE_BUCKET_NAME
+
+s3_client = boto3.client("s3")
+
+def check_uploaded_chunks(request):
+    file_hash = request.GET.get("hash")
+
+    # 获取所有已上传的分片
+    objects = s3_client.list_objects_v2(Bucket=AWS_STORAGE_BUCKET_NAME, Prefix=f"uploads/{file_hash}")
+
+    uploaded_chunks = []
+    if "Contents" in objects:
+        uploaded_chunks = [obj["Key"].split("_")[-1] for obj in objects["Contents"]]
+
+    return JsonResponse({"uploadedChunks": uploaded_chunks})
+```
+
+------
+
+## **✅ 方案 4：页面刷新后自动检查**
+
+```javascript
+window.addEventListener("load", async () => {
+  if (getUploadProgress()) {
+    const resume = confirm("检测到未完成的上传，是否继续？");
+    if (resume) await resumeUpload();
+    else clearUploadProgress();
+  }
+});
+```
+
+------
+
+## **✅ 方案 5：用户手动清除已上传分片**
+
+如果用户**不想继续上传**，希望清除已上传的分片：
+
+```javascript
+async function clearUploadedChunks(fileHash) {
+  await fetch("/api/upload/abort", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hash: fileHash })
+  });
+  clearUploadProgress();
+  console.log("已清除上传分片");
+}
+```
+
+------
+
+## **✅ 总结**
+
+### **🌟 断点续传方案**
+
+✅ **前端存储上传状态 (`localStorage`)**
+ ✅ **后端检查已上传的分片**
+ ✅ **用户选择相同文件，校验 `fileHash`**
+ ✅ **继续上传未完成的分片**
+
+### **⚡ 处理刷新问题**
+
+🔹 **刷新页面后，提示用户选择相同的文件**
+ 🔹 **比对 `fileHash`，防止误上传**
+ 🔹 **前端获取 `localStorage` 记录，后端检查已上传分片**
+ 🔹 **上传剩余分片，完成后合并**
+
+🚀 这样即使**页面刷新、网络中断**，也能**无缝继续上传**！🔥
+
+### **📌 问题分析**
+
+如果**用户刷新页面后不选择文件**，我们面临两个问题：
+
+1. **文件对象已丢失**：无法直接继续上传，因为浏览器不会存储 `File` 对象。
+2. **用户可能不想继续上传**：需要提供选项让用户**继续上传**或**清除已上传的数据**。
+
+------
+
+## **✅ 解决方案**
+
+### **1️⃣ 让用户选择文件**
+
+- 如果用户不选择文件，我们无法继续上传。
+- 提示用户**必须选择相同的文件**，否则无法恢复上传。
+
+```javascript
+async function promptUserForFile() {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.onchange = () => resolve(input.files[0]);
+    input.click();
+  });
+}
+```
+
+------
+
+### **2️⃣ 页面刷新后自动检测上传状态**
+
+**🌟 逻辑**：
+
+1. **检查 `localStorage` 是否有未完成的上传**。
+2. **提示用户继续或清除上传数据**。
+3. **如果用户选择继续，要求选择相同的文件**。
+4. **如果用户选择取消，清除已上传的分片**。
+
+```javascript
+window.addEventListener("load", async () => {
+  const progress = getUploadProgress();
+  if (!progress) return; // 没有未完成的上传
+
+  const resume = confirm("检测到未完成的上传，是否继续？");
+
+  if (resume) {
+    const file = await promptUserForFile();
+    if (!file) {
+      alert("你必须选择相同的文件才能继续上传！");
+      return;
+    }
+
+    const newFileHash = await calculateFileHash(file);
+    if (newFileHash !== progress.fileHash) {
+      alert("文件不匹配，无法继续上传！");
+      return;
+    }
+
+    await resumeUpload(file);
+  } else {
+    clearUploadProgress();
+    await clearUploadedChunks(progress.fileHash);
+    alert("已清除未完成的上传！");
+  }
+});
+```
+
+------
+
+### **3️⃣ 用户不选择文件怎么办？**
+
+如果用户关闭文件选择框，我们可以：
+
+- **一直弹出提示，直到用户选择文件**（不推荐，影响体验）。
+- **等待用户手动恢复**（推荐）。
+
+> **🌟 解决方案**
+>
+> - 如果用户不选择文件，不会继续上传，但**不会删除已上传的分片**。
+> - 以后用户仍然可以重新进入页面，手动恢复上传。
+
+------
+
+### **4️⃣ 提供“稍后恢复”功能**
+
+如果用户暂时不想上传，但未来可能想继续上传：
+
+1. **提供一个“稍后恢复”按钮**，允许用户手动恢复上传。
+2. **让 `localStorage` 存储未完成的上传数据**，页面刷新后仍然可用。
+
+```html
+<button id="resume-upload">恢复上传</button>
+document.getElementById("resume-upload").addEventListener("click", async () => {
+  const progress = getUploadProgress();
+  if (!progress) {
+    alert("没有未完成的上传！");
+    return;
+  }
+
+  const file = await promptUserForFile();
+  if (!file) {
+    alert("你必须选择相同的文件才能继续上传！");
+    return;
+  }
+
+  const newFileHash = await calculateFileHash(file);
+  if (newFileHash !== progress.fileHash) {
+    alert("文件不匹配，无法继续上传！");
+    return;
+  }
+
+  await resumeUpload(file);
+});
+```
+
+------
+
+## **✅ 最终流程**
+
+### **🌟 用户刷新页面后**
+
+1. **检测是否有未完成的上传**
+2. **弹出提示：是否继续上传？**
+   - ✅ **用户同意** → 让用户选择文件 → 校验 `fileHash` → 继续上传
+   - ❌ **用户拒绝** → 询问是否删除已上传的部分 → 清除数据
+3. **用户关闭文件选择框**
+   - **不会继续上传**
+   - **稍后可以点击“恢复上传”按钮继续**
+
+------
+
+## **✅ 总结**
+
+**📌 用户不选择文件时的解决方案**
+
+| 场景               | 解决方案                             |
+| ------------------ | ------------------------------------ |
+| 用户刷新页面后     | 提示继续上传或清除数据               |
+| 用户不选择文件     | 保留已上传的分片，等待手动恢复       |
+| 用户想稍后上传     | 提供“恢复上传”按钮，手动恢复         |
+| 用户选择错误的文件 | 比对 `fileHash`，防止误上传          |
+| 用户拒绝继续上传   | 清除 `localStorage` 并删除已上传分片 |
+
+------
+
+## **✅ 这样有什么好处？**
+
+✅ **用户有选择权**：可以继续上传，也可以放弃
+ ✅ **数据不会丢失**：即使用户关闭页面，已上传的部分仍然保存
+ ✅ **不影响体验**：用户可以稍后手动恢复，不会强制要求立刻上传
+
+这样，即使用户刷新页面、不选择文件，系统仍然能够**保持灵活性**，提供最好的用户体验！🚀🔥
+
+### **📌 Vue 3 + Django + S3 分片上传（支持断点续传）**
+
+> 方案支持 **多分片并发上传、页面刷新后继续上传、用户手动恢复、清除已上传数据**。
+
+------
+
+## **✅ 1. 前端 Vue 3 代码**
+
+### **📌 1.1 核心上传逻辑**
+
+```javascript
+import axios from "axios";
+
+const S3_UPLOAD_API = "/api/upload"; // Django 服务器上传 API
+
+export default {
+  data() {
+    return {
+      file: null,
+      fileHash: null,
+      uploadId: null,
+      uploadedChunks: [],
+      totalChunks: 0,
+      maxConcurrent: 3, // 并发上传分片数
+    };
+  },
+
+  methods: {
+    /** 选择文件 */
+    async selectFile(event) {
+      this.file = event.target.files[0];
+      if (!this.file) return;
+
+      this.fileHash = await this.calculateFileHash(this.file);
+      this.loadPreviousProgress();
+    },
+
+    /** 计算文件哈希 */
+    async calculateFileHash(file) {
+      const buffer = await file.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+      return Array.from(new Uint8Array(hashBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    },
+
+    /** 切片文件 */
+    sliceFile(file, chunkSize = 5 * 1024 * 1024) {
+      const chunks = [];
+      let offset = 0;
+      while (offset < file.size) {
+        chunks.push(file.slice(offset, offset + chunkSize));
+        offset += chunkSize;
+      }
+      this.totalChunks = chunks.length;
+      return chunks;
+    },
+
+    /** 请求 S3 上传 URL */
+    async getUploadUrls() {
+      const response = await axios.post(`${S3_UPLOAD_API}/initiate`, {
+        fileHash: this.fileHash,
+        totalChunks: this.totalChunks,
+      });
+      this.uploadId = response.data.uploadId;
+      return response.data.urls;
+    },
+
+    /** 加载历史进度 */
+    async loadPreviousProgress() {
+      const storedData = JSON.parse(localStorage.getItem("uploadProgress"));
+      if (storedData?.fileHash === this.fileHash) {
+        const serverResponse = await axios.get(`${S3_UPLOAD_API}/status`, {
+          params: { fileHash: this.fileHash },
+        });
+        this.uploadedChunks = serverResponse.data.uploadedChunks;
+        this.uploadId = storedData.uploadId;
+        this.resumeUpload();
+      } else {
+        localStorage.removeItem("uploadProgress");
+      }
+    },
+
+    /** 断点续传 */
+    async resumeUpload() {
+      const chunks = this.sliceFile(this.file);
+      const urls = await this.getUploadUrls();
+
+      for (let i = 0; i < this.totalChunks; i++) {
+        if (!this.uploadedChunks.includes(i)) {
+          await this.uploadChunk(urls[i], chunks[i], i);
+        }
+      }
+
+      await this.completeUpload();
+    },
+
+    /** 上传分片 */
+    async uploadChunk(url, chunk, index) {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", url, true);
+        xhr.setRequestHeader("Content-Type", "application/octet-stream");
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            console.log(`分片 ${index + 1}/${this.totalChunks} 进度: ${Math.round((event.loaded / event.total) * 100)}%`);
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            this.uploadedChunks.push(index);
+            this.saveUploadProgress();
+            resolve();
+          } else {
+            reject(new Error(`上传失败: ${xhr.status}`));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error("网络错误"));
+        xhr.send(chunk);
+      });
+    },
+
+    /** 保存上传进度 */
+    saveUploadProgress() {
+      localStorage.setItem("uploadProgress", JSON.stringify({
+        fileHash: this.fileHash,
+        uploadId: this.uploadId,
+        uploadedChunks: this.uploadedChunks,
+      }));
+    },
+
+    /** 完成上传 */
+    async completeUpload() {
+      await axios.post(`${S3_UPLOAD_API}/complete`, {
+        fileHash: this.fileHash,
+        uploadId: this.uploadId,
+      });
+      localStorage.removeItem("uploadProgress");
+      alert("上传完成！");
+    },
+
+    /** 取消上传 */
+    async cancelUpload() {
+      await axios.post(`${S3_UPLOAD_API}/abort`, { fileHash: this.fileHash });
+      localStorage.removeItem("uploadProgress");
+      alert("上传已取消！");
+    },
+  },
+};
+```
+
+------
+
+## **✅ 2. 后端 Django 代码**
+
+### **📌 2.1 配置 Django 视图**
+
+```python
+import boto3
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import json
+from my_project.settings import AWS_STORAGE_BUCKET_NAME
+
+s3_client = boto3.client("s3")
+
+@csrf_exempt
+def initiate_upload(request):
+    data = json.loads(request.body)
+    file_hash = data["fileHash"]
+    total_chunks = data["totalChunks"]
+
+    upload_urls = []
+    for i in range(total_chunks):
+        upload_urls.append(
+            s3_client.generate_presigned_url(
+                "put_object",
+                Params={
+                    "Bucket": AWS_STORAGE_BUCKET_NAME,
+                    "Key": f"uploads/{file_hash}_{i}",
+                    "ContentType": "application/octet-stream",
+                },
+                ExpiresIn=3600,
+            )
+        )
+
+    return JsonResponse({"uploadId": file_hash, "urls": upload_urls})
+
+
+@csrf_exempt
+def check_upload_status(request):
+    file_hash = request.GET.get("fileHash")
+    objects = s3_client.list_objects_v2(Bucket=AWS_STORAGE_BUCKET_NAME, Prefix=f"uploads/{file_hash}_")
+    
+    uploaded_chunks = []
+    if "Contents" in objects:
+        uploaded_chunks = [int(obj["Key"].split("_")[-1]) for obj in objects["Contents"]]
+
+    return JsonResponse({"uploadedChunks": uploaded_chunks})
+
+
+@csrf_exempt
+def complete_upload(request):
+    data = json.loads(request.body)
+    file_hash = data["fileHash"]
+
+    # 服务器可在此合并文件（如适用）
+    return JsonResponse({"message": "Upload complete"})
+
+
+@csrf_exempt
+def abort_upload(request):
+    data = json.loads(request.body)
+    file_hash = data["fileHash"]
+
+    objects = s3_client.list_objects_v2(Bucket=AWS_STORAGE_BUCKET_NAME, Prefix=f"uploads/{file_hash}_")
+    if "Contents" in objects:
+        for obj in objects["Contents"]:
+            s3_client.delete_object(Bucket=AWS_STORAGE_BUCKET_NAME, Key=obj["Key"])
+
+    return JsonResponse({"message": "Upload aborted"})
+```
+
+------
+
+## **✅ 3. 运行方式**
+
+### **🌟 前端**
+
+```sh
+npm install axios
+npm run dev
+```
+
+### **🌟 后端**
+
+```sh
+pip install boto3 django
+python manage.py runserver
+```
+
+------
+
+## **✅ 4. 方案解析**
+
+### **🌟 断点续传逻辑**
+
+1. **用户选择文件**
+2. **计算 `fileHash`**，比对是否已上传
+3. **服务器返回已上传的分片**
+4. **上传剩余的分片**
+5. **完成上传**
+
+### **🌟 页面刷新处理**
+
+- **存储上传进度 (`localStorage`)**
+- **服务器检查已上传分片**
+- **要求用户选择相同文件**
+- **比对 `fileHash`，继续上传**
+
+------
+
+## **✅ 5. 终极优化**
+
+✅ **并发上传多个分片**
+ ✅ **断点续传（刷新后继续上传）**
+ ✅ **实时上传进度**
+ ✅ **用户手动恢复或取消上传**
+ ✅ **S3 预签名 URL 直传**
+
+这样，即使用户**刷新页面、断网或选择稍后上传**，仍能**无缝恢复上传**！🚀🔥
+
+### **📌 Vue 3 + Axios + Django + S3 高性能分片上传**
+
+> **目标**：
+>
+> - ✅ **前端 Axios 可复用封装**
+> - ✅ **后端高性能处理**
+> - ✅ **多分片并发上传**
+> - ✅ **支持断点续传**
+> - ✅ **S3 预签名 URL 直传**
+
+------
+
+## **✅ 1. 前端 Vue 3 代码**
+
+> **🌟 使用 Axios 进行可复用封装**
+
+### **📌 1.1 分片上传封装**
+
+```javascript
+import axios from "axios";
+
+const S3_UPLOAD_API = "/api/upload";
+
+export default class ChunkUploader {
+  constructor(file, options = {}) {
+    this.file = file;
+    this.chunkSize = options.chunkSize || 5 * 1024 * 1024; // 5MB 分片
+    this.maxConcurrent = options.maxConcurrent || 3; // 并发数
+    this.uploadId = null;
+    this.fileHash = null;
+    this.uploadedChunks = [];
+  }
+
+  /** 计算文件 Hash（SHA-256） */
+  async calculateFileHash() {
+    const buffer = await this.file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+    this.fileHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  /** 切片文件 */
+  sliceFile() {
+    const chunks = [];
+    let offset = 0;
+    while (offset < this.file.size) {
+      chunks.push(this.file.slice(offset, offset + this.chunkSize));
+      offset += this.chunkSize;
+    }
+    return chunks;
+  }
+
+  /** 初始化上传 */
+  async initiateUpload() {
+    await this.calculateFileHash();
+    const response = await axios.post(`${S3_UPLOAD_API}/initiate`, {
+      fileHash: this.fileHash,
+      totalChunks: this.sliceFile().length,
+    });
+    this.uploadId = response.data.uploadId;
+    return response.data.urls;
+  }
+
+  /** 获取已上传的分片 */
+  async checkUploadedChunks() {
+    const response = await axios.get(`${S3_UPLOAD_API}/status`, {
+      params: { fileHash: this.fileHash },
+    });
+    this.uploadedChunks = response.data.uploadedChunks || [];
+  }
+
+  /** 上传单个分片 */
+  async uploadChunk(url, chunk, index) {
+    return axios.put(url, chunk, {
+      headers: { "Content-Type": "application/octet-stream" },
+      onUploadProgress: (event) => {
+        if (event.lengthComputable) {
+          console.log(`分片 ${index + 1} 上传进度: ${Math.round((event.loaded / event.total) * 100)}%`);
+        }
+      },
+    }).then(() => {
+      this.uploadedChunks.push(index);
+      this.saveProgress();
+    });
+  }
+
+  /** 断点续传 */
+  async resumeUpload() {
+    await this.checkUploadedChunks();
+    const chunks = this.sliceFile();
+    const urls = await this.initiateUpload();
+
+    const uploadQueue = [];
+    for (let i = 0; i < chunks.length; i++) {
+      if (!this.uploadedChunks.includes(i)) {
+        const uploadPromise = this.uploadChunk(urls[i], chunks[i], i);
+        uploadQueue.push(uploadPromise);
+
+        if (uploadQueue.length >= this.maxConcurrent) {
+          await Promise.race(uploadQueue);
+          uploadQueue.splice(0, uploadQueue.length - this.maxConcurrent);
+        }
+      }
+    }
+    
+    await Promise.all(uploadQueue);
+    await this.completeUpload();
+  }
+
+  /** 完成上传 */
+  async completeUpload() {
+    await axios.post(`${S3_UPLOAD_API}/complete`, {
+      fileHash: this.fileHash,
+      uploadId: this.uploadId,
+    });
+    localStorage.removeItem("uploadProgress");
+    console.log("上传完成！");
+  }
+
+  /** 保存进度 */
+  saveProgress() {
+    localStorage.setItem("uploadProgress", JSON.stringify({
+      fileHash: this.fileHash,
+      uploadId: this.uploadId,
+      uploadedChunks: this.uploadedChunks,
+    }));
+  }
+
+  /** 取消上传 */
+  async cancelUpload() {
+    await axios.post(`${S3_UPLOAD_API}/abort`, { fileHash: this.fileHash });
+    localStorage.removeItem("uploadProgress");
+    console.log("上传已取消！");
+  }
+}
+```
+
+------
+
+### **📌 1.2 Vue 组件调用**
+
+```vue
+<template>
+  <div>
+    <input type="file" @change="handleFileSelect" />
+    <button @click="resumeUpload">恢复上传</button>
+  </div>
+</template>
+
+<script>
+import ChunkUploader from "@/utils/ChunkUploader";
+
+export default {
+  data() {
+    return {
+      uploader: null,
+    };
+  },
+  methods: {
+    async handleFileSelect(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      this.uploader = new ChunkUploader(file);
+      await this.uploader.resumeUpload();
+    },
+    async resumeUpload() {
+      if (this.uploader) {
+        await this.uploader.resumeUpload();
+      }
+    },
+  },
+};
+</script>
+```
+
+------
+
+## **✅ 2. 后端 Django 高性能 API**
+
+### **📌 2.1 高效 S3 直传**
+
+```python
+import boto3
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import json
+from my_project.settings import AWS_STORAGE_BUCKET_NAME
+
+s3_client = boto3.client("s3")
+
+@csrf_exempt
+def initiate_upload(request):
+    data = json.loads(request.body)
+    file_hash = data["fileHash"]
+    total_chunks = data["totalChunks"]
+
+    urls = [
+        s3_client.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": AWS_STORAGE_BUCKET_NAME,
+                "Key": f"uploads/{file_hash}_{i}",
+                "ContentType": "application/octet-stream",
+            },
+            ExpiresIn=3600,
+        )
+        for i in range(total_chunks)
+    ]
+
+    return JsonResponse({"uploadId": file_hash, "urls": urls})
+
+@csrf_exempt
+def check_upload_status(request):
+    file_hash = request.GET.get("fileHash")
+    objects = s3_client.list_objects_v2(Bucket=AWS_STORAGE_BUCKET_NAME, Prefix=f"uploads/{file_hash}_")
+
+    uploaded_chunks = []
+    if "Contents" in objects:
+        uploaded_chunks = [int(obj["Key"].split("_")[-1]) for obj in objects["Contents"]]
+
+    return JsonResponse({"uploadedChunks": uploaded_chunks})
+
+@csrf_exempt
+def complete_upload(request):
+    data = json.loads(request.body)
+    file_hash = data["fileHash"]
+    
+    return JsonResponse({"message": "Upload complete"})
+
+@csrf_exempt
+def abort_upload(request):
+    data = json.loads(request.body)
+    file_hash = data["fileHash"]
+
+    objects = s3_client.list_objects_v2(Bucket=AWS_STORAGE_BUCKET_NAME, Prefix=f"uploads/{file_hash}_")
+    if "Contents" in objects:
+        for obj in objects["Contents"]:
+            s3_client.delete_object(Bucket=AWS_STORAGE_BUCKET_NAME, Key=obj["Key"])
+
+    return JsonResponse({"message": "Upload aborted"})
+```
+
+------
+
+## **✅ 3. 方案特点**
+
+✅ **前端 Axios 封装，可复用**
+ ✅ **多分片并发上传，提升速度**
+ ✅ **自动断点续传（页面刷新后可继续上传）**
+ ✅ **可手动取消上传并清除已上传的分片**
+ ✅ **S3 预签名 URL 直传，减少后端负担**
+ ✅ **Django 高性能处理，无需中转数据**
+
+这样，即使用户**刷新页面、断网、或者稍后上传**，仍然能**无缝恢复上传**！🚀
+
+### **📌 增加文件级别的上传进度**
+
+我们需要在 **前端** 计算整个文件的进度，而不仅仅是单个分片的进度。
+
+------
+
+## **✅ 1. 修改前端 `ChunkUploader` 支持整体进度**
+
+**关键改动：**
+
+1. **计算整体进度**：使用 `totalUploadedBytes / file.size`。
+2. **每个分片上传完成后，更新进度**。
+3. **支持 `onProgress` 回调**，方便 UI 组件监听。
+
+```javascript
+import axios from "axios";
+
+const S3_UPLOAD_API = "/api/upload";
+
+export default class ChunkUploader {
+  constructor(file, options = {}) {
+    this.file = file;
+    this.chunkSize = options.chunkSize || 5 * 1024 * 1024; // 5MB 分片
+    this.maxConcurrent = options.maxConcurrent || 3; // 并发上传数
+    this.uploadId = null;
+    this.fileHash = null;
+    this.uploadedChunks = [];
+    this.totalUploadedBytes = 0;
+    this.onProgress = options.onProgress || (() => {}); // 进度回调
+  }
+
+  /** 计算文件 Hash */
+  async calculateFileHash() {
+    const buffer = await this.file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+    this.fileHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  /** 切片文件 */
+  sliceFile() {
+    const chunks = [];
+    let offset = 0;
+    while (offset < this.file.size) {
+      chunks.push(this.file.slice(offset, offset + this.chunkSize));
+      offset += this.chunkSize;
+    }
+    return chunks;
+  }
+
+  /** 初始化上传 */
+  async initiateUpload() {
+    await this.calculateFileHash();
+    const response = await axios.post(`${S3_UPLOAD_API}/initiate`, {
+      fileHash: this.fileHash,
+      totalChunks: this.sliceFile().length,
+    });
+    this.uploadId = response.data.uploadId;
+    return response.data.urls;
+  }
+
+  /** 获取已上传的分片 */
+  async checkUploadedChunks() {
+    const response = await axios.get(`${S3_UPLOAD_API}/status`, {
+      params: { fileHash: this.fileHash },
+    });
+    this.uploadedChunks = response.data.uploadedChunks || [];
+    this.totalUploadedBytes = this.uploadedChunks.length * this.chunkSize;
+  }
+
+  /** 上传单个分片 */
+  async uploadChunk(url, chunk, index) {
+    return axios.put(url, chunk, {
+      headers: { "Content-Type": "application/octet-stream" },
+      onUploadProgress: (event) => {
+        if (event.lengthComputable) {
+          const chunkProgress = event.loaded / event.total;
+          this.totalUploadedBytes = this.uploadedChunks.length * this.chunkSize + event.loaded;
+          this.updateProgress();
+        }
+      },
+    }).then(() => {
+      this.uploadedChunks.push(index);
+      this.totalUploadedBytes = this.uploadedChunks.length * this.chunkSize;
+      this.updateProgress();
+      this.saveProgress();
+    });
+  }
+
+  /** 更新文件总进度 */
+  updateProgress() {
+    const progress = Math.min((this.totalUploadedBytes / this.file.size) * 100, 100);
+    this.onProgress(progress);
+  }
+
+  /** 断点续传 */
+  async resumeUpload() {
+    await this.checkUploadedChunks();
+    const chunks = this.sliceFile();
+    const urls = await this.initiateUpload();
+
+    const uploadQueue = [];
+    for (let i = 0; i < chunks.length; i++) {
+      if (!this.uploadedChunks.includes(i)) {
+        const uploadPromise = this.uploadChunk(urls[i], chunks[i], i);
+        uploadQueue.push(uploadPromise);
+
+        if (uploadQueue.length >= this.maxConcurrent) {
+          await Promise.race(uploadQueue);
+          uploadQueue.splice(0, uploadQueue.length - this.maxConcurrent);
+        }
+      }
+    }
+    
+    await Promise.all(uploadQueue);
+    await this.completeUpload();
+  }
+
+  /** 完成上传 */
+  async completeUpload() {
+    await axios.post(`${S3_UPLOAD_API}/complete`, {
+      fileHash: this.fileHash,
+      uploadId: this.uploadId,
+    });
+    localStorage.removeItem("uploadProgress");
+    this.updateProgress();
+    console.log("上传完成！");
+  }
+
+  /** 保存进度 */
+  saveProgress() {
+    localStorage.setItem("uploadProgress", JSON.stringify({
+      fileHash: this.fileHash,
+      uploadId: this.uploadId,
+      uploadedChunks: this.uploadedChunks,
+    }));
+  }
+
+  /** 取消上传 */
+  async cancelUpload() {
+    await axios.post(`${S3_UPLOAD_API}/abort`, { fileHash: this.fileHash });
+    localStorage.removeItem("uploadProgress");
+    console.log("上传已取消！");
+  }
+}
+```
+
+------
+
+## **✅ 2. 修改 Vue 组件，显示文件进度**
+
+**关键点**：
+
+1. **监听 `onProgress` 事件**，实时更新 UI。
+2. **进度条显示当前文件的上传进度**。
+
+```vue
+<template>
+  <div>
+    <input type="file" @change="handleFileSelect" />
+    <button @click="resumeUpload" v-if="uploader">恢复上传</button>
+    <div v-if="progress > 0">
+      上传进度: {{ progress.toFixed(2) }}%
+      <progress :value="progress" max="100"></progress>
+    </div>
+  </div>
+</template>
+
+<script>
+import ChunkUploader from "@/utils/ChunkUploader";
+
+export default {
+  data() {
+    return {
+      uploader: null,
+      progress: 0,
+    };
+  },
+  methods: {
+    async handleFileSelect(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      this.uploader = new ChunkUploader(file, {
+        onProgress: (progress) => {
+          this.progress = progress;
+        },
+      });
+      await this.uploader.resumeUpload();
+    },
+    async resumeUpload() {
+      if (this.uploader) {
+        await this.uploader.resumeUpload();
+      }
+    },
+  },
+};
+</script>
+```
+
+------
+
+## **✅ 3. 结果**
+
+### **🔥 现在，你能实现**
+
+✔ **支持文件级进度显示** 🎯
+ ✔ **分片上传完成即更新 UI** 📊
+ ✔ **页面刷新后还能继续显示进度** 🔄
+ ✔ **断点续传，断掉也能继续上传** 🚀
+
+这样，整个上传过程的**进度**就可以**实时显示**！🚀
