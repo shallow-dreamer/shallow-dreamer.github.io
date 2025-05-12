@@ -301,3 +301,5 @@ Validation error: [
 - **灵活性**：通过 `extra = 'allow'`，允许额外的字段出现在输入数据中。
 
 这样，您可以实现一个通用的超参数验证机制，不仅能够适配不同模型的超参数，还能确保每个超参数的值符合预期的类型和规则。
+
+https://gitee.com/yanglinxin0611/books/blob/master/PyTorch%E5%AE%98%E6%96%B9%E6%95%99%E7%A8%8B%E4%B8%AD%E6%96%87%E7%89%88.pdf
