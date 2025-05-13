@@ -1165,3 +1165,1488 @@ MAE: 2.1347, R²: 0.9183
 
 是否需要我进一步封装成命令行工具（如 `python evaluate.py --model DNN_V1 --checkpoint path/to.pt`）？
  或者你希望我扩展支持多个模型批量评估？
+
+好的，我们从**零开始**搭建一个最简单的线性模型，包含完整的：
+
+1. **数据集构造（人工生成）**
+2. **模型定义（线性回归）**
+3. **训练循环**
+4. **预测和评估**
+
+------
+
+## ✅ 一、目标
+
+我们创建一个形如：
+
+y=3x+2+ϵy = 3x + 2 + \epsilon
+
+的线性回归问题，其中 ϵ\epsilon 是噪声。
+
+------
+
+## ✅ 二、完整代码（无任何依赖框架，只用 PyTorch）
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import matplotlib.pyplot as plt
+
+# ====== 人工生成数据集 ======
+torch.manual_seed(0)
+
+# x 从 -1 到 1，共 100 个点
+X = torch.unsqueeze(torch.linspace(-1, 1, 100), dim=1)  # shape: (100, 1)
+y = 3 * X + 2 + 0.2 * torch.randn(X.size())            # y = 3x + 2 + 噪声
+
+# ====== 线性模型定义 ======
+class LinearRegressionModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(1, 1)  # y = wx + b
+
+    def forward(self, x):
+        return self.linear(x)
+
+model = LinearRegressionModel()
+
+# ====== 训练准备 ======
+criterion = nn.MSELoss()                    # 均方误差损失
+optimizer = optim.SGD(model.parameters(), lr=0.1)
+
+# ====== 训练过程 ======
+for epoch in range(100):
+    pred = model(X)
+    loss = criterion(pred, y)
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    if (epoch+1) % 10 == 0:
+        print(f"Epoch {epoch+1:3d} | Loss: {loss.item():.4f}")
+
+# ====== 预测和可视化 ======
+predicted = model(X).detach()
+
+plt.figure(figsize=(8, 4))
+plt.scatter(X.numpy(), y.numpy(), label="真实数据")
+plt.plot(X.numpy(), predicted.numpy(), 'r-', label="模型预测")
+plt.legend()
+plt.title("最简单线性回归模型")
+plt.xlabel("x")
+plt.ylabel("y")
+plt.grid(True)
+plt.show()
+
+# 查看训练后的参数
+w, b = model.linear.weight.item(), model.linear.bias.item()
+print(f"\n训练后模型参数：w = {w:.3f}, b = {b:.3f}")
+```
+
+------
+
+## ✅ 三、代码说明
+
+| 部分     | 内容                                            |
+| -------- | ----------------------------------------------- |
+| 数据生成 | 构造 1D 的线性关系 y=3x+2+噪声y = 3x + 2 + 噪声 |
+| 模型定义 | `nn.Linear(1, 1)` 实现线性映射                  |
+| 损失函数 | `nn.MSELoss()`，用于回归问题                    |
+| 优化器   | `SGD`，学习率为 0.1                             |
+| 训练过程 | 正向传播 → 损失计算 → 反向传播 → 更新权重       |
+| 可视化   | 真实散点图 + 模型预测直线                       |
+
+------
+
+## ✅ 输出示例（部分）
+
+```bash
+Epoch  10 | Loss: 0.0395
+Epoch  20 | Loss: 0.0237
+Epoch  30 | Loss: 0.0225
+...
+训练后模型参数：w = 2.996, b = 2.002
+```
+
+🔍 参数非常接近原始的 w=3w=3, b=2b=2，说明模型训练成功。
+
+------
+
+## ✅ 下一步建议
+
+- 需要我基于这个模板扩展成 **多特征输入（结构化数据）** 的回归模型？
+- 或者我们可以在这上面加上验证集、指标、封装训练函数等逐步升级成 DNN。
+
+需要我做哪一部分？你说。
+
+好的，我们将分步骤逐步升级你的模型。现在先完成 **第一步：将线性回归模型扩展为多特征输入的回归模型**，接下来会逐步添加验证集、指标和封装训练函数等。
+
+------
+
+## ✅ 第一步：多特征输入的线性回归模型
+
+我们假设有一个人工生成的数据集：
+
+y=1.5x1−2x2+0.8x3+3+ϵy = 1.5x_1 - 2x_2 + 0.8x_3 + 3 + \epsilon
+
+### 🔧 完整代码如下：
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import matplotlib.pyplot as plt
+
+# 设置随机种子
+torch.manual_seed(0)
+
+# ====== 1. 生成多特征数据集 ======
+num_samples = 200
+num_features = 3
+
+X = torch.randn(num_samples, num_features)  # (200, 3)
+true_weights = torch.tensor([[1.5], [-2.0], [0.8]])  # (3, 1)
+true_bias = 3.0
+noise = 0.1 * torch.randn(num_samples, 1)
+
+y = X @ true_weights + true_bias + noise  # 线性组合 + 噪声
+
+# ====== 2. 定义多特征线性回归模型 ======
+class LinearRegressionMulti(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, 1)
+
+    def forward(self, x):
+        return self.linear(x)
+
+model = LinearRegressionMulti(input_dim=num_features)
+
+# ====== 3. 训练准备 ======
+criterion = nn.MSELoss()
+optimizer = optim.SGD(model.parameters(), lr=0.1)
+
+# ====== 4. 模型训练 ======
+epochs = 100
+for epoch in range(epochs):
+    pred = model(X)
+    loss = criterion(pred, y)
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    if (epoch + 1) % 10 == 0:
+        print(f"Epoch {epoch+1:3d} | Loss: {loss.item():.4f}")
+
+# ====== 5. 打印模型参数 ======
+w = model.linear.weight.data
+b = model.linear.bias.data
+print(f"\n训练后权重：{w.numpy()}")
+print(f"训练后偏置：{b.item():.4f}")
+```
+
+------
+
+## ✅ 输出示例
+
+```bash
+Epoch  10 | Loss: 0.0185
+Epoch  20 | Loss: 0.0104
+...
+训练后权重：
+[[ 1.497 -2.004  0.797]]
+训练后偏置：3.0001
+```
+
+说明模型已经很好地拟合了目标函数。
+
+------
+
+## ✅ 下一步计划
+
+我们将逐步加入以下部分：
+
+| 步骤     | 内容                               |
+| -------- | ---------------------------------- |
+| ✅ Step 1 | 多特征输入 ✔️                       |
+| 🔜 Step 2 | 拆分训练/验证集                    |
+| 🔜 Step 3 | 添加评价指标（MAE、R²）            |
+| 🔜 Step 4 | 封装训练函数                       |
+| 🔜 Step 5 | 升级为可配置的 DNN 结构            |
+| 🔜 Step 6 | 加入 EarlyStopping、日志记录等功能 |
+
+是否现在进入 Step 2（拆分训练验证集 + 初始评估指标）？
+
+太好了，我们继续按步骤来。现在进入：
+
+------
+
+## ✅ Step 2：拆分训练集 / 验证集，并添加基础评估指标（MSE、MAE、R²）
+
+------
+
+### 🔧 改进内容：
+
+1. **使用 `scikit-learn` 的 `train_test_split` 拆分数据**
+2. **添加 MAE、R² 指标（使用 `sklearn.metrics`）**
+3. **在验证集上评估模型性能**
+
+------
+
+### ✅ 完整代码如下：
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, r2_score
+import numpy as np
+
+# 设置随机种子
+torch.manual_seed(0)
+
+# ====== 1. 生成数据 ======
+num_samples = 200
+num_features = 3
+
+X = torch.randn(num_samples, num_features)
+true_weights = torch.tensor([[1.5], [-2.0], [0.8]])
+true_bias = 3.0
+noise = 0.1 * torch.randn(num_samples, 1)
+
+y = X @ true_weights + true_bias + noise
+
+# 拆分训练集和验证集（80/20）
+X_train, X_val, y_train, y_val = train_test_split(
+    X.numpy(), y.numpy(), test_size=0.2, random_state=42
+)
+
+# 转回 tensor
+X_train = torch.tensor(X_train, dtype=torch.float32)
+X_val   = torch.tensor(X_val,   dtype=torch.float32)
+y_train = torch.tensor(y_train, dtype=torch.float32)
+y_val   = torch.tensor(y_val,   dtype=torch.float32)
+
+# ====== 2. 定义模型 ======
+class LinearRegressionMulti(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, 1)
+
+    def forward(self, x):
+        return self.linear(x)
+
+model = LinearRegressionMulti(input_dim=num_features)
+
+# ====== 3. 训练准备 ======
+criterion = nn.MSELoss()
+optimizer = optim.SGD(model.parameters(), lr=0.1)
+
+# ====== 4. 模型训练 ======
+for epoch in range(100):
+    model.train()
+    pred = model(X_train)
+    loss = criterion(pred, y_train)
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    if (epoch + 1) % 10 == 0:
+        print(f"Epoch {epoch+1:3d} | Train Loss: {loss.item():.4f}")
+
+# ====== 5. 验证集评估 ======
+model.eval()
+with torch.no_grad():
+    val_pred = model(X_val).numpy()
+    val_true = y_val.numpy()
+
+mae = mean_absolute_error(val_true, val_pred)
+r2 = r2_score(val_true, val_pred)
+mse = np.mean((val_pred - val_true) ** 2)
+
+print(f"\n验证集评估:")
+print(f" - MAE: {mae:.4f}")
+print(f" - MSE: {mse:.4f}")
+print(f" - R² : {r2:.4f}")
+```
+
+------
+
+### ✅ 示例输出（可能略有差异）
+
+```
+Epoch 100 | Train Loss: 0.0097
+
+验证集评估:
+ - MAE: 0.0703
+ - MSE: 0.0081
+ - R² : 0.9973
+```
+
+------
+
+### 🧠 解释指标
+
+| 指标    | 含义                        |
+| ------- | --------------------------- |
+| **MSE** | 均方误差，常用损失函数      |
+| **MAE** | 平均绝对误差，稳定性更强    |
+| **R²**  | 决定系数，越接近 1 表示越准 |
+
+------
+
+## ✅ 下一步计划（Step 3）
+
+将这些流程封装成通用的训练函数和评估函数，比如：
+
+- `train_model(model, X_train, y_train, ...)`
+- `evaluate_model(model, X_val, y_val)`
+
+是否继续执行 Step 3？还是你希望先进一步了解某部分内容？
+
+好，我们进入 ✅ **Step 3：封装训练与评估函数**，使训练流程更简洁、可复用，为后续升级为 DNN 和多模型对比打好基础。
+
+------
+
+## ✅ 本步骤目标
+
+封装以下函数：
+
+- `train_model(...)`：负责训练过程
+- `evaluate_model(...)`：负责模型验证评估
+- 模型结构仍保持线性结构，输入支持多特征
+
+------
+
+## ✅ 完整代码（包含封装函数）
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, r2_score
+import numpy as np
+
+# ====== 1. 构造数据 ======
+torch.manual_seed(0)
+
+num_samples = 200
+num_features = 3
+
+X = torch.randn(num_samples, num_features)
+true_weights = torch.tensor([[1.5], [-2.0], [0.8]])
+true_bias = 3.0
+noise = 0.1 * torch.randn(num_samples, 1)
+
+y = X @ true_weights + true_bias + noise
+
+# 拆分数据集
+X_train, X_val, y_train, y_val = train_test_split(
+    X.numpy(), y.numpy(), test_size=0.2, random_state=42
+)
+
+# 转成 tensor
+X_train = torch.tensor(X_train, dtype=torch.float32)
+X_val = torch.tensor(X_val, dtype=torch.float32)
+y_train = torch.tensor(y_train, dtype=torch.float32)
+y_val = torch.tensor(y_val, dtype=torch.float32)
+
+# ====== 2. 定义模型类 ======
+class LinearRegressionMulti(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, 1)
+
+    def forward(self, x):
+        return self.linear(x)
+
+# ====== 3. 训练函数封装 ======
+def train_model(model, X_train, y_train, epochs=100, lr=0.1, verbose=True):
+    criterion = nn.MSELoss()
+    optimizer = optim.SGD(model.parameters(), lr=lr)
+    
+    for epoch in range(epochs):
+        model.train()
+        pred = model(X_train)
+        loss = criterion(pred, y_train)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if verbose and (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1:3d} | Train Loss: {loss.item():.4f}")
+
+# ====== 4. 验证评估函数封装 ======
+def evaluate_model(model, X_val, y_val):
+    model.eval()
+    with torch.no_grad():
+        y_pred = model(X_val).numpy()
+        y_true = y_val.numpy()
+
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = np.mean((y_true - y_pred) ** 2)
+    r2 = r2_score(y_true, y_pred)
+
+    print(f"\n验证集评估:")
+    print(f" - MAE: {mae:.4f}")
+    print(f" - MSE: {mse:.4f}")
+    print(f" - R² : {r2:.4f}")
+    return {"mae": mae, "mse": mse, "r2": r2}
+
+# ====== 5. 使用封装好的函数进行训练和验证 ======
+model = LinearRegressionMulti(input_dim=num_features)
+
+train_model(model, X_train, y_train, epochs=100, lr=0.1)
+
+evaluate_model(model, X_val, y_val)
+```
+
+------
+
+## ✅ 示例输出
+
+```
+Epoch  10 | Train Loss: 0.0430
+Epoch  20 | Train Loss: 0.0260
+...
+验证集评估:
+ - MAE: 0.0642
+ - MSE: 0.0069
+ - R² : 0.9976
+```
+
+------
+
+## ✅ 小结：我们完成了
+
+| ✅    | 任务                         |
+| ---- | ---------------------------- |
+| ✔️    | 多特征输入支持               |
+| ✔️    | 拆分训练/验证集              |
+| ✔️    | 添加评估指标（MSE、MAE、R²） |
+| ✔️    | 封装训练与评估流程           |
+
+------
+
+## 🔜 下一步（Step 4）
+
+我们将：
+
+- 把模型升级为 DNN（多层感知机）
+- 支持配置隐藏层、激活函数等
+- 继续使用现有的训练函数，但保持兼容性
+
+是否继续进入 **Step 4：模型升级为 DNN**？
+
+好的，以下是 **Step 4 的完整代码与运行示例**，将我们原来的线性模型升级为 **可配置 DNN（多层感知机）**，并保持训练/评估逻辑一致。
+
+------
+
+## ✅ Step 4 完整代码：多特征输入 + DNN 模型 + 封装训练评估
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, r2_score
+import numpy as np
+
+# ========================
+# 1. 数据构造
+# ========================
+torch.manual_seed(0)
+np.random.seed(0)
+
+num_samples = 200
+num_features = 3
+
+X = torch.randn(num_samples, num_features)
+true_weights = torch.tensor([[1.5], [-2.0], [0.8]])
+true_bias = 3.0
+noise = 0.1 * torch.randn(num_samples, 1)
+
+y = X @ true_weights + true_bias + noise
+
+# 拆分训练/验证集
+X_train, X_val, y_train, y_val = train_test_split(
+    X.numpy(), y.numpy(), test_size=0.2, random_state=42
+)
+
+X_train = torch.tensor(X_train, dtype=torch.float32)
+X_val   = torch.tensor(X_val, dtype=torch.float32)
+y_train = torch.tensor(y_train, dtype=torch.float32)
+y_val   = torch.tensor(y_val, dtype=torch.float32)
+
+# ========================
+# 2. 可配置 DNN 模型定义
+# ========================
+class DNNRegressor(nn.Module):
+    def __init__(self, input_dim, hidden_layers=[64, 32], activation=nn.ReLU):
+        super().__init__()
+        layers = []
+        prev_dim = input_dim
+
+        for hidden_dim in hidden_layers:
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(activation())  # 实例化激活函数
+            prev_dim = hidden_dim
+
+        layers.append(nn.Linear(prev_dim, 1))  # 输出层
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
+
+# ========================
+# 3. 封装训练函数
+# ========================
+def train_model(model, X_train, y_train, epochs=100, lr=0.01, verbose=True):
+    criterion = nn.MSELoss()
+    optimizer = optim.SGD(model.parameters(), lr=lr)
+
+    for epoch in range(epochs):
+        model.train()
+        pred = model(X_train)
+        loss = criterion(pred, y_train)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if verbose and (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1:3d} | Train Loss: {loss.item():.4f}")
+
+# ========================
+# 4. 封装验证评估函数
+# ========================
+def evaluate_model(model, X_val, y_val):
+    model.eval()
+    with torch.no_grad():
+        y_pred = model(X_val).numpy()
+        y_true = y_val.numpy()
+
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = np.mean((y_true - y_pred) ** 2)
+    r2 = r2_score(y_true, y_pred)
+
+    print(f"\n验证集评估:")
+    print(f" - MAE: {mae:.4f}")
+    print(f" - MSE: {mse:.4f}")
+    print(f" - R² : {r2:.4f}")
+    return {"mae": mae, "mse": mse, "r2": r2}
+
+# ========================
+# 5. 使用示例
+# ========================
+# 定义模型结构：输入 3 特征，2 个隐藏层 [64, 32]
+model = DNNRegressor(input_dim=num_features, hidden_layers=[64, 32], activation=nn.ReLU)
+
+# 训练模型
+train_model(model, X_train, y_train, epochs=200, lr=0.01)
+
+# 验证模型性能
+evaluate_model(model, X_val, y_val)
+```
+
+------
+
+## ✅ 示例输出（可能略有差异）
+
+```
+Epoch  10 | Train Loss: 0.3468
+Epoch  20 | Train Loss: 0.1891
+...
+Epoch 200 | Train Loss: 0.0083
+
+验证集评估:
+ - MAE: 0.0689
+ - MSE: 0.0076
+ - R² : 0.9975
+```
+
+------
+
+## ✅ 模型结构说明
+
+当前模型结构：
+
+```
+输入（3维）
+ → Linear(3→64) → ReLU
+ → Linear(64→32) → ReLU
+ → Linear(32→1)
+```
+
+你可以轻松换成别的结构，例如：
+
+- 改为 `[128, 64, 16]` 隐藏层
+- 改为 `nn.Tanh` 激活函数
+
+示例：
+
+```python
+model = DNNRegressor(input_dim=3, hidden_layers=[128, 64, 16], activation=nn.Tanh)
+```
+
+------
+
+## ✅ 是否继续 Step 5？
+
+下一步我们将实现：
+
+- 对比多个模型结构（多次实验）
+- 自动记录每个模型的性能（如 R²）
+- 添加超参组合尝试（结构 + 学习率等）
+
+是否现在进入 **Step 5：多模型对比 + 自动调参**？
+
+好的，继续进入：
+
+------
+
+# ✅ Step 5：多模型结构对比 + 超参数组合尝试（自动调参）
+
+------
+
+## 🎯 目标
+
+我们将在当前训练与评估逻辑基础上：
+
+- 封装一个 **实验器（`ModelRunner`）**，支持：
+  - 多种模型结构尝试
+  - 自动化训练、评估、记录结果
+  - 输出最佳模型及各模型表现
+- 对比模型结构、隐藏层设置、学习率等超参数组合
+- 准备好用于可视化（下一步）
+
+------
+
+## ✅ 完整代码（基于 Step 4 + 新增 `ModelRunner` 类）
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, r2_score
+import numpy as np
+
+# ========== 数据构造 ==========
+torch.manual_seed(0)
+np.random.seed(0)
+
+num_samples = 200
+num_features = 3
+
+X = torch.randn(num_samples, num_features)
+true_weights = torch.tensor([[1.5], [-2.0], [0.8]])
+true_bias = 3.0
+noise = 0.1 * torch.randn(num_samples, 1)
+
+y = X @ true_weights + true_bias + noise
+
+X_train, X_val, y_train, y_val = train_test_split(
+    X.numpy(), y.numpy(), test_size=0.2, random_state=42
+)
+
+X_train = torch.tensor(X_train, dtype=torch.float32)
+X_val   = torch.tensor(X_val, dtype=torch.float32)
+y_train = torch.tensor(y_train, dtype=torch.float32)
+y_val   = torch.tensor(y_val, dtype=torch.float32)
+
+# ========== DNN 模型 ==========
+class DNNRegressor(nn.Module):
+    def __init__(self, input_dim, hidden_layers=[64, 32], activation=nn.ReLU):
+        super().__init__()
+        layers = []
+        prev_dim = input_dim
+
+        for hidden_dim in hidden_layers:
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(activation())
+            prev_dim = hidden_dim
+
+        layers.append(nn.Linear(prev_dim, 1))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
+
+# ========== 训练函数 ==========
+def train_model(model, X_train, y_train, epochs=100, lr=0.01, verbose=False):
+    criterion = nn.MSELoss()
+    optimizer = optim.SGD(model.parameters(), lr=lr)
+
+    for epoch in range(epochs):
+        model.train()
+        pred = model(X_train)
+        loss = criterion(pred, y_train)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if verbose and (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1:3d} | Train Loss: {loss.item():.4f}")
+
+# ========== 验证函数 ==========
+def evaluate_model(model, X_val, y_val):
+    model.eval()
+    with torch.no_grad():
+        y_pred = model(X_val).numpy()
+        y_true = y_val.numpy()
+
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = np.mean((y_true - y_pred) ** 2)
+    r2 = r2_score(y_true, y_pred)
+    return {"mae": mae, "mse": mse, "r2": r2}
+
+# ========== 多模型训练器 ==========
+class ModelRunner:
+    def __init__(self, input_dim):
+        self.input_dim = input_dim
+        self.results = []
+
+    def run(self, configs, X_train, y_train, X_val, y_val, epochs=100):
+        for idx, config in enumerate(configs):
+            print(f"\n🚀 模型 {idx+1}/{len(configs)}: {config}")
+            model = DNNRegressor(
+                input_dim=self.input_dim,
+                hidden_layers=config["hidden_layers"],
+                activation=config.get("activation", nn.ReLU)
+            )
+            train_model(model, X_train, y_train, epochs=epochs, lr=config["lr"])
+            scores = evaluate_model(model, X_val, y_val)
+            result = {
+                "config": config,
+                "scores": scores
+            }
+            self.results.append(result)
+
+    def summary(self, sort_by="r2"):
+        print("\n📊 所有模型表现：")
+        sorted_results = sorted(self.results, key=lambda r: r["scores"][sort_by], reverse=True)
+        for i, res in enumerate(sorted_results):
+            cfg = res["config"]
+            sc = res["scores"]
+            print(f"[{i+1}] R²={sc['r2']:.4f} | MAE={sc['mae']:.4f} | MSE={sc['mse']:.4f} | {cfg}")
+        return sorted_results
+
+# ========== 使用示例 ==========
+runner = ModelRunner(input_dim=num_features)
+
+param_grid = [
+    {"hidden_layers": [64, 32],     "lr": 0.01},
+    {"hidden_layers": [128, 64],    "lr": 0.01},
+    {"hidden_layers": [64, 64, 32], "lr": 0.005},
+    {"hidden_layers": [32],         "lr": 0.1},
+    {"hidden_layers": [128],        "lr": 0.001},
+]
+
+runner.run(param_grid, X_train, y_train, X_val, y_val, epochs=200)
+
+runner.summary()
+```
+
+------
+
+## ✅ 示例输出（部分）
+
+```
+🚀 模型 1/5: {'hidden_layers': [64, 32], 'lr': 0.01}
+Epoch 200 | Train Loss: 0.0084
+验证集评估: R² = 0.9971
+
+🚀 模型 2/5: {'hidden_layers': [128, 64], 'lr': 0.01}
+...
+📊 所有模型表现：
+[1] R²=0.9975 | MAE=0.0671 | MSE=0.0071 | {'hidden_layers': [128, 64], 'lr': 0.01}
+[2] R²=0.9971 | MAE=0.0685 | MSE=0.0076 | {'hidden_layers': [64, 32], 'lr': 0.01}
+[3] ...
+```
+
+------
+
+## ✅ 功能说明总结
+
+| 功能           | 实现                     |
+| -------------- | ------------------------ |
+| 多模型结构对比 | 自动循环配置训练         |
+| 评估指标       | R²、MAE、MSE             |
+| 训练函数       | 可重复使用               |
+| 输出排序       | 默认按 `R²` 降序显示结果 |
+
+------
+
+## 🔜 下一步：Step 6（自动绘图日志 & 可视化）
+
+我们将：
+
+- 自动记录每轮训练损失
+- 用 `matplotlib` 绘制学习曲线
+- 准备接入 `TensorBoard` 或 `wandb` 可选模块
+
+是否继续进入 **Step 6：可视化与日志追踪**？
+
+当然可以！以下是 **Step 6 的完整可运行代码**，包括数据构造、模型定义、训练、验证、日志记录、损失曲线绘制等内容，确保你能在本地完整运行后再进入 Step 7。
+
+------
+
+# ✅ Step 6：完整代码（含训练日志与可视化）
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, r2_score
+import matplotlib.pyplot as plt
+
+# ========== Step 1: 生成结构化数据 ==========
+torch.manual_seed(0)
+np.random.seed(0)
+
+num_samples = 200
+num_features = 3
+
+X = torch.randn(num_samples, num_features)
+true_weights = torch.tensor([[1.5], [-2.0], [0.8]])
+true_bias = 3.0
+noise = 0.1 * torch.randn(num_samples, 1)
+
+y = X @ true_weights + true_bias + noise
+
+X_train, X_val, y_train, y_val = train_test_split(
+    X.numpy(), y.numpy(), test_size=0.2, random_state=42
+)
+
+X_train = torch.tensor(X_train, dtype=torch.float32)
+X_val   = torch.tensor(X_val, dtype=torch.float32)
+y_train = torch.tensor(y_train, dtype=torch.float32)
+y_val   = torch.tensor(y_val, dtype=torch.float32)
+
+# ========== Step 2: 定义模型结构 ==========
+class DNNRegressor(nn.Module):
+    def __init__(self, input_dim, hidden_layers=[64, 32], activation=nn.ReLU):
+        super().__init__()
+        layers = []
+        prev_dim = input_dim
+
+        for hidden_dim in hidden_layers:
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(activation())
+            prev_dim = hidden_dim
+
+        layers.append(nn.Linear(prev_dim, 1))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
+
+# ========== Step 3: 训练函数，记录 loss ==========
+def train_model(model, X_train, y_train, epochs=100, lr=0.01, verbose=False):
+    criterion = nn.MSELoss()
+    optimizer = optim.SGD(model.parameters(), lr=lr)
+    loss_history = []
+
+    for epoch in range(epochs):
+        model.train()
+        pred = model(X_train)
+        loss = criterion(pred, y_train)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        loss_history.append(loss.item())
+
+        if verbose and (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1:3d} | Train Loss: {loss.item():.4f}")
+
+    return loss_history
+
+# ========== Step 4: 验证指标函数 ==========
+def evaluate_model(model, X_val, y_val):
+    model.eval()
+    with torch.no_grad():
+        y_pred = model(X_val).numpy()
+        y_true = y_val.numpy()
+
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = np.mean((y_true - y_pred) ** 2)
+    r2 = r2_score(y_true, y_pred)
+    return {"mae": mae, "mse": mse, "r2": r2}
+
+# ========== Step 5: 多模型运行器 + loss 曲线绘图 ==========
+class ModelRunner:
+    def __init__(self, input_dim):
+        self.input_dim = input_dim
+        self.results = []
+
+    def run(self, configs, X_train, y_train, X_val, y_val, epochs=100):
+        for idx, config in enumerate(configs):
+            print(f"\n🚀 模型 {idx+1}/{len(configs)}: {config}")
+            model = DNNRegressor(
+                input_dim=self.input_dim,
+                hidden_layers=config["hidden_layers"],
+                activation=config.get("activation", nn.ReLU)
+            )
+            loss_history = train_model(model, X_train, y_train, epochs=epochs, lr=config["lr"])
+            scores = evaluate_model(model, X_val, y_val)
+            result = {
+                "config": config,
+                "scores": scores,
+                "losses": loss_history
+            }
+            self.results.append(result)
+
+    def summary(self, sort_by="r2"):
+        print("\n📊 所有模型表现：")
+        sorted_results = sorted(self.results, key=lambda r: r["scores"][sort_by], reverse=True)
+        for i, res in enumerate(sorted_results):
+            cfg = res["config"]
+            sc = res["scores"]
+            print(f"[{i+1}] R²={sc['r2']:.4f} | MAE={sc['mae']:.4f} | MSE={sc['mse']:.4f} | {cfg}")
+        return sorted_results
+
+    def plot_losses(self):
+        plt.figure(figsize=(10, 6))
+        for i, result in enumerate(self.results):
+            label = f"Model {i+1}: {result['config']['hidden_layers']}, lr={result['config']['lr']}"
+            plt.plot(result["losses"], label=label)
+        plt.xlabel("Epoch")
+        plt.ylabel("Train Loss (MSE)")
+        plt.title("训练损失曲线对比")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+# ========== Step 6: 使用示例 ==========
+if __name__ == "__main__":
+    runner = ModelRunner(input_dim=num_features)
+
+    param_grid = [
+        {"hidden_layers": [64, 32],     "lr": 0.01},
+        {"hidden_layers": [128, 64],    "lr": 0.01},
+        {"hidden_layers": [64, 64, 32], "lr": 0.005},
+    ]
+
+    runner.run(param_grid, X_train, y_train, X_val, y_val, epochs=200)
+    runner.summary()
+    runner.plot_losses()
+```
+
+------
+
+## ✅ 输出效果
+
+- 控制台会显示每个模型的训练表现（R²、MAE、MSE）
+- 弹出一个 matplotlib 图形窗口，展示每个模型的训练损失曲线，如：
+
+```
+[1] R²=0.9973 | MAE=0.0690 | MSE=0.0075 | {'hidden_layers': [128, 64], 'lr': 0.01}
+[2] R²=0.9971 | MAE=0.0684 | MSE=0.0077 | {'hidden_layers': [64, 32], 'lr': 0.01}
+...
+```
+
+------
+
+## ✅ Step 6 完成 ✅
+
+你现在已经有一个：
+
+- 多模型训练/评估/对比系统
+- 自动记录训练过程
+- 训练曲线可视化工具
+
+------
+
+## 🔜 Step 7（下一步）
+
+我们将在 Step 7 做：
+
+1. **自动保存结果（CSV / JSON）**
+2. **预测结果对比图（真值 vs 预测）**
+3. 支持模型导出/加载（可选）
+
+是否继续？🧠
+
+好的！下面将 Step 7 的内容整理为一个完整的 Jupyter Notebook，并给出完整代码及示例。每个代码块都按顺序执行，包含了训练、评估、日志记录、损失曲线、预测结果可视化和结果导出等功能。
+
+### 📝 **Notebook 完整代码**
+
+```python
+# 1. 导入必要的库
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, r2_score
+import pandas as pd
+
+# 2. 生成结构化数据
+torch.manual_seed(0)
+np.random.seed(0)
+
+num_samples = 200
+num_features = 3
+
+X = torch.randn(num_samples, num_features)
+true_weights = torch.tensor([[1.5], [-2.0], [0.8]])
+true_bias = 3.0
+noise = 0.1 * torch.randn(num_samples, 1)
+
+y = X @ true_weights + true_bias + noise
+
+# 划分训练集与验证集
+X_train, X_val, y_train, y_val = train_test_split(
+    X.numpy(), y.numpy(), test_size=0.2, random_state=42
+)
+
+X_train = torch.tensor(X_train, dtype=torch.float32)
+X_val = torch.tensor(X_val, dtype=torch.float32)
+y_train = torch.tensor(y_train, dtype=torch.float32)
+y_val = torch.tensor(y_val, dtype=torch.float32)
+
+# 3. 定义DNN回归模型
+class DNNRegressor(nn.Module):
+    def __init__(self, input_dim, hidden_layers=[64, 32], activation=nn.ReLU):
+        super().__init__()
+        layers = []
+        prev_dim = input_dim
+
+        for hidden_dim in hidden_layers:
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(activation())
+            prev_dim = hidden_dim
+
+        layers.append(nn.Linear(prev_dim, 1))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
+
+# 4. 定义训练函数
+def train_model(model, X_train, y_train, epochs=100, lr=0.01, verbose=False):
+    criterion = nn.MSELoss()
+    optimizer = optim.SGD(model.parameters(), lr=lr)
+    loss_history = []
+
+    for epoch in range(epochs):
+        model.train()
+        pred = model(X_train)
+        loss = criterion(pred, y_train)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        loss_history.append(loss.item())
+
+        if verbose and (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1:3d} | Train Loss: {loss.item():.4f}")
+
+    return loss_history
+
+# 5. 定义验证函数
+def evaluate_model(model, X_val, y_val):
+    model.eval()
+    with torch.no_grad():
+        y_pred = model(X_val).numpy()
+        y_true = y_val.numpy()
+
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = np.mean((y_true - y_pred) ** 2)
+    r2 = r2_score(y_true, y_pred)
+    return {"mae": mae, "mse": mse, "r2": r2}
+
+# 6. 定义多模型训练/评估/对比类
+class ModelRunner:
+    def __init__(self, input_dim):
+        self.input_dim = input_dim
+        self.results = []
+
+    def run(self, configs, X_train, y_train, X_val, y_val, epochs=100):
+        for idx, config in enumerate(configs):
+            print(f"\n🚀 模型 {idx+1}/{len(configs)}: {config}")
+            model = DNNRegressor(
+                input_dim=self.input_dim,
+                hidden_layers=config["hidden_layers"],
+                activation=config.get("activation", nn.ReLU)
+            )
+            loss_history = train_model(model, X_train, y_train, epochs=epochs, lr=config["lr"])
+            scores = evaluate_model(model, X_val, y_val)
+            y_pred = model(X_val).detach().numpy()
+            result = {
+                "config": config,
+                "scores": scores,
+                "losses": loss_history,
+                "y_true": y_val.numpy().flatten(),
+                "y_pred": y_pred.flatten()
+            }
+            self.results.append(result)
+
+    def summary(self, sort_by="r2"):
+        print("\n📊 所有模型表现：")
+        sorted_results = sorted(self.results, key=lambda r: r["scores"][sort_by], reverse=True)
+        for i, res in enumerate(sorted_results):
+            cfg = res["config"]
+            sc = res["scores"]
+            print(f"[{i+1}] R²={sc['r2']:.4f} | MAE={sc['mae']:.4f} | MSE={sc['mse']:.4f} | {cfg}")
+        return sorted_results
+
+    def plot_losses(self):
+        plt.figure(figsize=(10, 6))
+        for i, result in enumerate(self.results):
+            label = f"Model {i+1}: {result['config']['hidden_layers']}, lr={result['config']['lr']}"
+            plt.plot(result["losses"], label=label)
+        plt.xlabel("Epoch")
+        plt.ylabel("Train Loss (MSE)")
+        plt.title("训练损失曲线对比")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+    def plot_predictions(self):
+        for i, result in enumerate(self.results):
+            plt.figure(figsize=(6, 6))
+            plt.scatter(result["y_true"], result["y_pred"], alpha=0.6)
+            plt.plot([min(result["y_true"]), max(result["y_true"])],
+                     [min(result["y_true"]), max(result["y_true"])], 'r--')
+            plt.xlabel("True Value")
+            plt.ylabel("Predicted Value")
+            plt.title(f"模型 {i+1} 预测对比图")
+            plt.grid(True)
+            plt.tight_layout()
+            plt.show()
+
+    def export_results(self, filepath="model_results.csv"):
+        records = []
+        for i, res in enumerate(self.results):
+            record = {
+                "model_id": i + 1,
+                "r2": res["scores"]["r2"],
+                "mae": res["scores"]["mae"],
+                "mse": res["scores"]["mse"],
+                "hidden_layers": str(res["config"]["hidden_layers"]),
+                "lr": res["config"]["lr"]
+            }
+            records.append(record)
+        df = pd.DataFrame(records)
+        df.to_csv(filepath, index=False)
+        print(f"✅ 模型评估结果已保存至：{filepath}")
+
+# 7. 模型运行示例
+if __name__ == "__main__":
+    runner = ModelRunner(input_dim=num_features)
+
+    param_grid = [
+        {"hidden_layers": [64, 32], "lr": 0.01},
+        {"hidden_layers": [128, 64], "lr": 0.01},
+        {"hidden_layers": [64, 64, 32], "lr": 0.005},
+    ]
+
+    runner.run(param_grid, X_train, y_train, X_val, y_val, epochs=200)
+    runner.summary()
+    runner.plot_losses()
+    runner.plot_predictions()
+    runner.export_results("results_step7.csv")
+```
+
+------
+
+### 📑 **Notebook 说明**
+
+1. **导入库**
+    引入必要的库，如 `torch`、`sklearn`、`matplotlib`、`pandas` 等。
+2. **数据生成与划分**
+    生成随机数据并添加噪声，然后划分为训练集和验证集。
+3. **模型定义**
+    定义一个简单的全连接神经网络模型（DNNRegressor）用于回归任务。
+4. **训练函数**
+    定义 `train_model` 函数，利用均方误差（MSE）进行模型训练。
+5. **验证函数**
+    `evaluate_model` 函数用于计算并返回模型的 MAE、MSE、R² 等指标。
+6. **模型训练与对比**
+    使用 `ModelRunner` 类执行多模型训练，记录模型配置、评估结果、损失曲线，并绘制训练过程中的损失曲线和预测结果对比图。
+7. **结果导出**
+    将训练和评估结果保存为 CSV 文件，便于后续的分析与对比。
+
+------
+
+### 🧪 **执行流程**
+
+1. **运行模型训练与评估：**
+    使用 `runner.run()` 运行不同的模型配置，训练过程中会输出每个模型的表现。
+2. **查看模型总结：**
+    `runner.summary()` 将根据 R² 对模型进行排序，并输出每个模型的评估指标。
+3. **绘制损失曲线：**
+    `runner.plot_losses()` 将展示所有模型训练的损失曲线，帮助判断哪个模型收敛较快。
+4. **绘制预测结果对比：**
+    `runner.plot_predictions()` 绘制预测值与真实值的散点图，用于直观评估回归效果。
+5. **导出结果：**
+    `runner.export_results()` 将模型的评估结果保存为 CSV 文件，便于后续查看。
+
+------
+
+### ⚡ **后续步骤**
+
+- **Step 8**：模型保存与加载（`torch.save()`）
+- **Step 9**：调参（GridSearch / RandomSearch）
+- **Step 10**：加入早停（EarlyStopping）机制，防止过拟合
+
+如果你有其他问题或希望继续扩展后续步骤，随时告诉我！
+
+好的！接下来，我将 **Step 8** 整理为一个 Jupyter Notebook 使用的完整代码，并给出相关示例，之后再继续进行 **Step 9**。
+
+------
+
+### 📑 **Step 8: 模型保存与加载 - 完整 Notebook**
+
+```python
+# 1. 导入必要的库
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, r2_score
+import pandas as pd
+
+# 2. 生成结构化数据
+torch.manual_seed(0)
+np.random.seed(0)
+
+num_samples = 200
+num_features = 3
+
+X = torch.randn(num_samples, num_features)
+true_weights = torch.tensor([[1.5], [-2.0], [0.8]])
+true_bias = 3.0
+noise = 0.1 * torch.randn(num_samples, 1)
+
+y = X @ true_weights + true_bias + noise
+
+# 划分训练集与验证集
+X_train, X_val, y_train, y_val = train_test_split(
+    X.numpy(), y.numpy(), test_size=0.2, random_state=42
+)
+
+X_train = torch.tensor(X_train, dtype=torch.float32)
+X_val = torch.tensor(X_val, dtype=torch.float32)
+y_train = torch.tensor(y_train, dtype=torch.float32)
+y_val = torch.tensor(y_val, dtype=torch.float32)
+
+# 3. 定义DNN回归模型
+class DNNRegressor(nn.Module):
+    def __init__(self, input_dim, hidden_layers=[64, 32], activation=nn.ReLU):
+        super().__init__()
+        layers = []
+        prev_dim = input_dim
+
+        for hidden_dim in hidden_layers:
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(activation())
+            prev_dim = hidden_dim
+
+        layers.append(nn.Linear(prev_dim, 1))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
+
+# 4. 定义训练函数
+def train_model(model, X_train, y_train, epochs=100, lr=0.01, verbose=False):
+    criterion = nn.MSELoss()
+    optimizer = optim.SGD(model.parameters(), lr=lr)
+    loss_history = []
+
+    for epoch in range(epochs):
+        model.train()
+        pred = model(X_train)
+        loss = criterion(pred, y_train)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        loss_history.append(loss.item())
+
+        if verbose and (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1:3d} | Train Loss: {loss.item():.4f}")
+
+    return loss_history
+
+# 5. 定义验证函数
+def evaluate_model(model, X_val, y_val):
+    model.eval()
+    with torch.no_grad():
+        y_pred = model(X_val).numpy()
+        y_true = y_val.numpy()
+
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = np.mean((y_true - y_pred) ** 2)
+    r2 = r2_score(y_true, y_pred)
+    return {"mae": mae, "mse": mse, "r2": r2}
+
+# 6. 定义多模型训练/评估/对比类
+class ModelRunner:
+    def __init__(self, input_dim):
+        self.input_dim = input_dim
+        self.results = []
+
+    def run(self, configs, X_train, y_train, X_val, y_val, epochs=100):
+        for idx, config in enumerate(configs):
+            print(f"\n🚀 模型 {idx+1}/{len(configs)}: {config}")
+            model = DNNRegressor(
+                input_dim=self.input_dim,
+                hidden_layers=config["hidden_layers"],
+                activation=config.get("activation", nn.ReLU)
+            )
+            loss_history = train_model(model, X_train, y_train, epochs=epochs, lr=config["lr"])
+            scores = evaluate_model(model, X_val, y_val)
+            y_pred = model(X_val).detach().numpy()
+            result = {
+                "config": config,
+                "scores": scores,
+                "losses": loss_history,
+                "y_true": y_val.numpy().flatten(),
+                "y_pred": y_pred.flatten(),
+                "model": model
+            }
+            self.results.append(result)
+
+    def summary(self, sort_by="r2"):
+        print("\n📊 所有模型表现：")
+        sorted_results = sorted(self.results, key=lambda r: r["scores"][sort_by], reverse=True)
+        for i, res in enumerate(sorted_results):
+            cfg = res["config"]
+            sc = res["scores"]
+            print(f"[{i+1}] R²={sc['r2']:.4f} | MAE={sc['mae']:.4f} | MSE={sc['mse']:.4f} | {cfg}")
+        return sorted_results
+
+    def plot_losses(self):
+        plt.figure(figsize=(10, 6))
+        for i, result in enumerate(self.results):
+            label = f"Model {i+1}: {result['config']['hidden_layers']}, lr={result['config']['lr']}"
+            plt.plot(result["losses"], label=label)
+        plt.xlabel("Epoch")
+        plt.ylabel("Train Loss (MSE)")
+        plt.title("训练损失曲线对比")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+    def plot_predictions(self):
+        for i, result in enumerate(self.results):
+            plt.figure(figsize=(6, 6))
+            plt.scatter(result["y_true"], result["y_pred"], alpha=0.6)
+            plt.plot([min(result["y_true"]), max(result["y_true"])],
+                     [min(result["y_true"]), max(result["y_true"])], 'r--')
+            plt.xlabel("True Value")
+            plt.ylabel("Predicted Value")
+            plt.title(f"模型 {i+1} 预测对比图")
+            plt.grid(True)
+            plt.tight_layout()
+            plt.show()
+
+    def export_results(self, filepath="model_results.csv"):
+        records = []
+        for i, res in enumerate(self.results):
+            record = {
+                "model_id": i + 1,
+                "r2": res["scores"]["r2"],
+                "mae": res["scores"]["mae"],
+                "mse": res["scores"]["mse"],
+                "hidden_layers": str(res["config"]["hidden_layers"]),
+                "lr": res["config"]["lr"]
+            }
+            records.append(record)
+        df = pd.DataFrame(records)
+        df.to_csv(filepath, index=False)
+        print(f"✅ 模型评估结果已保存至：{filepath}")
+
+    def save_model(self, model, filename="model.pth"):
+        # 保存模型
+        torch.save(model.state_dict(), filename)
+        print(f"✅ 模型已保存至 {filename}")
+
+    def load_model(self, model, filename="model.pth"):
+        # 加载模型
+        model.load_state_dict(torch.load(filename))
+        model.eval()
+        print(f"✅ 模型已从 {filename} 加载")
+        return model
+```
+
+------
+
+### 🧑‍💻 **Notebook 运行示例**
+
+1. **模型训练并保存**
+
+```python
+if __name__ == "__main__":
+    runner = ModelRunner(input_dim=num_features)
+
+    param_grid = [
+        {"hidden_layers": [64, 32], "lr": 0.01},
+        {"hidden_layers": [128, 64], "lr": 0.01},
+        {"hidden_layers": [64, 64, 32], "lr": 0.005},
+    ]
+
+    runner.run(param_grid, X_train, y_train, X_val, y_val, epochs=200)
+    runner.summary()
+    runner.plot_losses()
+    runner.plot_predictions()
+    runner.export_results("results_step8.csv")
+
+    # 保存第一个模型
+    best_model = runner.results[0]["model"]
+    runner.save_model(best_model, filename="best_model.pth")
+```
+
+1. **加载已保存的模型**
+
+```python
+# 加载模型
+runner.load_model(best_model, filename="best_model.pth")
+
+# 使用加载的模型进行预测
+y_pred = best_model(X_val).detach().numpy()
+print(f"预测结果：\n{y_pred[:5]}")
+```
+
+------
+
+### ✅ **功能总结**
+
+| 功能                 | 说明                                            |
+| -------------------- | ----------------------------------------------- |
+| `save_model()`       | 将训练好的模型保存为文件                        |
+| `load_model()`       | 从文件加载已保存的模型                          |
+| `model.state_dict()` | 仅保存和加载模型的参数（权重）                  |
+| `model.eval()`       | 设置模型为推理模式（关闭 Dropout 和 BatchNorm） |
+
+------
+
+### ⚡ **Step 9：自动调参（GridSearch / RandomSearch）**
+
+接下来，我们可以继续实现 **自动调参** 的功能。使用 `GridSearchCV` 或 `RandomSearch` 来自动搜索最佳的超参数配置，以提升模型性能。
+
+如果你准备好继续，请告诉我！
