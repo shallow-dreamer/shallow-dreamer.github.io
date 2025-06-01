@@ -1,0 +1,1661 @@
+---
+layout:     post
+title:      "训练流程测试"
+subtitle:   ""
+date:       2025-06-02
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+你这个需求可以很好地使用 **适配器模式** 来构建一个**灵活的模型训练框架**，用于适配各种不同类型的模型（如线性回归、神经网络、LLM、大数据分析等）。
+
+下面我将为你提供一个**完整的结构化训练流程框架**，包含以下模块：
+
+------
+
+## ✅ 总体流程（模块划分）
+
+```text
+User Request
+   ↓
+1. 参数输入（模型参数 + 因子参数 + 训练数据列表）
+   ↓
+2. 数据清洗（缺失值、字段映射、类型识别）
+   ↓
+3. 数据预处理（归一化 / 标准化）
+   ↓
+4. 模型适配（选择不同模型类）
+   ↓
+5. 模型训练（统一的 train 接口）
+   ↓
+6. 数据后处理（如反归一化）
+   ↓
+7. 模型保存（本地或上传 S3）
+```
+
+------
+
+## ✅ 项目结构建议
+
+```
+ml_pipeline/
+├── adapters/                # 模型适配器
+│   ├── base.py              # BaseModelAdapter
+│   ├── linear_regression.py
+│   ├── dnn.py
+│   └── llm.py
+├── data_cleaning/
+│   ├── cleaner.py           # 数据清洗工具
+│   └── field_mapper.py      # 字段映射/类型识别
+├── preprocessing/
+│   ├── preprocessor.py      # 归一化等预处理逻辑
+│   └── postprocessor.py     # 反归一化
+├── trainer.py               # 训练流程主入口
+├── utils/
+│   ├── io.py                # 数据文件读取（openpyxl + csv）
+│   └── s3_uploader.py       # 模型文件上传
+└── config/
+    └── model_registry.py    # 注册支持的模型类型
+```
+
+------
+
+## ✅ 核心类与流程实现（关键代码）
+
+### 1. `BaseModelAdapter`（所有模型的统一接口）
+
+```python
+# adapters/base.py
+from abc import ABC, abstractmethod
+
+class BaseModelAdapter(ABC):
+    def __init__(self, model_params: dict):
+        self.model_params = model_params
+
+    @abstractmethod
+    def preprocess(self, df):
+        pass
+
+    @abstractmethod
+    def train(self, train_data, test_data):
+        pass
+
+    @abstractmethod
+    def postprocess(self, results):
+        pass
+
+    @abstractmethod
+    def save_model(self, path: str):
+        pass
+```
+
+------
+
+### 2. `LinearRegressionAdapter` 示例
+
+```python
+# adapters/linear_regression.py
+from sklearn.linear_model import LinearRegression
+from .base import BaseModelAdapter
+
+class LinearRegressionAdapter(BaseModelAdapter):
+    def __init__(self, model_params):
+        super().__init__(model_params)
+        self.model = LinearRegression(**model_params)
+
+    def preprocess(self, df):
+        return df  # 线性模型通常不要求额外处理
+
+    def train(self, train_data, test_data):
+        X_train, y_train = train_data
+        self.model.fit(X_train, y_train)
+        return {"score": self.model.score(*test_data)}
+
+    def postprocess(self, results):
+        return results
+
+    def save_model(self, path):
+        import joblib
+        joblib.dump(self.model, path)
+```
+
+------
+
+### 3. 训练流程主入口
+
+```python
+# trainer.py
+from adapters import model_registry
+from data_cleaning.cleaner import clean_dataset
+from preprocessing.preprocessor import preprocess_dataset
+from preprocessing.postprocessor import postprocess_result
+from utils.io import load_datasets
+from utils.s3_uploader import upload_model_file
+
+def train_pipeline(factor_params, model_params, model_type, dataset_files, publish=False):
+    # 1. 加载数据集
+    df = load_datasets(dataset_files)
+
+    # 2. 数据清洗
+    df_clean = clean_dataset(df, factor_params)
+
+    # 3. 数据预处理（归一化）
+    df_preprocessed, scaler = preprocess_dataset(df_clean, factor_params)
+
+    # 4. 分割训练测试集
+    from sklearn.model_selection import train_test_split
+    X = df_preprocessed.drop(columns=["target"])
+    y = df_preprocessed["target"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+    # 5. 获取模型适配器
+    adapter_class = model_registry.get(model_type)
+    if not adapter_class:
+        raise ValueError(f"不支持的模型类型: {model_type}")
+    model = adapter_class(model_params)
+
+    # 6. 训练
+    train_result = model.train((X_train, y_train), (X_test, y_test))
+
+    # 7. 后处理
+    final_result = model.postprocess(train_result)
+
+    # 8. 模型保存
+    save_path = f"./output_models/{model_type}_{time.time()}.pkl"
+    model.save_model(save_path)
+
+    if publish:
+        upload_model_file(save_path)
+
+    return final_result
+```
+
+------
+
+### 4. 注册模型适配器
+
+```python
+# config/model_registry.py
+from adapters.linear_regression import LinearRegressionAdapter
+from adapters.dnn import DNNAdapter
+from adapters.llm import LLMAdapter
+
+model_registry = {
+    "linear_regression": LinearRegressionAdapter,
+    "dnn": DNNAdapter,
+    "llm": LLMAdapter,
+}
+```
+
+------
+
+### 5. 清洗 + 预处理（示例）
+
+```python
+# data_cleaning/cleaner.py
+def clean_dataset(df, factor_params):
+    # 删除因子为空的行
+    for factor in factor_params:
+        df = df[df[factor["name"]].notnull()]
+    return df
+
+# preprocessing/preprocessor.py
+from sklearn.preprocessing import MinMaxScaler
+
+def preprocess_dataset(df, factor_params):
+    numeric_cols = [f["name"] for f in factor_params if f.get("normalize") is True]
+    scaler = MinMaxScaler()
+    df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
+    return df, scaler
+```
+
+------
+
+## ✅ 示例调用
+
+```python
+result = train_pipeline(
+    factor_params=[{"name": "feature1", "normalize": True}, {"name": "feature2", "normalize": False}],
+    model_params={"fit_intercept": True},
+    model_type="linear_regression",
+    dataset_files=["/path/data1.xlsx", "/path/data2.csv"],
+    publish=True
+)
+print(result)
+```
+
+------
+
+## ✅ 总结
+
+- ✔ 使用适配器模式封装不同模型训练逻辑，便于扩展新模型。
+- ✔ 数据清洗与预处理模块独立，便于复用和测试。
+- ✔ 支持模型训练后发布（如上传到 S3）。
+- ✔ 高度解耦、结构清晰，方便多人协作或服务化部署。
+
+如果你希望我继续补全某个模块（如 DNNAdapter、反归一化、任务队列调用训练），可以告诉我，我会继续细化。
+
+很好，这说明你需要构建一个**灵活可配置的模型训练流程**，其中某些步骤（如数据预处理、归一化、后处理、发布）**可选执行，取决于模型类型或模型适配器的需要**。
+
+为此，我们可以增强适配器结构，使每个模型**声明需要哪些流程步骤**，并动态控制训练流程中各个节点的执行。
+
+------
+
+## ✅ 整体设计目标
+
+我们希望实现如下形式的训练控制流程：
+
+```text
+1. 模型适配器声明：我是否需要归一化？是否需要后处理？
+2. 训练主流程读取声明内容，仅执行需要的步骤
+```
+
+------
+
+## ✅ 修改点一：模型适配器接口扩展
+
+我们为 `BaseModelAdapter` 增加特性声明：
+
+```python
+# adapters/base.py
+class BaseModelAdapter(ABC):
+    def __init__(self, model_params: dict):
+        self.model_params = model_params
+
+    # ========= 新增：模型所需训练流程特性声明 =========
+    def need_preprocess(self) -> bool:
+        return False
+
+    def need_postprocess(self) -> bool:
+        return False
+
+    def need_normalization(self) -> bool:
+        return False
+
+    # ========= 原始接口 =========
+    @abstractmethod
+    def preprocess(self, df):
+        pass
+
+    @abstractmethod
+    def train(self, train_data, test_data):
+        pass
+
+    @abstractmethod
+    def postprocess(self, results):
+        pass
+
+    @abstractmethod
+    def save_model(self, path: str):
+        pass
+```
+
+------
+
+## ✅ 修改点二：适配器按需实现声明方法
+
+例如：线性回归需要归一化，不需要后处理
+
+```python
+# adapters/linear_regression.py
+class LinearRegressionAdapter(BaseModelAdapter):
+    def need_preprocess(self):
+        return True
+
+    def need_normalization(self):
+        return True
+
+    def need_postprocess(self):
+        return False
+
+    # ... 其他接口同前 ...
+```
+
+------
+
+## ✅ 修改点三：训练主流程改造（按需执行）
+
+```python
+# trainer.py
+def train_pipeline(factor_params, model_params, model_type, dataset_files, publish=False):
+    df = load_datasets(dataset_files)
+    df_clean = clean_dataset(df, factor_params)
+
+    adapter_class = model_registry.get(model_type)
+    if not adapter_class:
+        raise ValueError(f"不支持的模型类型: {model_type}")
+    model = adapter_class(model_params)
+
+    # ========= 是否需要预处理（归一化） =========
+    if model.need_preprocess():
+        if model.need_normalization():
+            df_clean, scaler = preprocess_dataset(df_clean, factor_params)
+        else:
+            df_clean, scaler = df_clean, None
+    else:
+        scaler = None
+
+    # ========= 分割训练集和测试集 =========
+    from sklearn.model_selection import train_test_split
+    X = df_clean.drop(columns=["target"])
+    y = df_clean["target"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+    # ========= 模型训练 =========
+    train_result = model.train((X_train, y_train), (X_test, y_test))
+
+    # ========= 可选后处理 =========
+    if model.need_postprocess():
+        final_result = model.postprocess(train_result)
+    else:
+        final_result = train_result
+
+    # ========= 模型保存 & 可选发布 =========
+    save_path = f"./output_models/{model_type}_{int(time.time())}.pkl"
+    model.save_model(save_path)
+
+    if publish:
+        upload_model_file(save_path)
+
+    return final_result
+```
+
+------
+
+## ✅ 总结：你获得了什么
+
+| 功能               | 实现方式                                       |
+| ------------------ | ---------------------------------------------- |
+| 每步是否执行       | 模型适配器提供 `.need_xxx()` 接口进行控制      |
+| 扩展支持的模型类型 | 只需实现新模型适配器类，声明需求并实现接口     |
+| 灵活性             | 流程每个节点都可以按模型要求决定是否执行       |
+| 解耦性             | 每个模块（清洗、预处理、训练、后处理）都可复用 |
+
+------
+
+如果你希望下一步我帮你：
+
+- 添加某个具体模型适配器（如 DNN、LLM）
+- 支持某些模型在训练过程中记录日志（用于前端显示）
+- 通过队列或任务管理器（如 Celery）执行训练任务
+
+欢迎继续告诉我，我会直接给出对应代码。
+
+明白了，你的需求是：
+
+> 在模型训练流程中，每个步骤（如归一化、预处理、后处理等）是否执行由**两方决定**：
+
+1. **模型制作者（适配器内部定义）**：设置默认流程行为（最高优先级）。
+2. **前端用户配置**：用户可以覆盖部分行为，如果适配器允许。
+
+并且：
+
+- **模型适配器优先级高**：如果适配器**强制某步骤执行/跳过**，则用户无法控制。
+- **用户控制优先使用**：如果适配器没有明确强制要求执行或跳过，则用户控制生效。
+
+------
+
+## ✅ 整体控制逻辑（流程节点执行判断）
+
+我们引入一个通用判断函数：
+
+```python
+def should_execute_step(
+    step_name: str,
+    user_control: dict,
+    adapter_control: dict
+) -> bool:
+    """
+    决定是否执行某一流程节点：
+    - adapter_control 优先级更高（必须执行或必须跳过）
+    - 否则看用户是否传入控制值
+    - 否则默认执行为 False
+    """
+    if step_name in adapter_control:
+        return adapter_control[step_name]
+    return user_control.get(step_name, False)
+```
+
+------
+
+## ✅ 模型适配器定义接口（带默认行为）
+
+每个模型可以通过适配器定义流程行为，例如：
+
+```python
+class BaseModelAdapter(ABC):
+    def __init__(self, model_params: dict):
+        self.model_params = model_params
+
+    @property
+    def pipeline_control(self) -> dict:
+        """
+        定义模型默认行为：
+        {
+            "preprocess": True,   # 表示模型需要预处理
+            "normalize": False,   # 表示模型不需要归一化
+            "postprocess": None,  # 表示是否需要后处理由用户决定
+        }
+        None 表示未指定，允许用户决定。
+        """
+        return {}
+
+    @abstractmethod
+    def preprocess(self, df):
+        pass
+
+    @abstractmethod
+    def train(self, train_data, test_data):
+        pass
+
+    @abstractmethod
+    def postprocess(self, results):
+        pass
+
+    @abstractmethod
+    def save_model(self, path: str):
+        pass
+```
+
+示例：线性回归适配器强制需要归一化、不做后处理：
+
+```python
+class LinearRegressionAdapter(BaseModelAdapter):
+    @property
+    def pipeline_control(self):
+        return {
+            "preprocess": True,
+            "normalize": True,
+            "postprocess": False
+        }
+
+    # 实现相关接口...
+```
+
+------
+
+## ✅ 主训练流程调整（引入双重控制）
+
+```python
+def train_pipeline(
+    factor_params: dict,
+    model_params: dict,
+    model_type: str,
+    dataset_files: List[Union[str, IO]],
+    user_pipeline_control: dict,
+    publish: bool = False
+):
+    df = load_datasets(dataset_files)
+    df_clean = clean_dataset(df, factor_params)
+
+    adapter_class = model_registry.get(model_type)
+    if not adapter_class:
+        raise ValueError(f"模型类型不支持: {model_type}")
+
+    model = adapter_class(model_params)
+    adapter_control = model.pipeline_control
+
+    # 判断是否执行各个步骤
+    do_preprocess = should_execute_step("preprocess", user_pipeline_control, adapter_control)
+    do_normalize = should_execute_step("normalize", user_pipeline_control, adapter_control)
+    do_postprocess = should_execute_step("postprocess", user_pipeline_control, adapter_control)
+
+    # ========= 预处理 =========
+    scaler = None
+    if do_preprocess:
+        if do_normalize:
+            df_clean, scaler = preprocess_dataset(df_clean, factor_params)
+        else:
+            df_clean, scaler = df_clean, None
+
+    # ========= 划分数据集 =========
+    from sklearn.model_selection import train_test_split
+    X = df_clean.drop(columns=["target"])
+    y = df_clean["target"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+    # ========= 训练 =========
+    train_result = model.train((X_train, y_train), (X_test, y_test))
+
+    # ========= 后处理 =========
+    if do_postprocess:
+        final_result = model.postprocess(train_result)
+    else:
+        final_result = train_result
+
+    # ========= 保存 & 发布 =========
+    save_path = f"./output_models/{model_type}_{int(time.time())}.pkl"
+    model.save_model(save_path)
+
+    if publish:
+        upload_model_file(save_path)
+
+    return final_result
+```
+
+------
+
+## ✅ 使用示例
+
+```python
+# 用户传入的控制参数
+user_pipeline_control = {
+    "preprocess": True,
+    "normalize": False,
+    "postprocess": True
+}
+
+train_pipeline(
+    factor_params={...},
+    model_params={...},
+    model_type="linear_regression",
+    dataset_files=["/path/to/data1.csv", "/path/to/data2.csv"],
+    user_pipeline_control=user_pipeline_control,
+    publish=True
+)
+```
+
+即使用户设置 `normalize=False`，但如果 `adapter.pipeline_control["normalize"] = True`，仍会执行归一化。
+
+------
+
+## ✅ 总结
+
+| 功能                 | 实现方式                                         |
+| -------------------- | ------------------------------------------------ |
+| 每个节点控制是否执行 | 适配器 `pipeline_control` 和用户传参共同决定     |
+| 优先级控制           | 适配器优先；用户传参为次选；否则默认 False       |
+| 新增模型适配简单     | 只需声明默认流程行为 + 实现训练接口即可          |
+| 可维护性高           | 每个模块职责清晰（数据处理、训练逻辑、保存逻辑） |
+
+------
+
+如果你需要我继续提供：
+
+- 流程结构封装为模块包
+- 任务持久化与 Celery 队列集成
+- 将训练流程日志回传前端
+
+欢迎继续告诉我，我可以继续补充完整示例。
+
+好的，以下是将“模型训练流程”封装为模块包，并支持将训练日志实时（流式）回传前端的完整设计思路与代码实现方案：
+
+------
+
+## ✅ 1. 模块结构设计
+
+我们将整个训练流程封装为一个模块包，例如 `ai_pipeline`：
+
+```
+ai_pipeline/
+├── __init__.py
+├── base.py                  # 适配器基类与通用控制逻辑
+├── adapters/                # 各种模型适配器
+│   ├── __init__.py
+│   ├── linear_regression.py
+│   └── ...
+├── data_handler.py          # 数据加载、清洗、预处理等
+├── pipeline.py              # 主流程控制
+├── logger.py                # 日志工具（流式输出）
+└── registry.py              # 模型注册器
+```
+
+------
+
+## ✅ 2. 流式日志 logger 实现（`logger.py`）
+
+```python
+import sys
+import time
+from typing import Callable
+
+
+class StreamLogger:
+    def __init__(self, log_func: Callable[[str], None] = print):
+        self.log_func = log_func
+
+    def log(self, msg: str):
+        timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
+        self.log_func(f"{timestamp} {msg}")
+
+# 用于队列或 WebSocket 场景的回调注入
+logger = StreamLogger()
+```
+
+------
+
+## ✅ 3. 数据处理逻辑（`data_handler.py`）
+
+略（你已经有了读取多个文件、字段匹配、归一化、反归一化等逻辑），只要封装成函数并接受 logger 实例即可。
+
+例如：
+
+```python
+def clean_and_preprocess(datasets, factor_config, normalize=False, logger=None):
+    logger = logger or print
+    logger("开始加载与合并数据集")
+    # 合并、清洗、归一化等操作...
+```
+
+------
+
+## ✅ 4. 适配器定义（`base.py`）
+
+```python
+from abc import ABC, abstractmethod
+
+
+class BaseModelAdapter(ABC):
+    def __init__(self, model_params: dict, logger=None):
+        self.model_params = model_params
+        self.logger = logger or print
+
+    @property
+    def pipeline_control(self) -> dict:
+        return {}
+
+    @abstractmethod
+    def train(self, X_train, y_train, X_test, y_test):
+        pass
+
+    @abstractmethod
+    def save_model(self, path: str):
+        pass
+
+    def postprocess(self, results):
+        return results
+```
+
+------
+
+## ✅ 5. 训练主流程（`pipeline.py`）
+
+```python
+from .registry import model_registry
+from .data_handler import clean_and_preprocess
+from .logger import logger
+from .base import BaseModelAdapter
+from .utils import should_execute_step
+from sklearn.model_selection import train_test_split
+
+
+def train_pipeline(
+    factor_params: dict,
+    model_params: dict,
+    model_type: str,
+    dataset_files: list,
+    user_pipeline_control: dict,
+    logger_instance=None
+):
+    log = logger_instance or logger.log
+    log(f"开始训练任务: 模型类型={model_type}")
+
+    # 1. 加载模型适配器
+    model_class = model_registry.get(model_type)
+    if not model_class:
+        raise ValueError(f"不支持的模型类型: {model_type}")
+
+    model = model_class(model_params, logger=log)
+    adapter_control = model.pipeline_control
+
+    # 2. 数据处理
+    normalize = should_execute_step("normalize", user_pipeline_control, adapter_control)
+    df, scaler = clean_and_preprocess(dataset_files, factor_params, normalize, logger=log)
+
+    X = df.drop(columns=["target"])
+    y = df["target"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+    # 3. 训练
+    log("开始模型训练...")
+    result = model.train(X_train, y_train, X_test, y_test)
+
+    # 4. 后处理（可选）
+    if should_execute_step("postprocess", user_pipeline_control, adapter_control):
+        result = model.postprocess(result)
+
+    # 5. 保存模型
+    model_path = f"./outputs/model_{model_type}_{int(time.time())}.pkl"
+    model.save_model(model_path)
+    log(f"模型保存到: {model_path}")
+
+    return result
+```
+
+------
+
+## ✅ 6. WebSocket 回传（适用于 Web 前端）
+
+### Django + Channels 示例（consumer）
+
+```python
+# consumers.py
+from channels.generic.websocket import WebsocketConsumer
+import threading
+from ai_pipeline import train_pipeline
+from ai_pipeline.logger import StreamLogger
+
+class TrainingConsumer(WebsocketConsumer):
+    def connect(self):
+        self.accept()
+
+    def disconnect(self, code):
+        pass
+
+    def receive(self, text_data=None, bytes_data=None):
+        import json
+        payload = json.loads(text_data)
+        
+        def send_log(msg):
+            self.send(json.dumps({"type": "log", "message": msg}))
+
+        logger = StreamLogger(log_func=send_log)
+
+        # 后台线程跑任务
+        threading.Thread(target=train_pipeline, kwargs={
+            "factor_params": payload["factorParams"],
+            "model_params": payload["modelParams"],
+            "model_type": payload["modelType"],
+            "dataset_files": payload["datasetFiles"],
+            "user_pipeline_control": payload.get("control", {}),
+            "logger_instance": logger.log
+        }).start()
+```
+
+------
+
+## ✅ 总结：关键特性一览
+
+| 功能点                         | 实现方式                         |
+| ------------------------------ | -------------------------------- |
+| 训练模块解耦封装               | `ai_pipeline` 包                 |
+| 支持多种模型适配               | 适配器模式 + 注册器              |
+| 控制流程节点执行               | `should_execute_step()` 方法     |
+| 双重控制（模型优先，用户可控） | `pipeline_control + user config` |
+| 日志可回传                     | 自定义 logger + WebSocket        |
+| 可集成 Celery                  | logger 与任务线程解耦            |
+
+------
+
+如需我：
+
+- 增加训练结果指标日志（R²、MAE等）
+- 封装成 pip install 包结构
+- 提供前端消息处理示例（如 Vue + Element Plus）
+
+都可以继续扩展。是否需要我打包成一个可直接运行的项目结构示例？
+
+```python
+# ai_pipeline/__init__.py
+# 空文件，使 ai_pipeline 成为模块包
+
+# ai_pipeline/logger.py
+import time
+from typing import Callable
+
+class StreamLogger:
+    def __init__(self, log_func: Callable[[str], None] = print):
+        self.log_func = log_func
+
+    def log(self, msg: str):
+        timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
+        self.log_func(f"{timestamp} {msg}")
+
+logger = StreamLogger()
+
+# ai_pipeline/utils.py
+def should_execute_step(step: str, user_control: dict, adapter_control: dict):
+    if step in adapter_control:
+        return adapter_control[step]
+    return user_control.get(step, False)
+
+# ai_pipeline/base.py
+from abc import ABC, abstractmethod
+
+class BaseModelAdapter(ABC):
+    def __init__(self, model_params: dict, logger=None):
+        self.model_params = model_params
+        self.logger = logger or print
+
+    @property
+    def pipeline_control(self) -> dict:
+        return {}
+
+    @abstractmethod
+    def train(self, X_train, y_train, X_test, y_test):
+        pass
+
+    @abstractmethod
+    def save_model(self, path: str):
+        pass
+
+    def postprocess(self, results):
+        return results
+
+# ai_pipeline/adapters/linear_regression.py
+import joblib
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+from ai_pipeline.base import BaseModelAdapter
+
+class LinearRegressionAdapter(BaseModelAdapter):
+    def __init__(self, model_params: dict, logger=None):
+        super().__init__(model_params, logger)
+        self.model = LinearRegression(**model_params)
+
+    @property
+    def pipeline_control(self):
+        return {"normalize": True, "postprocess": True}
+
+    def train(self, X_train, y_train, X_test, y_test):
+        self.logger("训练线性回归模型...")
+        self.model.fit(X_train, y_train)
+        y_pred = self.model.predict(X_test)
+        mse = mean_squared_error(y_test, y_pred)
+        r2 = r2_score(y_test, y_pred)
+        self.logger(f"模型评估 - MSE: {mse:.4f}, R2: {r2:.4f}")
+        return {"mse": mse, "r2": r2}
+
+    def save_model(self, path: str):
+        joblib.dump(self.model, path)
+        self.logger(f"模型保存到 {path}")
+
+# ai_pipeline/registry.py
+from ai_pipeline.adapters.linear_regression import LinearRegressionAdapter
+
+model_registry = {
+    "linear_regression": LinearRegressionAdapter
+}
+
+# ai_pipeline/data_handler.py
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+
+# 示例因子配置：{"age": {"type": "numeric", "normalize": True}}
+def clean_and_preprocess(dataset_files, factor_config, normalize=False, logger=None):
+    logger = logger or print
+    logger("加载并合并数据集...")
+    
+    df_list = []
+    for path in dataset_files:
+        df = pd.read_csv(path)
+        df_list.append(df)
+
+    # 合并并对齐列名（顺序不一致时）
+    base_cols = df_list[0].columns
+    df_list = [df[base_cols] for df in df_list]
+    df = pd.concat(df_list, ignore_index=True).drop_duplicates()
+
+    logger("根据因子配置进行数据清洗...")
+    for col, config in factor_config.items():
+        if config.get("type") == "numeric":
+            df = df[df[col].notna()]
+            if "min" in config:
+                df = df[df[col] >= config["min"]]
+            if "max" in config:
+                df = df[df[col] <= config["max"]]
+        elif config.get("type") == "category":
+            allowed = config.get("values")
+            if allowed:
+                df = df[df[col].isin(allowed)]
+
+    scaler = None
+    if normalize:
+        numeric_cols = [col for col, conf in factor_config.items() if conf.get("type") == "numeric" and conf.get("normalize")]
+        if numeric_cols:
+            logger("对数值型字段进行归一化...")
+            scaler = MinMaxScaler()
+            df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
+
+    return df, scaler
+
+# ai_pipeline/pipeline.py
+import time
+from sklearn.model_selection import train_test_split
+from ai_pipeline.registry import model_registry
+from ai_pipeline.logger import logger
+from ai_pipeline.utils import should_execute_step
+from ai_pipeline.data_handler import clean_and_preprocess
+
+def train_pipeline(
+    factor_params: dict,
+    model_params: dict,
+    model_type: str,
+    dataset_files: list,
+    user_pipeline_control: dict,
+    logger_instance=None
+):
+    log = logger_instance or logger.log
+    log(f"开始训练任务: 模型类型={model_type}")
+
+    model_class = model_registry.get(model_type)
+    if not model_class:
+        raise ValueError(f"不支持的模型类型: {model_type}")
+
+    model = model_class(model_params, logger=log)
+    adapter_control = model.pipeline_control
+
+    normalize = should_execute_step("normalize", user_pipeline_control, adapter_control)
+    df, scaler = clean_and_preprocess(dataset_files, factor_params, normalize, logger=log)
+
+    X = df.drop(columns=["target"])
+    y = df["target"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+    log("开始模型训练...")
+    result = model.train(X_train, y_train, X_test, y_test)
+
+    if should_execute_step("postprocess", user_pipeline_control, adapter_control):
+        result = model.postprocess(result)
+
+    model_path = f"./outputs/model_{model_type}_{int(time.time())}.pkl"
+    model.save_model(model_path)
+    log(f"模型训练完成，保存至: {model_path}")
+
+    return result
+
+```
+
+~~~python
+### 🧠 模型适配器基类（base.py）
+```python
+# ai_pipeline/base.py
+from abc import ABC, abstractmethod
+
+class BaseModelAdapter(ABC):
+    def __init__(self, model_params, logger):
+        self.model_params = model_params
+        self.logger = logger
+
+    @abstractmethod
+    def train(self, X_train, y_train):
+        pass
+
+    @abstractmethod
+    def predict(self, X):
+        pass
+
+    @abstractmethod
+    def save(self, path):
+        pass
+```
+
+### ✅ 模型注册表（registry.py）
+```python
+# ai_pipeline/registry.py
+from ai_pipeline.adapters.linear_regression import LinearRegressionAdapter
+from ai_pipeline.adapters.dnn import DNNAdapter
+
+MODEL_REGISTRY = {
+    "linear_regression": LinearRegressionAdapter,
+    "dnn": DNNAdapter,
+}
+```
+
+### ➕ 新增 DNN 模型适配器（adapters/dnn.py）
+```python
+# ai_pipeline/adapters/dnn.py
+from ai_pipeline.base import BaseModelAdapter
+from sklearn.neural_network import MLPRegressor
+import joblib
+
+class DNNAdapter(BaseModelAdapter):
+    def __init__(self, model_params, logger):
+        super().__init__(model_params, logger)
+        self.model = MLPRegressor(**model_params)
+
+    def train(self, X_train, y_train):
+        self.logger("[DNN] 开始训练")
+        self.model.fit(X_train, y_train)
+        self.logger("[DNN] 训练完成")
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+    def save(self, path):
+        joblib.dump(self.model, path)
+```
+
+### 🧪 示例测试调用更新
+```python
+from ai_pipeline.pipeline import train_pipeline
+
+# 使用深度神经网络模型训练
+result = train_pipeline(
+    factor_params={
+        "feature1": {"type": "numeric", "normalize": True},
+        "feature2": {"type": "numeric", "normalize": True},
+    },
+    model_params={
+        "hidden_layer_sizes": (50, 50),
+        "activation": "relu",
+        "max_iter": 200
+    },
+    model_type="dnn",
+    dataset_files=["dataset1.csv", "dataset2.csv"],
+    user_pipeline_control={
+        "normalize": True,
+        "postprocess": True,
+    }
+)
+```
+
+### ✅ 流程兼容性说明
+- 模型只需要继承 `BaseModelAdapter`
+- 注册在 `registry.py` 的 `MODEL_REGISTRY` 中
+- 控制流程结构和日志机制通用，适配任意结构化模型
+
+如需添加支持分类模型、NLP 模型、或外部服务模型（如 OpenAI），结构完全适配，只需按上述结构新增适配器。是否还需要我添加一个如 HuggingFace BERT 的适配器？
+
+~~~
+
+~~~python
+### 🧠 模型适配器基类（base.py）
+```python
+# ai_pipeline/base.py
+from abc import ABC, abstractmethod
+
+class BaseModelAdapter(ABC):
+    def __init__(self, model_params, logger):
+        self.model_params = model_params  # 模型参数（如层数、学习率等）
+        self.logger = logger              # 日志函数或流式日志输出器
+
+    @abstractmethod
+    def train(self, X_train, y_train):
+        pass  # 子类实现：训练模型
+
+    @abstractmethod
+    def predict(self, X):
+        pass  # 子类实现：执行预测
+
+    @abstractmethod
+    def save(self, path):
+        pass  # 子类实现：保存模型
+```
+
+### ✅ 模型注册表（registry.py）
+```python
+# ai_pipeline/registry.py
+from ai_pipeline.adapters.linear_regression import LinearRegressionAdapter
+from ai_pipeline.adapters.dnn import DNNAdapter
+from ai_pipeline.adapters.huggingface import HuggingFaceTextAdapter
+
+MODEL_REGISTRY = {
+    "linear_regression": LinearRegressionAdapter,
+    "dnn": DNNAdapter,
+    "huggingface_text": HuggingFaceTextAdapter,
+}
+```
+
+### ➕ HuggingFace 文本模型适配器（adapters/huggingface.py）
+```python
+# ai_pipeline/adapters/huggingface.py
+from ai_pipeline.base import BaseModelAdapter
+from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+import torch
+import os
+
+class HuggingFaceTextAdapter(BaseModelAdapter):
+    def __init__(self, model_params, logger):
+        super().__init__(model_params, logger)
+        model_name = model_params.get("model_name", "distilbert-base-uncased-finetuned-sst-2-english")
+        self.logger(f"[HF] 加载模型: {model_name}")
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        self.pipeline = pipeline("sentiment-analysis", model=self.model, tokenizer=self.tokenizer)
+
+    def train(self, X_train, y_train):
+        self.logger("[HF] 文本模型当前为预训练推理模式，跳过训练阶段")
+
+    def predict(self, X):
+        self.logger("[HF] 开始文本预测")
+        texts = X["text"] if isinstance(X, dict) else X  # 支持 DataFrame 或原始列表
+        return self.pipeline(texts)
+
+    def save(self, path):
+        self.logger("[HF] 保存模型和分词器")
+        self.model.save_pretrained(path)
+        self.tokenizer.save_pretrained(path)
+```
+
+### ✅ 说明（每行解释）
+```python
+model_name = model_params.get("model_name", "distilbert-base-uncased-finetuned-sst-2-english")
+# 获取模型名称（用户传入或默认使用情感分析模型）
+
+self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
+# 加载 HuggingFace 模型和 tokenizer
+
+self.pipeline = pipeline("sentiment-analysis", model=self.model, tokenizer=self.tokenizer)
+# 封装为 transformers pipeline，便于直接推理
+```
+
+### 🧪 示例测试调用（文本模型）
+```python
+from ai_pipeline.pipeline import train_pipeline
+
+result = train_pipeline(
+    factor_params={},  # 文本模型通常不需要数值因子
+    model_params={"model_name": "distilbert-base-uncased-finetuned-sst-2-english"},
+    model_type="huggingface_text",
+    dataset_files=["texts.csv"],
+    user_pipeline_control={
+        "normalize": False,
+        "postprocess": False,
+    }
+)
+```
+
+### 📦 输入文本数据要求
+- CSV 文件应包含 `text` 字段列：
+```
+text
+"I love this product."
+"This is terrible."
+```
+
+---
+如需扩展为多标签分类、多语言模型，只需更换模型名和 pipeline 类型即可。
+是否接下来需要接入类似 DeepSeek 或 OpenAI API 的推理模型？
+
+~~~
+
+~~~python
+## ✅ AI 平台通用模型训练流程模块（训练流程、适配器结构、API 推理模型支持）
+
+---
+
+## 📐 项目模块概览
+```bash
+ai_pipeline/
+├── base.py                    # 模型适配器基类（定义接口）
+├── pipeline.py                # 主训练流程模块
+├── registry.py                # 模型注册表（用于模型类型查找）
+├── adapters/
+│   ├── __init__.py
+│   ├── linear_regression.py   # sklearn 线性回归模型适配器
+│   ├── dnn.py                 # sklearn DNN 模型适配器
+│   ├── huggingface.py         # 本地 transformer 模型适配器
+│   └── openai_api.py          # 外部 OpenAI / DeepSeek 接口适配器
+```
+
+---
+
+## 📦 模型适配器基类（base.py）
+```python
+# ai_pipeline/base.py
+from abc import ABC, abstractmethod
+
+class BaseModelAdapter(ABC):
+    def __init__(self, model_params, logger):
+        self.model_params = model_params  # 模型初始化参数
+        self.logger = logger              # 日志函数
+
+    @abstractmethod
+    def train(self, X_train, y_train):
+        pass  # 训练方法
+
+    @abstractmethod
+    def predict(self, X):
+        pass  # 预测方法
+
+    @abstractmethod
+    def save(self, path):
+        pass  # 模型保存方法
+```
+
+---
+
+## 🧠 外部 API 模型适配器（如 OpenAI 或 DeepSeek）（adapters/openai_api.py）
+```python
+# ai_pipeline/adapters/openai_api.py
+import openai
+from ai_pipeline.base import BaseModelAdapter
+
+class OpenAIChatAdapter(BaseModelAdapter):
+    def __init__(self, model_params, logger):
+        super().__init__(model_params, logger)
+        self.api_key = model_params.get("api_key")
+        self.model = model_params.get("model", "gpt-4")
+        openai.api_key = self.api_key
+        logger(f"[OpenAI] 使用模型：{self.model}")
+
+    def train(self, X_train, y_train):
+        self.logger("[OpenAI] 外部 API 无需训练")
+
+    def predict(self, X):
+        prompt = X.get("prompt")
+        self.logger(f"[OpenAI] 请求提示词: {prompt}")
+
+        response = openai.ChatCompletion.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            stream=True
+        )
+
+        output = ""
+        for chunk in response:
+            delta = chunk["choices"][0]["delta"].get("content", "")
+            output += delta
+            self.logger(delta, stream=True)  # 流式返回
+        return output
+
+    def save(self, path):
+        self.logger("[OpenAI] API 模型无需保存")
+```
+
+### 🔍 每行解释：
+```python
+openai.api_key = self.api_key
+# 设置 OpenAI API 密钥
+
+response = openai.ChatCompletion.create(..., stream=True)
+# 启用流式响应，逐块接收模型输出
+
+for chunk in response:
+    delta = chunk["choices"][0]["delta"].get("content", "")
+    self.logger(delta, stream=True)
+# 将内容逐条流式输出给前端
+```
+
+---
+
+## 🔌 模型注册表（registry.py）
+```python
+# ai_pipeline/registry.py
+from ai_pipeline.adapters.linear_regression import LinearRegressionAdapter
+from ai_pipeline.adapters.dnn import DNNAdapter
+from ai_pipeline.adapters.huggingface import HuggingFaceTextAdapter
+from ai_pipeline.adapters.openai_api import OpenAIChatAdapter
+
+MODEL_REGISTRY = {
+    "linear_regression": LinearRegressionAdapter,
+    "dnn": DNNAdapter,
+    "huggingface_text": HuggingFaceTextAdapter,
+    "openai_chat": OpenAIChatAdapter,
+}
+```
+
+---
+
+## 🔁 通用训练流程封装模块（pipeline.py）
+```python
+# ai_pipeline/pipeline.py
+import pandas as pd
+from ai_pipeline.registry import MODEL_REGISTRY
+
+def default_logger(msg, stream=False):
+    print("[LOG]", msg, flush=True)  # 默认日志输出函数
+
+def train_pipeline(factor_params, model_params, model_type,
+                   dataset_files, user_pipeline_control=None,
+                   base_pipeline_control=None, logger=default_logger):
+
+    logger("[Pipeline] 加载模型适配器")
+    model_cls = MODEL_REGISTRY[model_type]
+    model = model_cls(model_params, logger)
+
+    logger("[Pipeline] 读取并合并数据集")
+    df = pd.concat([pd.read_csv(f) for f in dataset_files], ignore_index=True)
+    df.drop_duplicates(inplace=True)
+
+    logger("[Pipeline] 应用字段映射和因子清洗")
+    df = df.dropna(subset=factor_params.get("required_fields", []))
+
+    pipeline_ctl = {"normalize": True, "postprocess": True}  # 默认流程开关
+    if base_pipeline_control:
+        pipeline_ctl.update(base_pipeline_control)
+    if user_pipeline_control:
+        pipeline_ctl.update(user_pipeline_control)
+
+    if pipeline_ctl["normalize"]:
+        logger("[Pipeline] 执行归一化")
+        for col in factor_params.get("numeric_fields", []):
+            df[col] = (df[col] - df[col].mean()) / df[col].std()
+
+    logger("[Pipeline] 划分训练集和测试集")
+    train_df = df.sample(frac=0.8, random_state=42)
+    test_df = df.drop(train_df.index)
+
+    logger("[Pipeline] 开始训练模型")
+    X_train, y_train = train_df.drop("target", axis=1), train_df["target"]
+    model.train(X_train, y_train)
+
+    logger("[Pipeline] 模型训练完成，开始预测")
+    y_pred = model.predict(test_df.drop("target", axis=1))
+
+    if pipeline_ctl["postprocess"]:
+        logger("[Pipeline] 进行反归一化（伪操作）")
+
+    logger("[Pipeline] 保存模型")
+    model.save("saved_models/{}_model.bin".format(model_type))
+
+    return {"predictions": y_pred}
+```
+
+### 🔍 每行代码解释
+```python
+model_cls = MODEL_REGISTRY[model_type]
+model = model_cls(model_params, logger)
+# 获取模型类并初始化实例
+
+pd.concat([pd.read_csv(f) for f in dataset_files])
+# 合并多个 CSV 数据集
+
+df.dropna(subset=factor_params.get("required_fields", []))
+# 删除因子缺失值的样本
+
+if pipeline_ctl["normalize"]:
+    for col in factor_params.get("numeric_fields", []):
+        df[col] = ...
+# 对数值型字段进行归一化
+
+model.train(X_train, y_train)
+# 启动模型训练
+
+model.predict(...)
+# 执行预测（可返回数组或文本）
+
+model.save(...)
+# 保存模型到指定路径
+```
+
+---
+
+## ✅ 示例使用：
+```python
+train_pipeline(
+    factor_params={
+        "required_fields": ["text"],
+        "numeric_fields": [],
+    },
+    model_params={
+        "api_key": "sk-xxx",
+        "model": "gpt-4"
+    },
+    model_type="openai_chat",
+    dataset_files=["chat_prompts.csv"],
+    user_pipeline_control={"normalize": False, "postprocess": False}
+)
+```
+
+CSV 内容：
+```csv
+prompt
+"请帮我总结这段话"
+"解释什么是 Transformer 模型"
+```
+
+---
+
+是否需要我为你加入 S3 自动上传、训练日志实时 WebSocket 回传、或模型发布逻辑？
+
+~~~
+
+~~~python
+# 完整的 AI 模型训练流程框架（含适配器 + 注册表 + 数据处理 + 模型实例）
+
+本架构设计适用于：
+- 多模型适配（线性回归、大语言模型、分析模型等）
+- 模型训练流程节点的灵活控制（归一化、后处理等）
+- 支持用户控制与模型创建者控制的优先级机制
+- 多数据集合并处理、字段统一、清洗、归一化等
+- 训练日志支持实时推送（可接入 WebSocket）
+
+---
+
+## 项目目录结构
+```
+ml_platform/
+├── core/
+│   ├── registry.py                # 模型注册表
+│   ├── base_model.py             # 模型适配器基类
+│   └── linear_regression.py      # 示例模型：线性回归
+├── pipeline/
+│   └── trainer.py                # 主训练流程控制器
+├── preprocess/
+│   ├── dataset_handler.py        # 数据集读取与合并（支持 openpyxl）
+│   └── cleaner.py                # 数据清洗与预处理逻辑
+└── run_train.py                 # 模拟训练流程入口
+```
+
+---
+
+## core/registry.py
+```python
+# 模型注册中心，所有模型需注册进来以便训练器使用
+MODEL_REGISTRY = {}
+
+def register_model(model_type):
+    def wrapper(cls):
+        MODEL_REGISTRY[model_type] = cls
+        return cls
+    return wrapper
+
+def get_model_class(model_type):
+    return MODEL_REGISTRY.get(model_type)
+```
+
+---
+
+## core/base_model.py
+```python
+# 所有模型必须继承的基类
+from abc import ABC, abstractmethod
+
+class BaseModel(ABC):
+    def __init__(self, model_params, factor_params, control_config):
+        self.model_params = model_params
+        self.factor_params = factor_params
+        self.control_config = control_config  # 归一化/后处理执行标志
+
+    @abstractmethod
+    def train(self, train_data):
+        pass
+
+    @abstractmethod
+    def predict(self, test_data):
+        pass
+
+    def should_normalize(self):
+        return self.control_config.get("normalize", False)
+
+    def should_postprocess(self):
+        return self.control_config.get("postprocess", False)
+```
+
+---
+
+## core/linear_regression.py
+```python
+# 示例：线性回归模型
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from core.base_model import BaseModel
+from core.registry import register_model
+
+@register_model("linear_regression")
+class LinearRegressionModel(BaseModel):
+    def __init__(self, model_params, factor_params, control_config):
+        super().__init__(model_params, factor_params, control_config)
+        self.model = LinearRegression(**self.model_params)
+
+    def train(self, train_data):
+        X, y = train_data.drop(columns=["target"]), train_data["target"]
+        self.model.fit(X, y)
+
+    def predict(self, test_data):
+        return self.model.predict(test_data)
+```
+
+---
+
+## preprocess/dataset_handler.py
+```python
+# 使用 openpyxl 读取所有数据集内容，返回 pandas DataFrame
+import pandas as pd
+from openpyxl import load_workbook
+import io
+
+def read_excel_as_dataframe(file):
+    if isinstance(file, (str, bytes)):
+        wb = load_workbook(filename=file, read_only=True)
+    else:
+        wb = load_workbook(filename=io.BytesIO(file.read()), read_only=True)
+    sheet = wb.active
+    data = [[cell.value for cell in row] for row in sheet.iter_rows()]
+    headers, rows = data[0], data[1:]
+    return pd.DataFrame(rows, columns=headers)
+
+def merge_datasets(files):
+    dfs = [read_excel_as_dataframe(f) for f in files]
+    # 对齐列名顺序后合并
+    columns = dfs[0].columns
+    aligned_dfs = [df[columns] for df in dfs]
+    merged = pd.concat(aligned_dfs, ignore_index=True).drop_duplicates()
+    return merged
+```
+
+---
+
+## preprocess/cleaner.py
+```python
+# 数据清洗：包括因子缺失剔除、字段映射、归一化
+import pandas as pd
+
+def clean_data(df, factor_config):
+    for factor in factor_config:
+        name = factor["name"]
+        dtype = factor.get("type")
+        if dtype == "number":
+            min_val = factor.get("min")
+            max_val = factor.get("max")
+            enum = factor.get("enum")
+            if min_val is not None:
+                df = df[df[name] >= min_val]
+            if max_val is not None:
+                df = df[df[name] <= max_val]
+            if enum:
+                df = df[df[name].isin(enum)]
+        elif dtype == "string":
+            enum = factor.get("enum")
+            if enum:
+                df = df[df[name].isin(enum)]
+    df = df.dropna(subset=[f["name"] for f in factor_config])
+    return df
+
+def normalize_data(df, factor_config):
+    for factor in factor_config:
+        if factor.get("normalize") and factor.get("type") == "number":
+            col = factor["name"]
+            min_val = df[col].min()
+            max_val = df[col].max()
+            df[col] = (df[col] - min_val) / (max_val - min_val)
+    return df
+
+def split_data(df, train_ratio=0.8):
+    df = df.sample(frac=1).reset_index(drop=True)
+    split = int(len(df) * train_ratio)
+    return df[:split], df[split:]
+```
+
+---
+
+## pipeline/trainer.py
+```python
+from core.registry import get_model_class
+from preprocess.dataset_handler import merge_datasets
+from preprocess.cleaner import clean_data, normalize_data, split_data
+
+class TrainingPipeline:
+    def __init__(self, model_type, model_params, factor_params, dataset_files, control_flags):
+        self.model_type = model_type
+        self.model_params = model_params
+        self.factor_params = factor_params
+        self.dataset_files = dataset_files
+        self.control_flags = control_flags
+
+    def run(self):
+        print("[流程] 合并数据集...")
+        df = merge_datasets(self.dataset_files)
+
+        print("[流程] 清洗数据...")
+        df = clean_data(df, self.factor_params)
+
+        if self.control_flags.get("normalize"):
+            print("[流程] 数据归一化...")
+            df = normalize_data(df, self.factor_params)
+
+        print("[流程] 划分训练集/测试集...")
+        train_df, test_df = split_data(df)
+
+        print("[流程] 加载模型并训练...")
+        model_cls = get_model_class(self.model_type)
+        if not model_cls:
+            raise ValueError(f"不支持的模型类型: {self.model_type}")
+
+        model = model_cls(self.model_params, self.factor_params, self.control_flags)
+        model.train(train_df)
+
+        print("[流程] 训练完成，执行预测...")
+        preds = model.predict(test_df.drop(columns=["target"]))
+
+        if model.should_postprocess():
+            print("[流程] 执行后处理...")
+            # 可以添加反归一化等逻辑
+
+        print("[流程] 保存模型与结果...")
+        # TODO: 保存模型到 S3、本地等
+
+        return preds
+```
+
+---
+
+## run_train.py（训练入口模拟）
+```python
+from pipeline.trainer import TrainingPipeline
+
+# 模拟前端请求传参
+model_type = "linear_regression"
+model_params = {"fit_intercept": True}
+factor_params = [
+    {"name": "age", "type": "number", "normalize": True, "min": 10, "max": 80},
+    {"name": "gender", "type": "string", "enum": ["male", "female"]}
+]
+dataset_files = ["./datasets/sample1.xlsx", "./datasets/sample2.xlsx"]
+control_flags = {"normalize": True, "postprocess": False}
+
+pipeline = TrainingPipeline(
+    model_type=model_type,
+    model_params=model_params,
+    factor_params=factor_params,
+    dataset_files=dataset_files,
+    control_flags=control_flags
+)
+preds = pipeline.run()
+print("预测结果：", preds)
+```
+
+---
+
+## ✅ 总结
+该框架支持：
+- 各种模型注册与训练流程解耦
+- 使用 openpyxl 进行 Excel 读取
+- 基于因子配置的数据清洗、归一化与拆分
+- 模型训练与预测接口标准统一
+- 控制逻辑灵活，可扩展其他模型
+
+📌 如需：
+- S3 发布与模型持久化
+- 使用 Celery 加入任务队列
+- 日志实时回传（WebSocket 或 SSE）
+
+可继续扩展，我可以为你添加相关模块。
+
+~~~
+
