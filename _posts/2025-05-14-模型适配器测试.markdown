@@ -2235,3 +2235,186 @@ df_csv   = read_file_to_df("data.csv")
 3. 读完后都转换成 pandas.DataFrame，再做后续清洗、归一化、切分等操作。
 
 这样就能避开 `pandas.read_csv` 在某些复杂 CSV 上的兼容问题，同时整合 `openpyxl` 的 Excel 读取优点。
+
+下面是将你提出的**多字段数据清洗规则（最大/最小值 + 步长 + 容差 + 值替换）**逻辑，**适配集成到之前讨论过的统一数据清洗模块中的实现**。此版本基于你之前的需求整合：
+
+- 支持多个数据集文件（CSV 或 XLSX）
+- 使用 `openpyxl` 读取 XLSX，`pandas` 读取 CSV（可替换）
+- 所有字段列名一致但顺序可能不同，支持字段对齐
+- 清洗因子字段为空的记录
+- 每个字段可配置清洗规则，包括数值限定、值对齐与剔除
+
+------
+
+### ✅ 总体结构
+
+```text
+data_cleaning/
+├── __init__.py
+├── cleaner.py        # 主清洗逻辑
+├── file_reader.py    # XLSX/CSV 文件读取
+├── utils.py          # 工具函数
+```
+
+------
+
+## ✅ 1. `file_reader.py`：读取并对齐字段
+
+```python
+import pandas as pd
+from openpyxl import load_workbook
+from pathlib import Path
+from typing import List, Union
+import io
+
+
+def read_excel_file(file: Union[str, Path, io.BytesIO]) -> pd.DataFrame:
+    """使用 openpyxl 读取 xlsx 文件为 DataFrame"""
+    wb = load_workbook(file)
+    ws = wb.active
+    data = list(ws.iter_rows(values_only=True))
+    header, *rows = data
+    return pd.DataFrame(rows, columns=header)
+
+
+def read_dataset_files(file_list: List[Union[str, Path, io.BytesIO]]) -> pd.DataFrame:
+    """
+    读取并合并多个数据集文件（只支持相同结构但列顺序可不同）
+    """
+    dfs = []
+    for file in file_list:
+        if isinstance(file, (str, Path)) and str(file).lower().endswith(".xlsx"):
+            df = read_excel_file(file)
+        elif isinstance(file, (str, Path)) and str(file).lower().endswith(".csv"):
+            df = pd.read_csv(file)
+        else:
+            raise ValueError(f"不支持的文件格式或类型: {file}")
+        dfs.append(df)
+
+    # 对字段列统一（按照第一个为基准）
+    base_columns = dfs[0].columns
+    for df in dfs[1:]:
+        df.columns = base_columns  # 保证一致性
+
+    combined_df = pd.concat(dfs, ignore_index=True).drop_duplicates()
+    return combined_df
+```
+
+------
+
+## ✅ 2. `utils.py`：筛选值生成和字段清洗
+
+```python
+import numpy as np
+import pandas as pd
+
+
+def generate_filter_values(min_val: float, max_val: float, step: float) -> np.ndarray:
+    """根据 min/max/step 生成筛选值数组"""
+    return np.arange(min_val, max_val + step, step)
+
+
+def apply_filter_to_series(series: pd.Series, filters: np.ndarray, tolerance: float) -> pd.Series:
+    """将字段值替换为最接近的筛选值，超出容差则替换为 NaN"""
+    cleaned = []
+    for val in series:
+        if pd.isnull(val):
+            cleaned.append(np.nan)
+            continue
+        matched = False
+        for f in filters:
+            if abs(val - f) <= tolerance:
+                cleaned.append(f)
+                matched = True
+                break
+        if not matched:
+            cleaned.append(np.nan)
+    return pd.Series(cleaned, index=series.index)
+```
+
+------
+
+## ✅ 3. `cleaner.py`：清洗主逻辑入口
+
+```python
+import pandas as pd
+from typing import List, Union, Dict
+from .file_reader import read_dataset_files
+from .utils import generate_filter_values, apply_filter_to_series
+
+
+def clean_datasets(
+    files: List[Union[str, bytes]],
+    factor_config: Dict[str, dict],
+    required_factors: List[str]
+) -> pd.DataFrame:
+    """
+    统一数据清洗主函数
+
+    参数：
+    - files: 文件路径或 file-like 对象列表（csv/xlsx）
+    - factor_config: 各因子字段的清洗配置，如 min/max/step/tolerance
+    - required_factors: 必须存在的因子字段（非空）
+
+    返回：
+    - 清洗后的 DataFrame
+    """
+    df = read_dataset_files(files)
+
+    # 清除因子缺失的记录
+    df.dropna(subset=required_factors, inplace=True)
+
+    # 应用每个字段的清洗规则
+    for factor, config in factor_config.items():
+        if factor not in df.columns:
+            raise ValueError(f"字段 '{factor}' 不存在")
+
+        # 范围过滤
+        df = df[(df[factor] >= config["min"]) & (df[factor] <= config["max"])]
+
+        # 值替换
+        filters = generate_filter_values(config["min"], config["max"], config["step"])
+        df[factor] = apply_filter_to_series(df[factor], filters, config["tolerance"])
+
+    # 剔除无法匹配的 NaN
+    df.dropna(subset=factor_config.keys(), inplace=True)
+    return df.reset_index(drop=True)
+```
+
+------
+
+## ✅ 示例用法（测试用）
+
+```python
+if __name__ == "__main__":
+    from pathlib import Path
+
+    cleaning_rules = {
+        "temperature": {"min": 6, "max": 10, "step": 1, "tolerance": 0.2},
+        "humidity": {"min": 20, "max": 30, "step": 2, "tolerance": 0.3}
+    }
+
+    required_fields = ["temperature", "humidity"]
+
+    files = [
+        Path("data/file1.xlsx"),
+        Path("data/file2.xlsx")
+    ]
+
+    cleaned = clean_datasets(files, cleaning_rules, required_fields)
+    print(cleaned)
+```
+
+------
+
+## ✅ 总结说明
+
+| 模块             | 功能                                     | 可复用性 |
+| ---------------- | ---------------------------------------- | -------- |
+| `file_reader.py` | 支持不同格式读取合并                     | ✅        |
+| `utils.py`       | 通用工具函数（间隔值生成与筛选）         | ✅        |
+| `cleaner.py`     | 清洗总控函数，支持多个字段、字段缺失判断 | ✅        |
+
+------
+
+是否需要我将它封装为 pip 安装包格式，或支持 Celery 任务封装用于异步处理清洗？
