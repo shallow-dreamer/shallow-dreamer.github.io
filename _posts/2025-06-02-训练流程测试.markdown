@@ -1659,3 +1659,183 @@ print("预测结果：", preds)
 
 ~~~
 
+当然可以！我们以一个**线性 DNN 回归模型**为例，使用 PyTorch 编写完整训练流程，并展示如何使用训练集（train）、验证集（val）和测试集（test）。
+
+我们会涵盖以下内容：
+
+1. 数据拆分（train/val/test）
+2. 构建模型
+3. 模型训练（使用 train、val）
+4. 模型评估（使用 test）
+5. 每一步代码都有详细注释 ✅
+
+------
+
+## ✅ 环境依赖（请先安装）
+
+```bash
+pip install torch pandas scikit-learn
+```
+
+------
+
+## ✅ 完整代码（使用 PyTorch 实现线性 DNN 回归）
+
+```python
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+import numpy as np
+
+# ======== 模拟数据准备 =========
+# 假设我们有一个房价预测数据集
+def generate_synthetic_data(n=1000):
+    np.random.seed(42)
+    X = np.random.rand(n, 3) * 100  # 三个特征：面积、卧室数、距离
+    y = 0.3 * X[:, 0] + 0.5 * X[:, 1] - 0.2 * X[:, 2] + np.random.randn(n) * 2
+    return pd.DataFrame(X, columns=["area", "bedrooms", "distance"]), pd.Series(y, name="price")
+
+# 生成数据
+X_df, y_series = generate_synthetic_data()
+
+# ======== 数据预处理（归一化） =========
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X_df)
+X_scaled_df = pd.DataFrame(X_scaled, columns=X_df.columns)
+
+# ======== 数据集拆分 =========
+X_trainval, X_test, y_trainval, y_test = train_test_split(X_scaled_df, y_series, test_size=0.2, random_state=42)
+X_train, X_val, y_train, y_val = train_test_split(X_trainval, y_trainval, test_size=0.2, random_state=42)
+
+# ======== PyTorch 数据集封装 =========
+class RegressionDataset(Dataset):
+    def __init__(self, X, y):
+        self.X = torch.tensor(X.values, dtype=torch.float32)
+        self.y = torch.tensor(y.values, dtype=torch.float32).view(-1, 1)
+    
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, idx):
+        return self.X[idx], self.y[idx]
+
+# 构建 Dataloader
+train_loader = DataLoader(RegressionDataset(X_train, y_train), batch_size=32, shuffle=True)
+val_loader = DataLoader(RegressionDataset(X_val, y_val), batch_size=32)
+test_loader = DataLoader(RegressionDataset(X_test, y_test), batch_size=32)
+
+# ======== 构建 DNN 模型 =========
+class LinearDNNRegressor(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1)  # 输出为一个回归值
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+# 实例化模型、损失函数、优化器
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = LinearDNNRegressor(input_dim=X_train.shape[1]).to(device)
+criterion = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+# ======== 模型训练过程（使用 train 和 val）=========
+num_epochs = 50
+best_val_loss = float("inf")
+best_model_state = None
+
+for epoch in range(num_epochs):
+    model.train()
+    train_loss = 0
+    for X_batch, y_batch in train_loader:
+        X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+
+        optimizer.zero_grad()
+        y_pred = model(X_batch)
+        loss = criterion(y_pred, y_batch)
+        loss.backward()
+        optimizer.step()
+        train_loss += loss.item() * len(X_batch)
+
+    train_loss /= len(train_loader.dataset)
+
+    # 验证过程
+    model.eval()
+    val_loss = 0
+    with torch.no_grad():
+        for X_batch, y_batch in val_loader:
+            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+            y_pred = model(X_batch)
+            loss = criterion(y_pred, y_batch)
+            val_loss += loss.item() * len(X_batch)
+    val_loss /= len(val_loader.dataset)
+
+    # 打印日志
+    print(f"[Epoch {epoch+1}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+
+    # 保存最优模型
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        best_model_state = model.state_dict()
+
+# 恢复最优模型
+model.load_state_dict(best_model_state)
+
+# ======== 模型测试（使用 test）=========
+model.eval()
+test_loss = 0
+with torch.no_grad():
+    for X_batch, y_batch in test_loader:
+        X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+        y_pred = model(X_batch)
+        loss = criterion(y_pred, y_batch)
+        test_loss += loss.item() * len(X_batch)
+
+test_loss /= len(test_loader.dataset)
+print(f"Test Loss (MSE): {test_loss:.4f}")
+```
+
+------
+
+## ✅ 每一步解释
+
+### 数据部分：
+
+- `generate_synthetic_data`：生成三列特征和一个目标值的模拟数据。
+- `train_test_split`：将数据分为训练集、验证集和测试集。
+
+### 模型训练：
+
+- 训练过程中每个 epoch：
+  - 使用训练集（train_loader）进行梯度更新。
+  - 使用验证集（val_loader）评估模型效果。
+  - 如果验证损失更优，就保存当前模型参数。
+
+### 模型评估：
+
+- 使用测试集（test_loader）在训练完成后一次性评估，报告最终模型在“未知数据”上的表现。
+
+------
+
+## ✅ 小结（训练 vs 验证 vs 测试）
+
+| 阶段 | 目标             | 使用的数据     |
+| ---- | ---------------- | -------------- |
+| 训练 | 更新模型参数     | `train_loader` |
+| 验证 | 提前停止或调参   | `val_loader`   |
+| 测试 | 模拟生产环境评估 | `test_loader`  |
+
+------
+
+如果你后续要将这套训练结构封装成可配置的适配器模块（如你前面提到的训练服务），我可以帮你封装并加上日志、模型发布和预测流程的对接。
+
+是否需要我将这段代码封装为训练服务类并适配你前面讨论的接口？
