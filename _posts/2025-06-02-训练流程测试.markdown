@@ -1839,3 +1839,367 @@ print(f"Test Loss (MSE): {test_loss:.4f}")
 如果你后续要将这套训练结构封装成可配置的适配器模块（如你前面提到的训练服务），我可以帮你封装并加上日志、模型发布和预测流程的对接。
 
 是否需要我将这段代码封装为训练服务类并适配你前面讨论的接口？
+
+下面是一个**动态生成神经网络结构（DNN）**的实现示例，并支持：
+
+- 🧠 动态设置层结构（隐藏层数量、大小）
+- 🔢 自动识别**类别特征**并添加 **Embedding 层**
+- 📐 Embedding 的维度（嵌入维度）根据类别数量动态确定
+- 🧪 输入可为 pandas DataFrame
+- ✅ 结构清晰、适合集成到前面训练流程中
+
+------
+
+## ✅ 使用示例前的说明
+
+我们考虑如下输入特征场景：
+
+- 连续特征（数值型）：`area`, `distance`
+- 类别特征（分类型）：`city`, `material`（字符串或 int）
+
+------
+
+## ✅ 动态神经网络完整代码（含注释）
+
+```python
+import torch
+import torch.nn as nn
+import pandas as pd
+
+class DynamicDNN(nn.Module):
+    def __init__(self, df: pd.DataFrame, 
+                 categorical_cols: list[str], 
+                 continuous_cols: list[str],
+                 hidden_layers: list[int] = [64, 32],
+                 embedding_dim_rule=lambda n: min(50, (n + 1) // 2)):
+        """
+        :param df: 原始 DataFrame，用于统计 embedding 信息
+        :param categorical_cols: 类别型列名
+        :param continuous_cols: 数值型列名
+        :param hidden_layers: 隐藏层的结构，例如 [64, 32]
+        :param embedding_dim_rule: 一个函数，输入类别数，输出 embedding 维度
+        """
+        super().__init__()
+        self.categorical_cols = categorical_cols
+        self.continuous_cols = continuous_cols
+
+        # ===== 构建 Embedding 层 =====
+        self.embeddings = nn.ModuleDict()
+        total_emb_dim = 0
+        for col in categorical_cols:
+            num_classes = df[col].nunique()
+            emb_dim = embedding_dim_rule(num_classes)
+            self.embeddings[col] = nn.Embedding(num_classes, emb_dim)
+            total_emb_dim += emb_dim
+
+        self.input_dim = total_emb_dim + len(continuous_cols)
+
+        # ===== 构建隐藏层（全连接） =====
+        layers = []
+        prev_dim = self.input_dim
+        for h_dim in hidden_layers:
+            layers.append(nn.Linear(prev_dim, h_dim))
+            layers.append(nn.ReLU())
+            prev_dim = h_dim
+        layers.append(nn.Linear(prev_dim, 1))  # 回归任务输出一维
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x_cat: dict, x_cont: torch.Tensor):
+        """
+        :param x_cat: dict，每个 key 是类别列名，value 是 LongTensor 的 column vector
+        :param x_cont: FloatTensor，连续特征的 batch 输入
+        """
+        emb_list = []
+        for col in self.categorical_cols:
+            emb = self.embeddings[col](x_cat[col])
+            emb_list.append(emb)
+
+        x = torch.cat(emb_list + [x_cont], dim=1)
+        return self.model(x)
+```
+
+------
+
+## ✅ 数据准备示例
+
+```python
+import numpy as np
+from sklearn.preprocessing import LabelEncoder
+
+# 模拟数据
+df = pd.DataFrame({
+    "area": np.random.rand(1000) * 100,
+    "distance": np.random.rand(1000) * 10,
+    "city": np.random.choice(["A", "B", "C", "D"], size=1000),
+    "material": np.random.choice(["wood", "brick", "steel"], size=1000),
+    "price": np.random.rand(1000) * 500
+})
+
+categorical_cols = ["city", "material"]
+continuous_cols = ["area", "distance"]
+
+# Label encode categorical columns
+label_encoders = {}
+for col in categorical_cols:
+    le = LabelEncoder()
+    df[col] = le.fit_transform(df[col])
+    label_encoders[col] = le
+
+# 转换为张量输入
+x_cat_tensor = {col: torch.tensor(df[col].values, dtype=torch.long) for col in categorical_cols}
+x_cont_tensor = torch.tensor(df[continuous_cols].values, dtype=torch.float32)
+y_tensor = torch.tensor(df["price"].values, dtype=torch.float32).view(-1, 1)
+
+# 构建模型
+model = DynamicDNN(df, categorical_cols, continuous_cols)
+pred = model(x_cat_tensor, x_cont_tensor)
+
+print("预测输出形状:", pred.shape)  # [batch_size, 1]
+```
+
+------
+
+## ✅ 输出说明
+
+- Embedding 层的维度是动态确定的，如 `city` 有 4 个类别，则默认嵌入维度为 `(4 + 1) // 2 = 2`
+- 模型结构由 `hidden_layers` 控制，可自由扩展
+- 支持多列 embedding，同步处理连续值与类别值
+- 最后输出 shape 为 `[batch_size, 1]`，适用于回归
+
+------
+
+## ✅ 接入你现有框架的方法建议
+
+1. 将此 `DynamicDNN` 模块添加为模型适配器的实现类（如之前的 `BaseModelAdapter` 子类）。
+2. 在数据清洗过程中，自动识别类别列并传入 `DynamicDNN`。
+3. 模型训练器调用 `model(x_cat_dict, x_cont_tensor)` 进行前向传播。
+4. 自动构建 `x_cat_dict` 和 `x_cont_tensor`（已集成在前面的 Dataset 封装也可以做这个事）。
+
+------
+
+如果你希望我帮你**封装成适配器模型**、**添加训练和预测模块**、**加入日志或任务队列支持**，我可以继续帮你构建下一个模块。是否继续？
+
+下面是将 DNN 回归模型封装成适配器形式，并添加完整的训练、验证、测试与预测模块的代码。你可以将这套代码作为平台中“模型适配器”的一部分集成进通用训练流程中。
+
+------
+
+## 📦 目录结构建议
+
+```
+ml_adapters/
+├── __init__.py
+├── base.py              # 基类定义
+├── dnn_regression.py    # 本次实现的 DNN 模型适配器
+```
+
+------
+
+## 🧩 base.py – 通用模型适配器基类
+
+```python
+# ml_adapters/base.py
+from abc import ABC, abstractmethod
+
+class BaseModelAdapter(ABC):
+    @abstractmethod
+    def train(self, train_data, val_data, **kwargs):
+        pass
+
+    @abstractmethod
+    def evaluate(self, test_data):
+        pass
+
+    @abstractmethod
+    def predict(self, input_data):
+        pass
+
+    @abstractmethod
+    def save(self, path):
+        pass
+
+    @abstractmethod
+    def load(self, path):
+        pass
+```
+
+------
+
+## 🧠 dnn_regression.py – DNN 适配器实现
+
+```python
+# ml_adapters/dnn_regression.py
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+import pandas as pd
+import os
+
+from .base import BaseModelAdapter
+
+
+class DynamicDNN(nn.Module):
+    def __init__(self, df: pd.DataFrame, categorical_cols, continuous_cols, hidden_layers=[64, 32]):
+        super().__init__()
+        self.categorical_cols = categorical_cols
+        self.continuous_cols = continuous_cols
+
+        self.embeddings = nn.ModuleDict()
+        total_emb_dim = 0
+        for col in categorical_cols:
+            num_classes = df[col].nunique()
+            emb_dim = min(50, (num_classes + 1) // 2)
+            self.embeddings[col] = nn.Embedding(num_classes, emb_dim)
+            total_emb_dim += emb_dim
+
+        self.input_dim = total_emb_dim + len(continuous_cols)
+
+        layers = []
+        prev = self.input_dim
+        for h in hidden_layers:
+            layers.append(nn.Linear(prev, h))
+            layers.append(nn.ReLU())
+            prev = h
+        layers.append(nn.Linear(prev, 1))
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x_cat_dict, x_cont):
+        emb_list = [self.embeddings[k](x_cat_dict[k]) for k in self.categorical_cols]
+        x = torch.cat(emb_list + [x_cont], dim=1)
+        return self.model(x)
+
+
+class DNNRegressionAdapter(BaseModelAdapter):
+    def __init__(self, df, categorical_cols, continuous_cols, target_col, hidden_layers=[64, 32], device=None):
+        self.df = df
+        self.categorical_cols = categorical_cols
+        self.continuous_cols = continuous_cols
+        self.target_col = target_col
+        self.hidden_layers = hidden_layers
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = DynamicDNN(df, categorical_cols, continuous_cols, hidden_layers).to(self.device)
+
+    def _prepare_loader(self, df, batch_size=32, shuffle=True):
+        x_cat = {col: torch.tensor(df[col].values, dtype=torch.long).to(self.device) for col in self.categorical_cols}
+        x_cont = torch.tensor(df[self.continuous_cols].values, dtype=torch.float32).to(self.device)
+        y = torch.tensor(df[self.target_col].values, dtype=torch.float32).view(-1, 1).to(self.device)
+        return DataLoader(TensorDataset(x_cont, y, *x_cat.values()), batch_size=batch_size, shuffle=shuffle)
+
+    def _batch_to_input(self, batch):
+        x_cont, y, *cat_vals = batch
+        x_cat_dict = {col: val for col, val in zip(self.categorical_cols, cat_vals)}
+        return x_cat_dict, x_cont, y
+
+    def train(self, train_df, val_df=None, epochs=10, lr=0.001, batch_size=32):
+        train_loader = self._prepare_loader(train_df, batch_size)
+        val_loader = self._prepare_loader(val_df, batch_size, shuffle=False) if val_df is not None else None
+
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        criterion = nn.MSELoss()
+
+        for epoch in range(epochs):
+            self.model.train()
+            total_loss = 0
+            for batch in train_loader:
+                x_cat, x_cont, y = self._batch_to_input(batch)
+                pred = self.model(x_cat, x_cont)
+                loss = criterion(pred, y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
+            print(f"[Train] Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(train_loader):.4f}")
+
+            if val_loader:
+                self.evaluate(val_df, prefix="[Val]")
+
+    def evaluate(self, test_df, prefix="[Test]"):
+        test_loader = self._prepare_loader(test_df, shuffle=False)
+        self.model.eval()
+        total_loss = 0
+        criterion = nn.MSELoss()
+        with torch.no_grad():
+            for batch in test_loader:
+                x_cat, x_cont, y = self._batch_to_input(batch)
+                pred = self.model(x_cat, x_cont)
+                loss = criterion(pred, y)
+                total_loss += loss.item()
+        print(f"{prefix} MSE: {total_loss/len(test_loader):.4f}")
+
+    def predict(self, input_df):
+        self.model.eval()
+        loader = self._prepare_loader(input_df, shuffle=False)
+        predictions = []
+        with torch.no_grad():
+            for batch in loader:
+                x_cat, x_cont, _ = self._batch_to_input(batch)
+                pred = self.model(x_cat, x_cont)
+                predictions.append(pred.cpu())
+        return torch.cat(predictions).numpy()
+
+    def save(self, path):
+        torch.save(self.model.state_dict(), path)
+
+    def load(self, path):
+        self.model.load_state_dict(torch.load(path, map_location=self.device))
+```
+
+------
+
+## ✅ 测试示例
+
+```python
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from ml_adapters.dnn_regression import DNNRegressionAdapter
+
+# 生成测试数据
+df = pd.DataFrame({
+    "city": pd.Categorical(["A", "B", "A", "C", "B", "A"]).codes,
+    "material": pd.Categorical(["wood", "steel", "brick", "wood", "steel", "brick"]).codes,
+    "area": [50, 60, 70, 80, 90, 100],
+    "distance": [3, 4, 5, 6, 7, 8],
+    "price": [100, 120, 140, 160, 180, 200]
+})
+
+train_df, test_df = train_test_split(df, test_size=0.33)
+
+model = DNNRegressionAdapter(
+    df=train_df,
+    categorical_cols=["city", "material"],
+    continuous_cols=["area", "distance"],
+    target_col="price"
+)
+
+model.train(train_df, test_df, epochs=10)
+model.evaluate(test_df)
+
+preds = model.predict(test_df)
+print("预测结果:", preds)
+
+# 模型保存 & 加载
+model.save("dnn_model.pth")
+model.load("dnn_model.pth")
+```
+
+------
+
+## ✅ 支持集成任务流程
+
+你可以把这个类注册到你的适配器工厂，例如：
+
+```python
+ADAPTERS = {
+    "dnn_regression": DNNRegressionAdapter,
+    # future: "linear_regression": LinearRegressionAdapter,
+}
+```
+
+------
+
+是否需要我继续：
+
+- 将其接入训练主流程管理器
+- 添加日志记录与任务 ID 标识
+- 提供模型发布（如 S3 上传）与预测服务接口
+
+需要我继续完善哪些部分？
