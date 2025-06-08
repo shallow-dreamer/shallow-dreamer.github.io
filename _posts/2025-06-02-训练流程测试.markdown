@@ -2203,3 +2203,1077 @@ ADAPTERS = {
 - 提供模型发布（如 S3 上传）与预测服务接口
 
 需要我继续完善哪些部分？
+
+是的，**可以并且推荐**将归一化和反归一化逻辑抽象出来，作为**可插拔的归一化策略模块（Strategy Pattern）**，这样可以：
+
+- ✅ 支持多种归一化方法（MinMax、Z-score、Log 等）；
+- ✅ 保证归一化与反归一化是一一对应的；
+- ✅ 保持训练模块解耦，只依赖统一接口；
+- ✅ 易于测试和扩展。
+
+------
+
+## ✅ 一、结构设计（归一化策略接口）
+
+```python
+normalization/
+├── __init__.py
+├── base.py                  # 抽象基类
+├── minmax.py                # MinMax归一化
+├── zscore.py                # ZScore标准化
+├── factory.py               # 创建策略的工厂方法
+```
+
+------
+
+## ✅ 二、代码实现
+
+### `base.py`（抽象归一化接口）
+
+```python
+from abc import ABC, abstractmethod
+import pandas as pd
+
+class Normalizer(ABC):
+    @abstractmethod
+    def fit(self, series: pd.Series):
+        """计算归一化所需的参数"""
+        pass
+
+    @abstractmethod
+    def transform(self, series: pd.Series) -> pd.Series:
+        """执行归一化"""
+        pass
+
+    @abstractmethod
+    def inverse_transform(self, series: pd.Series) -> pd.Series:
+        """反归一化"""
+        pass
+
+    @abstractmethod
+    def get_params(self) -> dict:
+        """返回参数（用于持久化或调试）"""
+        pass
+```
+
+------
+
+### `minmax.py`
+
+```python
+from .base import Normalizer
+import pandas as pd
+
+class MinMaxNormalizer(Normalizer):
+    def __init__(self):
+        self.min_val = None
+        self.max_val = None
+
+    def fit(self, series: pd.Series):
+        self.min_val = float(series.min())
+        self.max_val = float(series.max())
+
+    def transform(self, series: pd.Series) -> pd.Series:
+        return (series - self.min_val) / (self.max_val - self.min_val + 1e-8)
+
+    def inverse_transform(self, series: pd.Series) -> pd.Series:
+        return series * (self.max_val - self.min_val) + self.min_val
+
+    def get_params(self):
+        return {"min": self.min_val, "max": self.max_val}
+```
+
+------
+
+### `zscore.py`
+
+```python
+from .base import Normalizer
+import pandas as pd
+
+class ZScoreNormalizer(Normalizer):
+    def __init__(self):
+        self.mean = None
+        self.std = None
+
+    def fit(self, series: pd.Series):
+        self.mean = float(series.mean())
+        self.std = float(series.std())
+
+    def transform(self, series: pd.Series) -> pd.Series:
+        return (series - self.mean) / (self.std + 1e-8)
+
+    def inverse_transform(self, series: pd.Series) -> pd.Series:
+        return series * self.std + self.mean
+
+    def get_params(self):
+        return {"mean": self.mean, "std": self.std}
+```
+
+------
+
+### `factory.py`（策略工厂）
+
+```python
+from .minmax import MinMaxNormalizer
+from .zscore import ZScoreNormalizer
+
+def get_normalizer(strategy: str):
+    """
+    获取归一化策略
+    """
+    strategy = strategy.lower()
+    if strategy == "minmax":
+        return MinMaxNormalizer()
+    elif strategy == "zscore":
+        return ZScoreNormalizer()
+    else:
+        raise ValueError(f"Unsupported normalization strategy: {strategy}")
+```
+
+------
+
+## ✅ 三、在数据预处理中使用归一化策略
+
+在 `DataPreprocessor` 中集成：
+
+```python
+from normalization.factory import get_normalizer
+
+class DataPreprocessor:
+    def __init__(self, factor_configs: Dict[str, Dict]):
+        self.factor_configs = factor_configs
+        self.normalizers = {}
+
+    def normalize(self, df: pd.DataFrame) -> pd.DataFrame:
+        for col, cfg in self.factor_configs.items():
+            if cfg.get("type") == "numerical" and cfg.get("normalize") and not cfg.get("encoded"):
+                strategy = cfg.get("strategy", "minmax")
+                normalizer = get_normalizer(strategy)
+                normalizer.fit(df[col])
+                df[col] = normalizer.transform(df[col])
+                self.normalizers[col] = normalizer
+        return df
+
+    def inverse_normalize(self, df: pd.DataFrame) -> pd.DataFrame:
+        for col, normalizer in self.normalizers.items():
+            df[col] = normalizer.inverse_transform(df[col])
+        return df
+```
+
+------
+
+## ✅ 四、字段配置中的扩展参数示例
+
+```python
+factor_configs = {
+    "age": {
+        "type": "numerical",
+        "normalize": True,
+        "strategy": "minmax",     # 也可以使用 "zscore"
+        "encoded": False
+    },
+    "height": {
+        "type": "numerical",
+        "normalize": True,
+        "strategy": "zscore",
+        "encoded": False
+    }
+}
+```
+
+------
+
+## ✅ 五、优势总结
+
+| 优点         | 描述                                             |
+| ------------ | ------------------------------------------------ |
+| ✅ 插拔式策略 | 可以快速添加自定义归一化方式                     |
+| ✅ 接口统一   | 所有归一化类都有 fit/transform/inverse_transform |
+| ✅ 模块解耦   | 训练器/预处理器不依赖具体实现细节                |
+| ✅ 适配场景广 | 不同模型可要求不同字段归一化策略                 |
+
+------
+
+是否还需要我：
+
+- 增加自定义归一化方式（如对数归一化、最大绝对值归一化）？
+- 将归一化策略序列化保存，方便模型部署反归一化时加载使用？
+- 加入日志记录和调试模式？
+
+我可以根据你的使用场景继续封装。
+
+为了在模型部署时支持 **反归一化操作**，我们需要将每个字段使用的归一化策略和其参数进行 **序列化保存（保存到文件或数据库）**，并在加载模型时一并还原这些归一化配置。
+
+------
+
+## ✅ 一、核心目标
+
+- 在训练阶段：
+  - 每个字段的归一化策略（如 MinMax、ZScore）和对应参数被保存；
+- 在预测/部署阶段：
+  - 从保存的配置中 **加载归一化器对象**，用于 `inverse_transform` 反归一化操作。
+
+------
+
+## ✅ 二、改造 Normalizer 接口（支持保存/加载）
+
+### `base.py` 增加 `to_dict()` / `from_dict()` 方法
+
+```python
+from abc import ABC, abstractmethod
+import pandas as pd
+
+class Normalizer(ABC):
+    @abstractmethod
+    def fit(self, series: pd.Series):
+        pass
+
+    @abstractmethod
+    def transform(self, series: pd.Series) -> pd.Series:
+        pass
+
+    @abstractmethod
+    def inverse_transform(self, series: pd.Series) -> pd.Series:
+        pass
+
+    @abstractmethod
+    def get_params(self) -> dict:
+        pass
+
+    @abstractmethod
+    def to_dict(self) -> dict:
+        """用于序列化保存"""
+        pass
+
+    @classmethod
+    @abstractmethod
+    def from_dict(cls, data: dict):
+        """从序列化数据中还原归一化器"""
+        pass
+```
+
+------
+
+## ✅ 三、实现 MinMaxNormalizer 的保存与加载
+
+### `minmax.py`
+
+```python
+from .base import Normalizer
+import pandas as pd
+
+class MinMaxNormalizer(Normalizer):
+    def __init__(self, min_val=None, max_val=None):
+        self.min_val = min_val
+        self.max_val = max_val
+
+    def fit(self, series: pd.Series):
+        self.min_val = float(series.min())
+        self.max_val = float(series.max())
+
+    def transform(self, series: pd.Series) -> pd.Series:
+        return (series - self.min_val) / (self.max_val - self.min_val + 1e-8)
+
+    def inverse_transform(self, series: pd.Series) -> pd.Series:
+        return series * (self.max_val - self.min_val) + self.min_val
+
+    def get_params(self):
+        return {"min": self.min_val, "max": self.max_val}
+
+    def to_dict(self):
+        return {
+            "type": "minmax",
+            "min_val": self.min_val,
+            "max_val": self.max_val
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(min_val=data["min_val"], max_val=data["max_val"])
+```
+
+------
+
+## ✅ 四、通用加载函数
+
+### `factory.py` 扩展反序列化功能
+
+```python
+from .minmax import MinMaxNormalizer
+from .zscore import ZScoreNormalizer
+
+NORMALIZER_CLASSES = {
+    "minmax": MinMaxNormalizer,
+    "zscore": ZScoreNormalizer
+}
+
+def get_normalizer(strategy: str):
+    strategy = strategy.lower()
+    if strategy in NORMALIZER_CLASSES:
+        return NORMALIZER_CLASSES[strategy]()
+    else:
+        raise ValueError(f"Unsupported normalization strategy: {strategy}")
+
+def load_normalizer(data: dict):
+    strategy = data["type"]
+    if strategy in NORMALIZER_CLASSES:
+        return NORMALIZER_CLASSES[strategy].from_dict(data)
+    else:
+        raise ValueError(f"Unknown normalizer type in serialized data: {strategy}")
+```
+
+------
+
+## ✅ 五、保存和加载示例（JSON 文件）
+
+### ✅ 保存归一化器配置
+
+```python
+import json
+
+def save_normalizers(normalizers: dict, path: str):
+    """
+    保存归一化器配置为 JSON 文件
+    """
+    data = {col: normalizer.to_dict() for col, normalizer in normalizers.items()}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+```
+
+### ✅ 加载归一化器配置
+
+```python
+from normalization.factory import load_normalizer
+
+def load_normalizers(path: str) -> dict:
+    """
+    加载归一化器配置
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return {col: load_normalizer(cfg) for col, cfg in data.items()}
+```
+
+------
+
+## ✅ 六、在训练与预测阶段使用
+
+### 训练结束时保存配置：
+
+```python
+preprocessor = DataPreprocessor(factor_configs)
+df = preprocessor.normalize(df)
+save_normalizers(preprocessor.normalizers, "normalizers.json")
+```
+
+### 部署预测时加载配置并反归一化：
+
+```python
+normalizers = load_normalizers("normalizers.json")
+for col, normalizer in normalizers.items():
+    df[col] = normalizer.inverse_transform(df[col])
+```
+
+------
+
+## ✅ 七、总结优势
+
+| 功能点           | 说明                                 |
+| ---------------- | ------------------------------------ |
+| ✅ 归一化策略可选 | 每个字段独立选择合适的归一化策略     |
+| ✅ 可反归一化     | 支持模型预测输出回转到原始单位       |
+| ✅ 可持久化       | 可存为 JSON，适合模型部署与调试      |
+| ✅ 模型解耦       | 模型本身只处理数值，不关心归一化策略 |
+
+------
+
+如果你需要，我也可以扩展支持：
+
+- 将归一化策略保存在数据库中；
+- 将 `normalizers.json` 自动与模型文件打包；
+- 多模型共享的归一化缓存目录设计。
+
+是否需要将它们集成进你当前的训练流程结构？
+
+反归一化的使用位置取决于你的 **目标** 是什么：可视化指标、还原输出、或生成结果报告。下面是详细的说明：
+
+------
+
+## ✅ 一、反归一化应该使用在哪些场景？
+
+### 📌 1. **预测结果输出前（部署或离线推理）**
+
+**场景**：你使用模型预测数据后，需要将模型输出还原为用户可理解的原始单位（如价格、温度、销售量等）。
+
+- **位置**：模型预测结果之后，模型输出 → `inverse_transform`
+- **是否必须**：✅必须，如果模型输出的是归一化后的值
+
+```python
+# 模型预测
+y_pred_norm = model.predict(X_test)
+
+# 反归一化
+y_pred = normalizer.inverse_transform(y_pred_norm)
+```
+
+------
+
+### 📌 2. **评估指标计算前（MSE、MAE、R² 等）**
+
+**场景**：你希望评估指标的单位是“真实世界单位”，否则归一化数据下的 MAE、MSE 没有实际意义。
+
+- **位置**：模型预测 + 标签都需反归一化后再计算指标
+- **是否必须**：✅推荐（除非你就想看归一化单位下的误差）
+
+```python
+# 反归一化
+y_pred = normalizer.inverse_transform(y_pred_norm)
+y_true = normalizer.inverse_transform(y_test)
+
+# 再进行误差评估
+mae = mean_absolute_error(y_true, y_pred)
+```
+
+------
+
+### 📌 3. **训练集输出可视化（非必须）**
+
+**场景**：如果你在训练后想画图观察模型对训练集拟合得如何，通常你也会想看原始单位的输出。
+
+- **位置**：仅用于可视化、报告生成等环节
+- **是否必须**：❌可选
+
+------
+
+## ✅ 二、反归一化应该 **不使用** 的地方
+
+### 🚫 1. 模型内部（例如 loss 计算）
+
+- 在模型训练过程中，所有的 loss 计算、反向传播都应在 **归一化后的数据** 上进行。
+- 不应在模型内部对输出 `inverse_transform` 后再计算 loss。
+
+```python
+# 错误 ❌
+loss = MSE(y_true, normalizer.inverse_transform(model(X)))
+
+# 正确 ✅
+loss = MSE(y_true_normalized, model(X))
+```
+
+------
+
+## ✅ 三、你的情况说明
+
+> 我现在是在模型训练后的外部对训练数据进行的反归一化
+
+### ✅ 正确做法应是：
+
+1. **训练前归一化输入和输出**
+2. **训练时使用归一化后的数据**
+3. **训练后不对训练数据反归一化**
+   - 除非你要画图看模型效果，或输出预测结果
+4. **预测时模型输出进行反归一化**
+
+------
+
+## ✅ 四、总结
+
+| 阶段       | 是否归一化          | 是否反归一化   | 原因                   |
+| ---------- | ------------------- | -------------- | ---------------------- |
+| 训练前数据 | ✅ 需要              | ❌ 不需要       | 提升模型训练稳定性     |
+| 模型内部   | ✅ 使用归一化        | ❌ 不做反归一化 | loss 计算基于归一化    |
+| 模型输出   | ✅ 输出归一化        | ✅ 再反归一化   | 提供用户真实单位的预测 |
+| 评估指标   | ✅ 预测+标签反归一化 | ✅              | 保证指标有实际意义     |
+| 可视化     | ✅ 反归一化          | ✅              | 呈现原始值曲线         |
+
+------
+
+是否需要我整合到你目前的模型训练和预测框架中？我可以直接帮你写一个完整的训练 + 预测 + 反归一化评估的示例。
+
+下面是一个整合了**训练、预测、反归一化、评估**的完整流程代码示例，使用线性回归（或 DNN）模型为例，并且适配你的框架结构：
+
+------
+
+## ✅ 一、目录结构概览（推荐）
+
+```
+ml_platform/
+├── normalizers/
+│   └── base.py         # 归一化策略基础类
+│   └── minmax.py       # MinMax归一化
+├── models/
+│   └── base_adapter.py # 模型适配器接口
+│   └── linear.py       # 线性模型适配器
+├── trainer/
+│   └── trainer.py      # 核心训练与评估逻辑
+├── utils/
+│   └── io.py           # 模型保存与归一化参数保存
+└── main.py             # 示例入口点
+```
+
+------
+
+## ✅ 二、归一化组件（minmax.py）
+
+```python
+# ml_platform/normalizers/minmax.py
+import numpy as np
+import json
+
+class MinMaxNormalizer:
+    def __init__(self):
+        self.min = None
+        self.max = None
+
+    def fit(self, data: np.ndarray):
+        self.min = data.min(axis=0)
+        self.max = data.max(axis=0)
+
+    def transform(self, data: np.ndarray) -> np.ndarray:
+        return (data - self.min) / (self.max - self.min + 1e-8)
+
+    def inverse_transform(self, data: np.ndarray) -> np.ndarray:
+        return data * (self.max - self.min + 1e-8) + self.min
+
+    def save(self, filepath):
+        with open(filepath, 'w') as f:
+            json.dump({'min': self.min.tolist(), 'max': self.max.tolist()}, f)
+
+    def load(self, filepath):
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+            self.min = np.array(data['min'])
+            self.max = np.array(data['max'])
+```
+
+------
+
+## ✅ 三、模型适配器接口与线性实现（base_adapter.py, linear.py）
+
+```python
+# ml_platform/models/base_adapter.py
+class BaseModelAdapter:
+    def train(self, X_train, y_train, X_val, y_val): ...
+    def predict(self, X): ...
+    def save(self, path): ...
+    def load(self, path): ...
+
+# ml_platform/models/linear.py
+from sklearn.linear_model import LinearRegression
+from .base_adapter import BaseModelAdapter
+import joblib
+
+class LinearModelAdapter(BaseModelAdapter):
+    def __init__(self):
+        self.model = LinearRegression()
+
+    def train(self, X_train, y_train, X_val=None, y_val=None):
+        self.model.fit(X_train, y_train)
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+    def save(self, path):
+        joblib.dump(self.model, path)
+
+    def load(self, path):
+        self.model = joblib.load(path)
+```
+
+------
+
+## ✅ 四、训练器实现（trainer.py）
+
+```python
+# ml_platform/trainer/trainer.py
+import numpy as np
+from ml_platform.normalizers.minmax import MinMaxNormalizer
+
+class ModelTrainer:
+    def __init__(self, model_adapter, normalization_enabled=True):
+        self.model = model_adapter
+        self.normalizer = MinMaxNormalizer() if normalization_enabled else None
+
+    def train(self, X_train, y_train, X_val=None, y_val=None):
+        if self.normalizer:
+            self.normalizer.fit(y_train)
+            y_train = self.normalizer.transform(y_train)
+            if y_val is not None:
+                y_val = self.normalizer.transform(y_val)
+
+        self.model.train(X_train, y_train, X_val, y_val)
+
+    def predict(self, X):
+        y_pred = self.model.predict(X)
+        if self.normalizer:
+            y_pred = self.normalizer.inverse_transform(y_pred)
+        return y_pred
+
+    def evaluate(self, X_test, y_test):
+        y_pred = self.model.predict(X_test)
+        if self.normalizer:
+            y_pred = self.normalizer.inverse_transform(y_pred)
+            y_test = self.normalizer.inverse_transform(y_test)
+
+        mae = np.mean(np.abs(y_test - y_pred))
+        mse = np.mean((y_test - y_pred) ** 2)
+        return {"MAE": mae, "MSE": mse}
+```
+
+------
+
+## ✅ 五、测试入口（main.py）
+
+```python
+# ml_platform/main.py
+import numpy as np
+from ml_platform.models.linear import LinearModelAdapter
+from ml_platform.trainer.trainer import ModelTrainer
+
+# 1. 模拟数据
+X = np.random.rand(100, 5)
+y = X @ np.array([1.5, -2, 0.5, 3.0, 0.2]) + 0.1 * np.random.randn(100)
+
+# 2. 划分数据集
+train_size = int(len(X) * 0.7)
+val_size = int(len(X) * 0.1)
+X_train, X_val, X_test = X[:train_size], X[train_size:train_size+val_size], X[train_size+val_size:]
+y_train, y_val, y_test = y[:train_size], y[train_size:train_size+val_size], y[train_size+val_size:]
+
+# 3. 模型初始化与训练
+model_adapter = LinearModelAdapter()
+trainer = ModelTrainer(model_adapter)
+trainer.train(X_train, y_train.reshape(-1, 1), X_val, y_val.reshape(-1, 1))
+
+# 4. 模型预测与评估
+pred = trainer.predict(X_test)
+metrics = trainer.evaluate(X_test, y_test.reshape(-1, 1))
+
+print("预测值:", pred[:5].flatten())
+print("评估结果:", metrics)
+```
+
+------
+
+## ✅ 六、重点说明
+
+| 模块                 | 说明                                                         |
+| -------------------- | ------------------------------------------------------------ |
+| `MinMaxNormalizer`   | 实现了 `fit`, `transform`, `inverse_transform`, 可序列化     |
+| `LinearModelAdapter` | 适配 `sklearn` 的线性回归模型，封装 `train`, `predict`, `save/load` |
+| `ModelTrainer`       | 负责整体训练流程，适配归一化、反归一化逻辑与评估             |
+| `main.py`            | 模拟流程并展示整个训练、预测、评估过程                       |
+
+------
+
+是否还希望我添加：
+
+- 对归一化参数的保存/加载逻辑（部署使用）？
+- 支持流式训练日志回传给前端？
+- 接入任务队列（如 Celery）调用整个流程？
+
+我们将归一化与反归一化模块作为流程节点 `NormalizationNode`，整合进现有的训练适配器结构中，并支持日志回传、策略保存、加载与切换归一化方法。以下是完整的模块集成方案。
+
+------
+
+## ✅ 模块结构说明
+
+```
+ml_pipeline/
+│
+├── base_node.py               # 流程节点基类
+├── normalization_strategies.py  # 多种归一化策略定义
+├── normalization_node.py     # 封装的归一化流程节点
+├── training_flow.py          # 训练流程定义与任务运行管理
+├── adapter_base.py           # 模型训练适配器基类
+├── dnn_regression_adapter.py # 示例：DNN回归模型适配器
+└── utils/
+    └── logger.py             # 日志回传模块
+```
+
+------
+
+## 1️⃣ `base_node.py`
+
+```python
+# ml_pipeline/base_node.py
+from abc import ABC, abstractmethod
+
+class BaseNode(ABC):
+    def __init__(self, name: str):
+        self.name = name
+
+    @abstractmethod
+    def run(self, context: dict) -> dict:
+        """执行当前节点的逻辑，接收并返回 context"""
+        pass
+```
+
+------
+
+## 2️⃣ `normalization_strategies.py`
+
+```python
+# ml_pipeline/normalization_strategies.py
+import pandas as pd
+import joblib
+from abc import ABC, abstractmethod
+
+class NormalizationStrategy(ABC):
+    @abstractmethod
+    def fit(self, data: pd.DataFrame): pass
+
+    @abstractmethod
+    def transform(self, data: pd.DataFrame) -> pd.DataFrame: pass
+
+    @abstractmethod
+    def inverse_transform(self, data: pd.DataFrame) -> pd.DataFrame: pass
+
+    def save(self, path: str):
+        joblib.dump(self, path)
+
+    def load(self, path: str):
+        obj = joblib.load(path)
+        self.__dict__.update(obj.__dict__)
+
+class MinMaxNormalization(NormalizationStrategy):
+    def __init__(self):
+        self.min = None
+        self.max = None
+
+    def fit(self, data: pd.DataFrame):
+        self.min = data.min()
+        self.max = data.max()
+
+    def transform(self, data: pd.DataFrame) -> pd.DataFrame:
+        return (data - self.min) / (self.max - self.min + 1e-8)
+
+    def inverse_transform(self, data: pd.DataFrame) -> pd.DataFrame:
+        return data * (self.max - self.min + 1e-8) + self.min
+
+class StandardNormalization(NormalizationStrategy):
+    def __init__(self):
+        self.mean = None
+        self.std = None
+
+    def fit(self, data: pd.DataFrame):
+        self.mean = data.mean()
+        self.std = data.std()
+
+    def transform(self, data: pd.DataFrame) -> pd.DataFrame:
+        return (data - self.mean) / (self.std + 1e-8)
+
+    def inverse_transform(self, data: pd.DataFrame) -> pd.DataFrame:
+        return data * (self.std + 1e-8) + self.mean
+
+def get_normalization_strategy(name: str) -> NormalizationStrategy:
+    if name == "minmax":
+        return MinMaxNormalization()
+    elif name == "standard":
+        return StandardNormalization()
+    else:
+        raise ValueError(f"Unknown normalization strategy: {name}")
+```
+
+------
+
+## 3️⃣ `normalization_node.py`
+
+```python
+# ml_pipeline/normalization_node.py
+from .base_node import BaseNode
+from .normalization_strategies import get_normalization_strategy
+from typing import Optional
+import pandas as pd
+import os
+
+class NormalizationNode(BaseNode):
+    def __init__(self, strategy_name: str, normalize_columns: Optional[list] = None, save_path: Optional[str] = None):
+        super().__init__("NormalizationNode")
+        self.strategy_name = strategy_name
+        self.normalize_columns = normalize_columns
+        self.save_path = save_path or f"./normalizers/{strategy_name}_normalizer.pkl"
+        os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
+
+    def run(self, context: dict) -> dict:
+        df = context["train_data"]
+        strategy = get_normalization_strategy(self.strategy_name)
+        columns = self.normalize_columns or df.select_dtypes(include=['float', 'int']).columns.tolist()
+        strategy.fit(df[columns])
+        df[columns] = strategy.transform(df[columns])
+        context["train_data"] = df
+        strategy.save(self.save_path)
+        context["normalization_strategy"] = strategy
+        context["normalize_columns"] = columns
+        return context
+```
+
+------
+
+## 4️⃣ 训练流程整合（training_flow.py）
+
+```python
+# ml_pipeline/training_flow.py
+from .normalization_node import NormalizationNode
+from .base_node import BaseNode
+from typing import List
+import logging
+
+logger = logging.getLogger(__name__)
+
+class TrainingFlow:
+    def __init__(self, nodes: List[BaseNode]):
+        self.nodes = nodes
+
+    def run(self, context: dict):
+        for node in self.nodes:
+            logger.info(f"Running node: {node.name}")
+            context = node.run(context)
+        return context
+```
+
+------
+
+## ✅ 示例使用（run_training.py）
+
+```python
+from ml_pipeline.training_flow import TrainingFlow
+from ml_pipeline.normalization_node import NormalizationNode
+from mynodes.data_cleaning_node import DataCleaningNode
+from mynodes.train_model_node import TrainModelNode
+import pandas as pd
+
+# 加载训练数据
+df = pd.read_csv("data.csv")
+
+context = {
+    "train_data": df,
+    "model_type": "dnn_regression"
+}
+
+flow = TrainingFlow(nodes=[
+    DataCleaningNode(),
+    NormalizationNode(strategy_name="minmax"),
+    TrainModelNode()
+])
+
+context = flow.run(context)
+```
+
+------
+
+## 🔁 在模型推理时反归一化（例如预测）
+
+```python
+# predict.py
+from ml_pipeline.normalization_strategies import get_normalization_strategy
+
+strategy = get_normalization_strategy("minmax")
+strategy.load("./normalizers/minmax_normalizer.pkl")
+
+# 假设 result 是预测输出
+inverse_result = strategy.inverse_transform(result)
+```
+
+------
+
+### 🔍 总结
+
+| 步骤   | 功能                       | 模块                  |
+| ------ | -------------------------- | --------------------- |
+| 初始化 | 归一化节点添加到流程       | `NormalizationNode`   |
+| 执行   | 归一化训练数据             | `run()` 方法          |
+| 保存   | 归一化策略持久化           | `joblib.dump()`       |
+| 预测   | 使用相同策略反归一化预测值 | `inverse_transform()` |
+
+------
+
+需要我进一步为你接入模型适配器结构（比如 `DNNRegressionAdapter`）并结合流程节点自动运行吗？我也可以帮你生成对应的训练日志流式返回逻辑。
+
+下面是完整机制的实现，确保训练和预测阶段使用一致的归一化策略，包括：
+
+1. ✅ 流程节点封装（归一化、反归一化）
+2. ✅ 策略保存与加载
+3. ✅ 模型元信息记录归一化策略路径
+4. ✅ 示例代码集成与注释
+
+------
+
+## ✅ 1. 归一化策略基类 + 多策略实现
+
+```python
+# normalization/strategies/base.py
+import abc
+import pandas as pd
+import pickle
+
+class BaseNormalizer(abc.ABC):
+    def __init__(self, fields: list[str]):
+        self.fields = fields
+
+    @abc.abstractmethod
+    def fit(self, df: pd.DataFrame): ...
+    
+    @abc.abstractmethod
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame: ...
+    
+    @abc.abstractmethod
+    def inverse_transform(self, df: pd.DataFrame) -> pd.DataFrame: ...
+    
+    def save(self, path: str):
+        with open(path, "wb") as f:
+            pickle.dump(self, f)
+    
+    @classmethod
+    def load(cls, path: str) -> "BaseNormalizer":
+        with open(path, "rb") as f:
+            return pickle.load(f)
+# normalization/strategies/minmax.py
+import pandas as pd
+from .base import BaseNormalizer
+
+class MinMaxNormalizer(BaseNormalizer):
+    def __init__(self, fields: list[str]):
+        super().__init__(fields)
+        self.min = {}
+        self.max = {}
+
+    def fit(self, df: pd.DataFrame):
+        for field in self.fields:
+            self.min[field] = df[field].min()
+            self.max[field] = df[field].max()
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        for field in self.fields:
+            df[field] = (df[field] - self.min[field]) / (self.max[field] - self.min[field])
+        return df
+
+    def inverse_transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        for field in self.fields:
+            df[field] = df[field] * (self.max[field] - self.min[field]) + self.min[field]
+        return df
+```
+
+------
+
+## ✅ 2. 归一化策略工厂
+
+```python
+# normalization/factory.py
+from .strategies.minmax import MinMaxNormalizer
+
+def get_normalizer(name: str, fields: list[str]):
+    if name == "minmax":
+        return MinMaxNormalizer(fields)
+    raise ValueError(f"Unsupported normalization strategy: {name}")
+```
+
+------
+
+## ✅ 3. 封装流程节点（Node）
+
+```python
+# pipeline/nodes/normalize.py
+from normalization.factory import get_normalizer
+
+class NormalizationNode:
+    def __init__(self, strategy_name: str, fields: list[str], save_path: str):
+        self.strategy_name = strategy_name
+        self.fields = fields
+        self.save_path = save_path
+
+    def run(self, df: pd.DataFrame) -> pd.DataFrame:
+        strategy = get_normalizer(self.strategy_name, self.fields)
+        strategy.fit(df)
+        df_transformed = strategy.transform(df)
+        strategy.save(self.save_path)
+        return df_transformed
+# pipeline/nodes/inverse_normalize.py
+from normalization.factory import get_normalizer
+
+class InverseNormalizationNode:
+    def __init__(self, strategy_name: str, fields: list[str], load_path: str):
+        self.strategy_name = strategy_name
+        self.fields = fields
+        self.load_path = load_path
+
+    def run(self, df: pd.DataFrame) -> pd.DataFrame:
+        strategy = get_normalizer(self.strategy_name, self.fields)
+        strategy = strategy.load(self.load_path)
+        return strategy.inverse_transform(df)
+```
+
+------
+
+## ✅ 4. 模型元信息保存格式（示例）
+
+```json
+{
+  "model_id": "model_xyz",
+  "normalization": {
+    "strategy": "minmax",
+    "fields": ["age", "income"],
+    "path": "./models/model_xyz/normalizer_minmax.pkl"
+  }
+}
+```
+
+可以保存在数据库字段、JSON配置或模型目录中。
+
+------
+
+## ✅ 5. 在训练流程中使用
+
+```python
+df_raw = pd.read_csv(dataset_path)
+fields_to_normalize = ["age", "income"]
+
+# 步骤1：归一化
+norm_node = NormalizationNode("minmax", fields_to_normalize, save_path="./models/model_xyz/normalizer_minmax.pkl")
+df_normalized = norm_node.run(df_raw)
+
+# 步骤2：训练模型...
+```
+
+------
+
+## ✅ 6. 在预测流程中使用
+
+```python
+df_input = pd.read_csv(input_path)
+fields_to_normalize = ["age", "income"]
+
+# 步骤1：归一化输入
+strategy = get_normalizer("minmax", fields_to_normalize).load("./models/model_xyz/normalizer_minmax.pkl")
+df_input_normalized = strategy.transform(df_input)
+
+# 步骤2：预测
+predictions = model.predict(df_input_normalized)
+
+# 步骤3：反归一化
+inverse_node = InverseNormalizationNode("minmax", ["target"], "./models/model_xyz/normalizer_minmax.pkl")
+df_output = inverse_node.run(predictions)
+```
+
+------
+
+## ✅ 下一步建议
+
+你可以：
+
+- ✅ 将这些节点整合入你已有的 `TrainingPipeline` 中
+- ✅ 为预测流程增加相应的标准 Node
+- ✅ 添加数据库记录支持记录 `normalizer_path`
+
+------
+
+是否需要我为你：
+
+- 添加其他归一化策略（如 Z-Score、Robust）？
+- 将这些节点自动加入你的流程框架中并支持 YAML/JSON 配置方式加载？
+- 为训练/预测流程封装完整的 CLI 或 Django API 接口？
+
+告诉我你的下一步目标，我帮你完善。
