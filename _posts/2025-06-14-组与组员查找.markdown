@@ -1,0 +1,271 @@
+---
+layout:     post
+title:      "组与组员的查找"
+subtitle:   ""
+date:       2025-06-14
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - Django
+    - pgsql
+---
+
+下面是一个完整的 Django 单元测试代码示例，用于测试你这个“找出标签集合完全一致的 `TagGroup`”逻辑，**不使用原生 SQL，仅使用 Django ORM**（依赖 PostgreSQL 的 `ArrayAgg`）。
+
+------
+
+## ✅ 模型假设（用于测试）
+
+```python
+# models.py
+from django.db import models
+
+class TagGroup(models.Model):
+    name = models.CharField(max_length=100)
+
+class TagDetail(models.Model):
+    tag_group = models.ForeignKey(TagGroup, on_delete=models.CASCADE, related_name='details')
+    name = models.CharField(max_length=100)
+```
+
+------
+
+## ✅ 查询函数（需先引入）
+
+```python
+# utils.py 或 services.py
+from django.db.models import ArrayAgg
+from yourapp.models import TagGroup, TagDetail
+
+def get_same_tag_groups(group_id):
+    target_names = list(
+        TagDetail.objects
+        .filter(tag_group_id=group_id)
+        .order_by('name')
+        .values_list('name', flat=True)
+    )
+
+    if not target_names:
+        return []
+
+    groups = (
+        TagGroup.objects
+        .annotate(tag_names=ArrayAgg('details__name', ordering='details__name'))
+        .filter(tag_names=target_names)
+        .values_list('id', flat=True)
+    )
+
+    return list(groups)
+```
+
+------
+
+## ✅ 单元测试代码
+
+```python
+# tests.py
+from django.test import TestCase
+from yourapp.models import TagGroup, TagDetail
+from yourapp.utils import get_same_tag_groups
+
+class TagGroupMatchingTest(TestCase):
+    def setUp(self):
+        # Group A: apple, banana
+        self.group_a = TagGroup.objects.create(name='Group A')
+        TagDetail.objects.bulk_create([
+            TagDetail(tag_group=self.group_a, name='apple'),
+            TagDetail(tag_group=self.group_a, name='banana'),
+        ])
+
+        # Group B: banana, apple (same as A but unordered)
+        self.group_b = TagGroup.objects.create(name='Group B')
+        TagDetail.objects.bulk_create([
+            TagDetail(tag_group=self.group_b, name='banana'),
+            TagDetail(tag_group=self.group_b, name='apple'),
+        ])
+
+        # Group C: apple only
+        self.group_c = TagGroup.objects.create(name='Group C')
+        TagDetail.objects.create(tag_group=self.group_c, name='apple')
+
+        # Group D: apple, banana, cherry (extra tag)
+        self.group_d = TagGroup.objects.create(name='Group D')
+        TagDetail.objects.bulk_create([
+            TagDetail(tag_group=self.group_d, name='apple'),
+            TagDetail(tag_group=self.group_d, name='banana'),
+            TagDetail(tag_group=self.group_d, name='cherry'),
+        ])
+
+    def test_matching_groups(self):
+        matching_ids = get_same_tag_groups(self.group_a.id)
+        expected_ids = {self.group_a.id, self.group_b.id}
+
+        self.assertSetEqual(set(matching_ids), expected_ids)
+
+    def test_no_match_for_partial(self):
+        matching_ids = get_same_tag_groups(self.group_c.id)
+        self.assertSetEqual(set(matching_ids), {self.group_c.id})
+
+    def test_no_match_for_extra(self):
+        matching_ids = get_same_tag_groups(self.group_d.id)
+        self.assertSetEqual(set(matching_ids), {self.group_d.id})
+```
+
+------
+
+## ✅ 如何运行测试
+
+确保你使用的是 PostgreSQL，并已配置好 Django 数据库：
+
+```bash
+python manage.py test yourapp
+```
+
+------
+
+## ✅ 可选：只查其他 group（不含自身）
+
+如果你不想让结果包含自己（即只查“其它等价组”），在 `filter` 后加上：
+
+```python
+.exclude(id=group_id)
+```
+
+------
+
+需要我给你这个测试场景的迁移脚本、`pytest` 版本或更大规模压力测试脚本吗？
+
+你的当前实现已经是 **纯 ORM + 高效内存集合对比**，适合中等规模（上万）数据使用。但如果你希望进一步**优化性能**、**减少数据库扫描量或内存消耗**，可以考虑如下几个方向。
+
+------
+
+## ✅ 当前优化程度回顾
+
+你当前方案已经有以下优化点：
+
+| 优化点             | 是否具备 | 说明                                       |
+| ------------------ | -------- | ------------------------------------------ |
+| 只加载必要字段     | ✅        | `.only('name')` 限定字段                   |
+| 批量预加载         | ✅        | `prefetch_related(Prefetch(...))` 避免 N+1 |
+| 结构对比优化       | ✅        | 用 `set()` 减少排序等额外运算              |
+| 提前排除不等长集合 | ✅        | `len(names) != target_count`               |
+
+------
+
+## 🚀 可选优化方向（进阶）
+
+### 1. ✅ **限制候选组范围（用 annotation 聚合过滤）**
+
+> 不用加载所有 group，只加载“可能匹配”的 group，提前用数据库过滤掉数量不对的 group。
+
+示例：
+
+```python
+from django.db.models import Count
+
+# 先过滤出标签数量相等的组（减少 prefetch 的量）
+groups = TagGroup.objects.annotate(tag_count=Count('details')).filter(tag_count=target_count)
+groups = groups.prefetch_related(Prefetch('details', queryset=TagDetail.objects.only('name')))
+```
+
+这样你只 prefetch 数量相同的组，**显著减少内存遍历和请求量**。
+
+------
+
+### 2. ✅ **排序 + tuple 比较（避免 set 构造开销）**
+
+如果你保证标签名称在每组内唯一，**且数量不大**，你也可以将标签名**排序为元组**进行对比（加快 hash 比较）：
+
+```python
+target_signature = tuple(sorted(target_names))
+
+for group in groups:
+    signature = tuple(sorted(d.name for d in group.details.all()))
+    if signature == target_signature:
+        matched_group_ids.append(group.id)
+```
+
+这种方式对比两个元组比对两个 set 更快，尤其是在标签数量较小时（5-30 个以内），速度可能快一倍左右。
+
+------
+
+### 3. ✅ **提前缓存目标签名**
+
+避免多次构建 target 数据结构，尤其你后续可能要多次用：
+
+```python
+# 已有：target_names = set(...)
+target_signature = tuple(sorted(target_names))
+```
+
+------
+
+### 4. ✅ **将结果改为 generator（流式遍历）**
+
+如果你不需要一次性拿到所有 ID，而是逐个返回，可以将其改为生成器：
+
+```python
+def get_groups_with_same_tag_names(group_id):
+    ...
+    for group in groups:
+        ...
+        if names == target_names:
+            yield group.id
+```
+
+然后调用处使用：
+
+```python
+for group_id in get_groups_with_same_tag_names(...):
+    print(group_id)
+```
+
+这样可以节省大量内存（适用于百万组以上的极大数据量）。
+
+------
+
+### 5. ❌ 不推荐的优化：hash 进数据库
+
+你可能会考虑给每个 TagGroup 的标签名集合加上 hash（如 `md5(sorted(tag_names))`）来加速过滤，但这属于：
+
+- 写时增加额外维护负担；
+- 标签变更时同步维护复杂；
+- 不如纯 Python 处理灵活。
+
+仅在超大规模数据（千万以上）需要考虑。
+
+------
+
+## ✅ 推荐最终优化版（组合 Count + Prefetch）
+
+```python
+from django.db.models import Count, Prefetch
+from .models import TagGroup, TagDetail
+
+def get_groups_with_same_tag_names(group_id):
+    target_names = set(
+        TagDetail.objects.filter(tag_group_id=group_id).values_list('name', flat=True)
+    )
+    target_count = len(target_names)
+    target_signature = tuple(sorted(target_names))
+
+    groups = TagGroup.objects.annotate(tag_count=Count('details')).filter(tag_count=target_count)
+    groups = groups.prefetch_related(
+        Prefetch('details', queryset=TagDetail.objects.only('name'))
+    )
+
+    matched_group_ids = []
+
+    for group in groups:
+        signature = tuple(sorted(d.name for d in group.details.all()))
+        if signature == target_signature:
+            matched_group_ids.append(group.id)
+
+    return matched_group_ids
+```
+
+------
+
+如你希望把这封装为可链式使用的 ORM 方法（如 `.with_same_tag_names_as(group_id)`），我也可以帮你做自定义 `QuerySet`。
+
+是否需要我帮你封装为更通用的工具？
