@@ -269,3 +269,285 @@ def get_groups_with_same_tag_names(group_id):
 如你希望把这封装为可链式使用的 ORM 方法（如 `.with_same_tag_names_as(group_id)`），我也可以帮你做自定义 `QuerySet`。
 
 是否需要我帮你封装为更通用的工具？
+
+是的！你现在这段代码已经是**Django ORM 中较高效的实现**，但如果要进一步加速，我们可以从以下几个方面**做结构性优化**，最大程度减少查询量、提高 PostgreSQL 执行效率 —— **特别是在数据集数量和标签组非常庞大的情况下**。
+
+------
+
+## ✅ 你当前做得很好的地方
+
+- 使用了 `Subquery` + `OuterRef` 拿到每个数据集的最新版本；
+- 用 `ArrayAgg(... ordering=..., distinct=True)` 构造有序标签集合；
+- 避免了 Python 端循环，全部逻辑尽量在数据库完成。
+
+------
+
+## 🚀 优化方向（详细说明）
+
+### ✅ 1. 用 `Exists + Filtered Subquery` 替代 `ArrayAgg` 聚合比较（更快）
+
+#### 问题：
+
+你现在用 `ArrayAgg` 会让 PostgreSQL 做字符串数组构造再比较，**这是典型的“聚合 + 过滤比对”**，有一定开销。
+
+#### 替代方案：
+
+改用 `Exists()` + `Group by + Having` 思路（即比对 tag_group 的标签集合是否相同）。
+
+但由于你不想写 SQL，这里给出**兼顾 ORM 和性能**的可行方案：
+
+------
+
+### ✅ 2. 为每个标签组构造“标签签名”（只读优化，不存字段）
+
+我们构造每个标签组的唯一标识（签名），作为**可比较对象**，避免 ArrayAgg：
+
+```python
+# 为每个 TagGroup 构造签名 —— 排序标签名再连接
+def get_tag_signature(tag_group_id):
+    return ','.join(
+        TagDetail.objects
+        .filter(tag_group_id=tag_group_id)
+        .order_by('name')
+        .values_list('name', flat=True)
+    )
+```
+
+> 标签集合 `{x, y, z}` 与 `{z, x, y}` 生成的签名一样 ⇒ 可直接字符串对比！
+
+------
+
+### ✅ 3. 查询阶段避免聚合，对比签名（字符串比较快于数组）
+
+替换原 `ArrayAgg` 为提前构造签名的方式：
+
+```python
+from django.db.models import Subquery, OuterRef
+from yourapp.models import Dataset, DatasetVersion, TagDetail
+
+def get_datasets_with_same_latest_tag_signature(dataset_id):
+    # Step 1: 获取目标标签组 ID
+    latest_tag_group_id = (
+        DatasetVersion.objects
+        .filter(dataset_id=dataset_id)
+        .order_by('-version')
+        .values_list('tag_group_id', flat=True)
+        .first()
+    )
+
+    if not latest_tag_group_id:
+        return []
+
+    # Step 2: 获取目标签名
+    target_signature = get_tag_signature(latest_tag_group_id)
+
+    if not target_signature:
+        return []
+
+    # Step 3: 找出每个数据集的最新版本 tag_group
+    latest_tag_group_subquery = Subquery(
+        DatasetVersion.objects
+        .filter(dataset=OuterRef('pk'))
+        .order_by('-version')
+        .values('tag_group_id')[:1]
+    )
+
+    # Step 4: 比对标签签名（在 Python 侧一次性拉取 tag_group_ids 并映射签名）
+    # 更适合中等规模：几千组时性能优于数据库端聚合
+
+    from django.db.models import F
+
+    datasets = (
+        Dataset.objects
+        .annotate(latest_tag_group_id=latest_tag_group_subquery)
+        .values('id', 'latest_tag_group_id')
+    )
+
+    # 批量取所有 group_id 的签名（避免循环调用 get_tag_signature）
+    from collections import defaultdict
+    tag_group_ids = {d['latest_tag_group_id'] for d in datasets if d['latest_tag_group_id']}
+    group_signature_map = {
+        group_id: get_tag_signature(group_id)
+        for group_id in tag_group_ids
+    }
+
+    matching_ids = [
+        d['id']
+        for d in datasets
+        if group_signature_map.get(d['latest_tag_group_id']) == target_signature
+    ]
+
+    return matching_ids
+```
+
+------
+
+### ✅ 性能优势说明：
+
+| 方法                 | 优点                   | 适用场景                                      |
+| -------------------- | ---------------------- | --------------------------------------------- |
+| 原始 ArrayAgg        | 全 ORM，无手动签名逻辑 | 数据集较少（<1000）时足够快                   |
+| 签名映射法（推荐）   | 极快，无聚合，避免重算 | 数据集成千上万时性能更优，避免大字段聚合      |
+| 预计算字段（下一步） | 查询最快，仅字符串匹配 | 数据不频繁变更，可存 `signature` 字段并加索引 |
+
+------
+
+## ✅ Bonus（额外极致优化）
+
+如你允许为 `TagGroup` 添加只读字段，可在 `TagGroup` 中添加一个 `signature` 字段，用于维护标签集合哈希：
+
+```python
+class TagGroup(models.Model):
+    ...
+    signature = models.CharField(max_length=500, db_index=True)  # 可自动更新
+```
+
+并使用 `post_save` 信号或 save() 内部更新。
+
+查询直接变成：
+
+```python
+Dataset.objects.filter(latest_version__tag_group__signature=target_signature)
+```
+
+这个方法最快，适合读多写少场景。
+
+------
+
+## ✅ 小结
+
+| 方案                           | 速度   | Django 原生 | 适用场景     |
+| ------------------------------ | ------ | ----------- | ------------ |
+| `ArrayAgg` + ORM（你当前使用） | 🟡 中   | ✅ 是        | 中等数据集   |
+| 🆕 TagGroup 签名对比（推荐）    | 🟢 快   | ✅ 是        | 大数据集     |
+| 添加字段 `signature`           | 🟢 最快 | ✅ 是        | 写少读多场景 |
+
+------
+
+如果你希望我帮你封装第 2 个方案为可复用函数/管理器，或给出一个 benchmark 测试工具（对比耗时），我可以继续提供。是否需要？
+
+```python
+# utils/tag_matching.py
+import time
+
+from django.contrib.postgres.aggregates import ArrayAgg
+from django.db.models import Subquery, OuterRef, Q
+from .models import Dataset, DatasetVersion, TagDetail
+
+def build_tag_group_signature(tag_group_id):
+    """构造标签组的签名（按 name 排序连接）"""
+    return ','.join(
+        TagDetail.objects
+        .filter(tag_group_id=tag_group_id)
+        .order_by('name')
+        .values_list('name', flat=True)
+    )
+
+def get_datasets_with_same_latest_tag_signature(dataset_id):
+    """
+    返回所有其最新版本的标签集合与给定 dataset 最新版本标签集合完全一致的 Dataset ID 列表。
+    不使用 ArrayAgg，使用标签签名字符串比较。
+    """
+    latest_tag_group_id = (
+        DatasetVersion.objects
+        .filter(dataset_id=dataset_id)
+        .order_by('-version')
+        .values_list('tag_group_id', flat=True)
+        .first()
+    )
+
+    if not latest_tag_group_id:
+        return []
+
+    target_signature = build_tag_group_signature(latest_tag_group_id)
+    if not target_signature:
+        return []
+
+    latest_tag_group_subquery = Subquery(
+        DatasetVersion.objects
+        .filter(dataset=OuterRef('pk'))
+        .order_by('-version')
+        .values('tag_group_id')[:1]
+    )
+
+    annotated_datasets = Dataset.objects.annotate(latest_tag_group_id=latest_tag_group_subquery)
+
+    group_ids = set(
+        annotated_datasets
+        .values_list('latest_tag_group_id', flat=True)
+    )
+    group_signatures = {
+        gid: build_tag_group_signature(gid)
+        for gid in group_ids if gid
+    }
+
+    matched_ids = [
+        ds.id for ds in annotated_datasets
+        if group_signatures.get(ds.latest_tag_group_id) == target_signature
+    ]
+
+    return matched_ids
+
+def benchmark_tag_matching(dataset_id):
+    """对比 ArrayAgg 方案与标签签名方案的性能"""
+    def match_with_arrayagg():
+        latest_tag_group_id = (
+            DatasetVersion.objects
+            .filter(dataset_id=dataset_id)
+            .order_by('-version')
+            .values_list('tag_group_id', flat=True)
+            .first()
+        )
+
+        if not latest_tag_group_id:
+            return []
+
+        target_tags = list(
+            TagDetail.objects
+            .filter(tag_group_id=latest_tag_group_id)
+            .order_by('name')
+            .values_list('name', flat=True)
+        )
+
+        if not target_tags:
+            return []
+
+        latest_subquery = Subquery(
+            DatasetVersion.objects
+            .filter(dataset=OuterRef('pk'))
+            .order_by('-version')
+            .values('tag_group_id')[:1]
+        )
+
+        result = Dataset.objects.annotate(
+            latest_tag_group_id=latest_subquery
+        ).annotate(
+            latest_tag_names=ArrayAgg(
+                'versions__tag_group__details__name',
+                filter=Q(versions__tag_group_id=OuterRef('latest_tag_group_id')),
+                ordering='versions__tag_group__details__name',
+                distinct=True
+            )
+        ).filter(latest_tag_names=target_tags).values_list('id', flat=True)
+
+        return list(result)
+
+    print("Benchmarking: Dataset ID =", dataset_id)
+
+    start = time.time()
+    result1 = get_datasets_with_same_latest_tag_signature(dataset_id)
+    end = time.time()
+    print(f"Signature Match Time: {end - start:.4f}s, Matches: {len(result1)}")
+
+    start = time.time()
+    result2 = match_with_arrayagg()
+    end = time.time()
+    print(f"ArrayAgg Match Time: {end - start:.4f}s, Matches: {len(result2)}")
+
+    if set(result1) == set(result2):
+        print("✅ Results match")
+    else:
+        print("❌ Results differ")
+
+```
+
