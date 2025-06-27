@@ -3277,3 +3277,782 @@ df_output = inverse_node.run(predictions)
 - 为训练/预测流程封装完整的 CLI 或 Django API 接口？
 
 告诉我你的下一步目标，我帮你完善。
+
+当然可以！你完全可以**不使用任何第三方库**，使用 Python 标准库 + 自定义结构 来实现一个模块化、流程化的模型训练系统。
+
+下面我将为你提供一个**不依赖任何第三方框架（如 Airflow、Prefect、Hydra 等）**的训练流程设计方案，包含：
+
+- ✅ 核心流程引擎（支持链式 / 函数式）
+- ✅ 配置驱动支持（基于字典或 JSON）
+- ✅ 无第三方依赖
+- ✅ 简洁清晰、适合平台扩展
+
+------
+
+## ✅ 一、核心思路
+
+- 每个流程步骤是一个类，继承 `BaseNode`，实现 `run(context)` 方法。
+- `context` 是一个 Python 字典，传递数据。
+- `Pipeline` 类接收多个步骤，并依次调用它们的 `run()`。
+
+------
+
+## ✅ 二、完整示例代码（无第三方依赖）
+
+### 1️⃣ `base_node.py` — 基础流程节点定义
+
+```python
+# base_node.py
+from abc import ABC, abstractmethod
+
+class BaseNode(ABC):
+    def __init__(self, name: str):
+        self.name = name
+
+    @abstractmethod
+    def run(self, context: dict) -> dict:
+        """处理 context 并返回更新后的 context"""
+        pass
+```
+
+------
+
+### 2️⃣ 自定义几个节点（步骤模块）
+
+```python
+# nodes.py
+from base_node import BaseNode
+
+class LoadDatasetNode(BaseNode):
+    def __init__(self, paths: list[str]):
+        super().__init__("LoadDataset")
+        self.paths = paths
+
+    def run(self, context: dict) -> dict:
+        print(f"[{self.name}] 加载数据: {self.paths}")
+        context["raw_data"] = f"Data from {self.paths}"
+        return context
+
+
+class CleanDataNode(BaseNode):
+    def __init__(self, required_columns: list[str]):
+        super().__init__("CleanData")
+        self.required_columns = required_columns
+
+    def run(self, context: dict) -> dict:
+        print(f"[{self.name}] 清洗数据：保留 {self.required_columns}")
+        context["clean_data"] = f"Cleaned({context['raw_data']})"
+        return context
+
+
+class TrainModelNode(BaseNode):
+    def __init__(self, model_type: str, params: dict):
+        super().__init__("TrainModel")
+        self.model_type = model_type
+        self.params = params
+
+    def run(self, context: dict) -> dict:
+        print(f"[{self.name}] 训练模型：{self.model_type} with {self.params}")
+        context["trained_model"] = f"Model({self.model_type})"
+        return context
+```
+
+------
+
+### 3️⃣ `pipeline.py` — 流程管理器
+
+```python
+# pipeline.py
+from typing import List
+from base_node import BaseNode
+
+class Pipeline:
+    def __init__(self):
+        self.steps: List[BaseNode] = []
+
+    def add(self, step: BaseNode):
+        self.steps.append(step)
+        return self  # 支持链式调用
+
+    def run(self, context=None):
+        context = context or {}
+        for step in self.steps:
+            print(f"\n➡️ 执行步骤：{step.name}")
+            context = step.run(context)
+        print("\n✅ 流程完成")
+        return context
+```
+
+------
+
+### 4️⃣ 使用示例：链式方式调用流程
+
+```python
+# run_pipeline.py
+from pipeline import Pipeline
+from nodes import LoadDatasetNode, CleanDataNode, TrainModelNode
+
+pipeline = (
+    Pipeline()
+    .add(LoadDatasetNode(paths=["data1.xlsx", "data2.xlsx"]))
+    .add(CleanDataNode(required_columns=["age", "salary"]))
+    .add(TrainModelNode(model_type="dnn", params={"layers": [64, 32]}))
+)
+
+final_context = pipeline.run()
+print("\n最终输出上下文：", final_context)
+```
+
+------
+
+## ✅ 三、支持 JSON/字典 配置执行
+
+### 用字典定义：
+
+```python
+pipeline_config = [
+    {"type": "LoadDatasetNode", "params": {"paths": ["a.xlsx", "b.xlsx"]}},
+    {"type": "CleanDataNode", "params": {"required_columns": ["x", "y"]}},
+    {"type": "TrainModelNode", "params": {"model_type": "dnn", "params": {"layers": [64]}}}
+]
+```
+
+### 加载执行（无需外部依赖）：
+
+```python
+# dynamic_pipeline.py
+from nodes import LoadDatasetNode, CleanDataNode, TrainModelNode
+from pipeline import Pipeline
+
+NODE_MAP = {
+    "LoadDatasetNode": LoadDatasetNode,
+    "CleanDataNode": CleanDataNode,
+    "TrainModelNode": TrainModelNode,
+}
+
+def load_pipeline_from_config(config: list[dict]) -> Pipeline:
+    pipeline = Pipeline()
+    for step in config:
+        node_class = NODE_MAP[step["type"]]
+        node = node_class(**step["params"])
+        pipeline.add(node)
+    return pipeline
+```
+
+------
+
+## ✅ 四、特点总结
+
+| 特性         | 说明                             |
+| ------------ | -------------------------------- |
+| ✅ 无依赖     | 全部使用 Python 标准库           |
+| 🔌 模块解耦   | 每个步骤单独封装，便于复用与测试 |
+| 📦 易平台集成 | 可嵌入 Django/Celery 任意任务中  |
+| 📋 可配置     | 字典或 JSON 控制流程             |
+| 🧩 可扩展     | 新节点只需继承 `BaseNode` 即可   |
+
+------
+
+## ✅ 是否继续？
+
+我可以帮你：
+
+- 🔁 增加数据预处理、归一化、模型保存等 Node
+- 🧪 生成一个测试运行示例（训练 + 模型保存 + 反归一化）
+- ☁️ 对接 Celery 异步队列/日志流式输出
+- 🛠️ 整理为一个 Python 包结构，供你项目导入使用
+
+你想要我下一步完善哪部分？是否希望我提供完整的项目结构并封装为模块包？
+
+很好，我们来扩展你的无第三方依赖训练流程框架：
+
+------
+
+## ✅ 目标
+
+- 增加以下通用节点：
+  - `PreprocessNode`（数据预处理，如缺失填充、类型转换等）
+  - `NormalizeNode`（数值型归一化）
+  - `SaveModelNode`（保存模型结构或权重信息）
+- 每个节点支持一个可扩展的**`persist()`机制**：
+  - 可选是否持久化结果（如保存至 S3、本地或数据库）
+  - 暂不实现逻辑，仅设计通用接口与结构
+
+------
+
+## ✅ 修改 `BaseNode`：添加持久化挂钩
+
+```python
+# base_node.py
+from abc import ABC, abstractmethod
+
+class BaseNode(ABC):
+    def __init__(self, name: str, persist: bool = False):
+        self.name = name
+        self.persist = persist  # 是否启用持久化
+
+    @abstractmethod
+    def run(self, context: dict) -> dict:
+        pass
+
+    def save_result(self, key: str, value):
+        """用于保存结果，可扩展到 S3、数据库或本地"""
+        if self.persist:
+            print(f"[{self.name}] 🔄 模拟持久化保存：{key} -> {value[:50]}...")
+            # 真实实现中可调用 save_to_s3/save_to_db/save_to_disk 等
+```
+
+------
+
+## ✅ 新增节点 1：预处理节点 `PreprocessNode`
+
+```python
+# nodes.py
+class PreprocessNode(BaseNode):
+    def __init__(self, fields: list[str], fillna: float = 0.0, persist: bool = False):
+        super().__init__("Preprocess", persist)
+        self.fields = fields
+        self.fillna = fillna
+
+    def run(self, context: dict) -> dict:
+        print(f"[{self.name}] 数据预处理：填充字段 {self.fields} 的缺失值为 {self.fillna}")
+        data = context["clean_data"]
+        processed = f"Preprocessed({data})"
+        context["preprocessed_data"] = processed
+        self.save_result("preprocessed_data", processed)
+        return context
+```
+
+------
+
+## ✅ 新增节点 2：归一化节点 `NormalizeNode`
+
+```python
+class NormalizeNode(BaseNode):
+    def __init__(self, fields: list[str], strategy: str = "minmax", persist: bool = False):
+        super().__init__("Normalize", persist)
+        self.fields = fields
+        self.strategy = strategy
+
+    def run(self, context: dict) -> dict:
+        print(f"[{self.name}] 对字段 {self.fields} 使用策略 {self.strategy} 归一化")
+        data = context.get("preprocessed_data") or context.get("clean_data")
+        normalized = f"Normalized({data})"
+        context["normalized_data"] = normalized
+        self.save_result("normalized_data", normalized)
+        return context
+```
+
+------
+
+## ✅ 新增节点 3：模型保存节点 `SaveModelNode`
+
+```python
+class SaveModelNode(BaseNode):
+    def __init__(self, save_path: str, persist: bool = False):
+        super().__init__("SaveModel", persist)
+        self.save_path = save_path
+
+    def run(self, context: dict) -> dict:
+        model = context.get("trained_model")
+        print(f"[{self.name}] 保存模型到路径 {self.save_path}")
+        self.save_result("model", f"ModelFile({model})")
+        context["model_path"] = self.save_path
+        return context
+```
+
+------
+
+## ✅ 使用示例（链式或函数式均可）
+
+```python
+pipeline = (
+    Pipeline()
+    .add(LoadDatasetNode(paths=["a.xlsx", "b.xlsx"]))
+    .add(CleanDataNode(required_columns=["age", "income"]))
+    .add(PreprocessNode(fields=["age", "income"], fillna=0.0, persist=True))
+    .add(NormalizeNode(fields=["age", "income"], persist=True))
+    .add(TrainModelNode(model_type="dnn", params={"layers": [64, 32]}))
+    .add(SaveModelNode(save_path="./model/dnn.pkl", persist=True))
+)
+context = pipeline.run()
+```
+
+------
+
+## ✅ 持久化扩展建议
+
+你可以通过策略类实现持久化支持：
+
+```python
+class ResultSaver:
+    def __init__(self, mode="local"):
+        self.mode = mode  # 可为 'local', 's3', 'db'
+
+    def save(self, key: str, value):
+        if self.mode == "local":
+            print(f"[Local] Save {key}")
+        elif self.mode == "s3":
+            print(f"[S3] Upload {key}")
+        elif self.mode == "db":
+            print(f"[DB] Insert {key}")
+```
+
+在每个 `Node` 中调用 `ResultSaver().save(key, value)` 即可轻松扩展。
+
+------
+
+## ✅ 小结
+
+| 模块               | 说明                                       |
+| ------------------ | ------------------------------------------ |
+| `PreprocessNode`   | 执行字段的缺失填充等预处理操作             |
+| `NormalizeNode`    | 支持不同归一化策略（占位实现）             |
+| `SaveModelNode`    | 模拟模型文件保存                           |
+| `BaseNode.persist` | 控制是否保存节点中间数据                   |
+| `save_result()`    | 模拟将结果写入存储系统，后续可注入实际逻辑 |
+
+------
+
+是否需要我为你：
+
+- 💾 添加 `ResultSaver` 可注入策略示例
+- ☁️ 整合 Django 中的 S3 存储（例如使用 `boto3`）作为 `save_result()` 的默认实现
+- 🧪 为每个 Node 写一份单元测试/模拟上下文测试
+
+告诉我你希望优先推进哪一块，我立刻为你扩展。
+
+当然可以，我将为你**详细解释这个模型训练流程的整体设计逻辑**，以及每个部分的代码结构和作用。我们使用的是**自定义流程系统**，完全基于 Python 标准库构建，具备：
+
+- 模块化（每一步都是一个 Node）
+- 解耦（数据通过上下文 context 流转）
+- 可扩展（支持模型、清洗、归一化等扩展）
+- 可持久化（支持保存中间结果至 S3/数据库等）
+
+------
+
+## ✅ 一、整体流程概览图
+
+```
+训练流程（Pipeline）
+
+┌─────────────────────────────┐
+│        Pipeline.run()       │
+│ ┌─────┐   ┌──────┐   ┌─────┐ │
+│ │Node1│→→→│Node2 │→→→│Node3│→→ ... │
+│ └─────┘   └──────┘   └─────┘ │
+└─────────────────────────────┘
+
+每个 Node 执行 run(context)，更新上下文并返回
+```
+
+------
+
+## ✅ 二、核心结构说明
+
+### 1. `BaseNode`: 所有流程步骤的基类
+
+```python
+# base_node.py
+from abc import ABC, abstractmethod
+
+class BaseNode(ABC):
+    def __init__(self, name: str, persist: bool = False):
+        self.name = name
+        self.persist = persist  # 是否持久化当前节点输出
+
+    @abstractmethod
+    def run(self, context: dict) -> dict:
+        pass
+
+    def save_result(self, key: str, value):
+        """持久化保存结果（目前为打印模拟）"""
+        if self.persist:
+            print(f"[{self.name}] 模拟保存 {key}: {str(value)[:50]}...")
+```
+
+✅ 功能说明：
+
+- 提供统一的 `run()` 接口，所有流程节点必须实现。
+- 提供 `save_result()`，预留持久化能力。
+
+------
+
+### 2. `Pipeline`: 执行流程的调度器
+
+```python
+# pipeline.py
+class Pipeline:
+    def __init__(self):
+        self.steps = []
+
+    def add(self, step: BaseNode):
+        self.steps.append(step)
+        return self  # 支持链式调用
+
+    def run(self, context=None):
+        context = context or {}
+        for step in self.steps:
+            print(f"➡️ 执行步骤：{step.name}")
+            context = step.run(context)
+        return context
+```
+
+✅ 功能说明：
+
+- 接收多个 Node 实例
+- 按顺序执行每个 `run(context)`，将返回结果传给下一个 Node
+
+------
+
+## ✅ 三、每个 Node 的作用及代码逻辑
+
+### 3.1 加载数据 `LoadDatasetNode`
+
+```python
+class LoadDatasetNode(BaseNode):
+    def __init__(self, paths):
+        super().__init__("LoadDataset")
+        self.paths = paths
+
+    def run(self, context):
+        print(f"[{self.name}] 加载数据：{self.paths}")
+        context["raw_data"] = f"Data from {self.paths}"  # 实际应读取文件
+        return context
+```
+
+- 接收多个路径 → 模拟加载数据 → 保存为 `raw_data`
+
+------
+
+### 3.2 数据清洗 `CleanDataNode`
+
+```python
+class CleanDataNode(BaseNode):
+    def __init__(self, required_columns):
+        super().__init__("CleanData")
+        self.required_columns = required_columns
+
+    def run(self, context):
+        print(f"[{self.name}] 清洗字段：{self.required_columns}")
+        data = context["raw_data"]
+        cleaned = f"Cleaned({data})"
+        context["clean_data"] = cleaned
+        return context
+```
+
+- 清洗只保留指定字段 → 存入 `clean_data`
+
+------
+
+### 3.3 数据预处理 `PreprocessNode`
+
+```python
+class PreprocessNode(BaseNode):
+    def __init__(self, fields, fillna=0.0, persist=False):
+        super().__init__("Preprocess", persist)
+        self.fields = fields
+        self.fillna = fillna
+
+    def run(self, context):
+        print(f"[{self.name}] 缺失值填充：字段={self.fields}, 填充={self.fillna}")
+        data = context["clean_data"]
+        processed = f"Preprocessed({data})"
+        context["preprocessed_data"] = processed
+        self.save_result("preprocessed_data", processed)
+        return context
+```
+
+- 执行缺失填充、字段校验等预处理逻辑
+- 可选持久化保存（如到 S3）
+
+------
+
+### 3.4 数据归一化 `NormalizeNode`
+
+```python
+class NormalizeNode(BaseNode):
+    def __init__(self, fields, strategy="minmax", persist=False):
+        super().__init__("Normalize", persist)
+        self.fields = fields
+        self.strategy = strategy
+
+    def run(self, context):
+        print(f"[{self.name}] 对字段 {self.fields} 使用 {self.strategy} 归一化")
+        data = context.get("preprocessed_data") or context["clean_data"]
+        normalized = f"Normalized({data})"
+        context["normalized_data"] = normalized
+        self.save_result("normalized_data", normalized)
+        return context
+```
+
+- 对数值型字段进行归一化
+- 将归一化后的结果保存在 `normalized_data`
+
+------
+
+### 3.5 模型训练 `TrainModelNode`
+
+```python
+class TrainModelNode(BaseNode):
+    def __init__(self, model_type, params):
+        super().__init__("TrainModel")
+        self.model_type = model_type
+        self.params = params
+
+    def run(self, context):
+        print(f"[{self.name}] 训练模型类型={self.model_type} 参数={self.params}")
+        model = f"TrainedModel({self.model_type})"
+        context["trained_model"] = model
+        return context
+```
+
+- 根据模型类型和参数训练（此处为模拟）
+- 保存训练好的模型对象
+
+------
+
+### 3.6 模型保存 `SaveModelNode`
+
+```python
+class SaveModelNode(BaseNode):
+    def __init__(self, save_path, persist=False):
+        super().__init__("SaveModel", persist)
+        self.save_path = save_path
+
+    def run(self, context):
+        model = context["trained_model"]
+        print(f"[{self.name}] 保存模型到 {self.save_path}")
+        self.save_result("model", f"ModelFile({model})")
+        context["model_path"] = self.save_path
+        return context
+```
+
+- 将模型保存路径保存到上下文（实际可调用 pickle/S3 保存）
+- 使用 `save_result()` 预留真实保存接口
+
+------
+
+## ✅ 四、运行入口脚本示例
+
+```python
+# run_pipeline.py
+from pipeline import Pipeline
+from nodes import LoadDatasetNode, CleanDataNode, PreprocessNode, NormalizeNode, TrainModelNode, SaveModelNode
+
+pipeline = (
+    Pipeline()
+    .add(LoadDatasetNode(paths=["data1.xlsx", "data2.xlsx"]))
+    .add(CleanDataNode(required_columns=["age", "salary"]))
+    .add(PreprocessNode(fields=["age", "salary"], fillna=0, persist=True))
+    .add(NormalizeNode(fields=["age", "salary"], strategy="minmax", persist=True))
+    .add(TrainModelNode(model_type="dnn", params={"layers": [64, 32]}))
+    .add(SaveModelNode(save_path="./model/dnn.pkl", persist=True))
+)
+
+context = pipeline.run()
+print("最终输出：", context)
+```
+
+------
+
+## ✅ 总结逻辑流程图
+
+```
+context 结构
+┌────────────┐
+│ raw_data   │ ← LoadDatasetNode
+│ clean_data │ ← CleanDataNode
+│ preprocessed_data ← PreprocessNode
+│ normalized_data   ← NormalizeNode
+│ trained_model     ← TrainModelNode
+│ model_path        ← SaveModelNode
+└────────────┘
+```
+
+------
+
+## ✅ 你下一步可以选择：
+
+1. 让我帮你将这个结构组织成完整的 Python 包目录
+2. 生成真实的数据处理与训练逻辑（使用 Pandas、PyTorch）
+3. 接入任务队列 Celery/Redis + 异步训练流程
+4. 接入 S3、PostgreSQL 进行持久化存储
+
+告诉我你希望进一步完善哪个模块，我就继续为你实现。
+
+这是一个非常重要也非常有价值的问题 —— **在训练流程中，每个节点（Node）之间确实可能存在数据依赖关系**，我们需要用一套通用又清晰的方式来：
+
+- **规范每个节点的输入（依赖）和输出（产出）**
+- **避免数据丢失或执行顺序出错**
+- **支持灵活插拔、重排流程的能力**
+
+------
+
+## ✅ 总体方案：节点的输入输出依赖管理
+
+我们为每个 `BaseNode` 增加两个显式属性：
+
+| 属性                  | 说明                                          |
+| --------------------- | --------------------------------------------- |
+| `requires: list[str]` | 依赖的 `context` 键，即前置步骤必须产出的内容 |
+| `produces: list[str]` | 本步骤输出的 `context` 键，用于后续步骤消费   |
+
+------
+
+## ✅ 1. 修改 `BaseNode` 支持依赖声明检查
+
+```python
+class BaseNode(ABC):
+    def __init__(self, name: str, persist: bool = False):
+        self.name = name
+        self.persist = persist
+        self.requires: list[str] = []    # 依赖的 context key
+        self.produces: list[str] = []    # 本节点输出的 context key
+
+    @abstractmethod
+    def run(self, context: dict) -> dict:
+        pass
+
+    def save_result(self, key: str, value):
+        if self.persist:
+            print(f"[{self.name}] 模拟持久化：{key} -> {str(value)[:50]}")
+
+    def check_requirements(self, context: dict):
+        missing = [k for k in self.requires if k not in context]
+        if missing:
+            raise ValueError(f"[{self.name}] 缺少依赖数据: {missing}")
+```
+
+在 `Pipeline.run()` 中增加依赖检查：
+
+```python
+def run(self, context=None):
+    context = context or {}
+    for step in self.steps:
+        print(f"\n➡️ 执行步骤：{step.name}")
+        step.check_requirements(context)
+        context = step.run(context)
+    return context
+```
+
+------
+
+## ✅ 2. 示例：修改每个节点的实现
+
+### ✅ `LoadDatasetNode`
+
+```python
+class LoadDatasetNode(BaseNode):
+    def __init__(self, paths):
+        super().__init__("LoadDataset")
+        self.paths = paths
+        self.produces = ["raw_data"]
+
+    def run(self, context):
+        data = f"Data from {self.paths}"
+        context["raw_data"] = data
+        return context
+```
+
+------
+
+### ✅ `CleanDataNode`
+
+```python
+class CleanDataNode(BaseNode):
+    def __init__(self, required_columns):
+        super().__init__("CleanData")
+        self.required_columns = required_columns
+        self.requires = ["raw_data"]
+        self.produces = ["clean_data"]
+
+    def run(self, context):
+        data = context["raw_data"]
+        cleaned = f"Cleaned({data})"
+        context["clean_data"] = cleaned
+        return context
+```
+
+------
+
+### ✅ `NormalizeNode`
+
+```python
+class NormalizeNode(BaseNode):
+    def __init__(self, fields, strategy="minmax", persist=False):
+        super().__init__("Normalize", persist)
+        self.fields = fields
+        self.strategy = strategy
+        self.requires = ["preprocessed_data"]  # 或 ["clean_data"]
+        self.produces = ["normalized_data"]
+
+    def run(self, context):
+        data = context.get("preprocessed_data") or context["clean_data"]
+        normalized = f"Normalized({data})"
+        context["normalized_data"] = normalized
+        self.save_result("normalized_data", normalized)
+        return context
+```
+
+------
+
+## ✅ 3. 增强：自动检测节点顺序是否合理（可选）
+
+在 `Pipeline.run()` 之前，做一个**顺序合理性预检查**：
+
+```python
+def validate_dependencies(self):
+    available = set()
+    for step in self.steps:
+        missing = [key for key in step.requires if key not in available]
+        if missing:
+            raise ValueError(f"[{step.name}] 顺序错误，缺少依赖：{missing}")
+        available.update(step.produces)
+```
+
+调用：
+
+```python
+def run(self, context=None):
+    self.validate_dependencies()
+    ...
+```
+
+------
+
+## ✅ 总结：设计收益
+
+| 特性           | 实现                                                    |
+| -------------- | ------------------------------------------------------- |
+| 明确数据流依赖 | 每个节点 `requires` 明确依赖哪些键                      |
+| 防止乱序执行   | `Pipeline.validate_dependencies()` 自动检查             |
+| 保证流程健壮性 | 如果缺失依赖，提前抛错                                  |
+| 易于维护       | 插拔节点时不用看内部实现，只看 `requires` 和 `produces` |
+| 易于文档生成   | 可自动输出流程图与依赖说明                              |
+
+------
+
+## ✅ 示例：自动文档生成（可选）
+
+你甚至可以自动打印出流程：
+
+```python
+for step in pipeline.steps:
+    print(f"🔧 {step.name}")
+    print(f"   ➤ 输入依赖: {step.requires}")
+    print(f"   ➤ 输出结果: {step.produces}")
+```
+
+------
+
+## ✅ 下一步建议
+
+我可以继续帮你：
+
+1. 🔧 提炼出 `Node` 的 schema 描述和注册机制
+2. 📊 生成流程图（例如输出为 Graphviz 或 Mermaid 图）
+3. 🧪 为每个节点设计单元测试和上下文模拟测试
+4. ☁️ 实现 `save_result()` 的持久化策略（如 S3、PostgreSQL）
+
+你想优先处理哪一块？我可以马上开始。
