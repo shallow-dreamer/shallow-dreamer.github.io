@@ -390,3 +390,176 @@ python safe_model_save.py
 - 或者带更复杂控制流、`torch.jit.script` 和 `torch.jit.trace` 的示例
 
 要不要？我可以直接帮你打包成【可部署模板】！ 🚀
+
+好！我给你做一份【动态生成结构 + 嵌入参数 + register_buffer + 验证一致性】的**可直接运行的完整示例**，
+ 这样你就能一眼看懂：
+
+- 哪些东西必须注册成 `Parameter` 或 `Buffer`
+- 保存 `state_dict` 时，哪些会保存，哪些不会
+- 怎么保证加载后结果和训练时一致
+
+------
+
+## ✅ **保存成一个文件：`dynamic_model_safe_save.py`**
+
+直接复制保存，然后：
+
+```bash
+python dynamic_model_safe_save.py
+```
+
+就能看效果。
+
+------
+
+```python
+import torch
+import torch.nn as nn
+import random
+
+# ======================================================
+# ✅ 动态生成结构 + 嵌入权重的模型示例
+# ======================================================
+class DynamicModel(nn.Module):
+    def __init__(self, input_size, hidden_size, use_buffer=True):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+
+        # 这里是动态生成的 Linear 层
+        self.linear = nn.Linear(input_size, hidden_size)
+
+        # 这里是动态生成的嵌入权重：必须注册
+        rand_weight = torch.randn(hidden_size)
+        if use_buffer:
+            self.register_buffer('my_embed', rand_weight)
+        else:
+            self.my_embed = rand_weight  # ⚠️ 这样就不会进 state_dict！
+
+    def forward(self, x):
+        out = self.linear(x)
+        # 使用动态生成的嵌入参数
+        out = out + self.my_embed
+        return out
+
+# ======================================================
+# ✅ 保证可复现
+# ======================================================
+torch.manual_seed(42)
+random.seed(42)
+
+# ======================================================
+# ✅ 训练时
+# ======================================================
+model = DynamicModel(input_size=4, hidden_size=2, use_buffer=True)
+
+# 做个前向
+x = torch.randn(1, 4)
+output_before = model(x)
+print(f"✅ Output BEFORE saving: {output_before}")
+
+# 保存结构参数
+torch.save({
+    'model_state_dict': model.state_dict(),
+    'model_args': {
+        'input_size': 4,
+        'hidden_size': 2,
+        'use_buffer': True
+    }
+}, "dynamic_model_state.pt")
+print("✅ Saved state_dict and config!")
+
+# ======================================================
+# ✅ === 加载 ===
+# ======================================================
+checkpoint = torch.load("dynamic_model_state.pt")
+
+# 用保存的结构参数重新生成模型
+model2 = DynamicModel(**checkpoint['model_args'])
+model2.load_state_dict(checkpoint['model_state_dict'])
+model2.eval()
+
+# 用相同输入验证输出
+output_after = model2(x)
+print(f"✅ Output AFTER loading: {output_after}")
+
+print("\n🟢 SAME? ", torch.allclose(output_before, output_after))
+
+# ======================================================
+# ✅ === 演示如果不注册 Buffer 会怎样 ===
+# ======================================================
+print("\n⚠️ 演示: 如果不注册 Buffer，my_embed 不会被保存！")
+model_bad = DynamicModel(input_size=4, hidden_size=2, use_buffer=False)
+torch.manual_seed(42)
+output_bad = model_bad(x)
+torch.save(model_bad.state_dict(), "bad_state.pt")
+
+# 重新加载: 注意我们重新生成了结构，但 my_embed 没被保存
+model_bad2 = DynamicModel(input_size=4, hidden_size=2, use_buffer=False)
+model_bad2.load_state_dict(torch.load("bad_state.pt"))
+model_bad2.eval()
+
+output_bad_after = model_bad2(x)
+
+print(f"⚠️ Output BEFORE (bad): {output_bad}")
+print(f"⚠️ Output AFTER (bad): {output_bad_after}")
+print("🟡 SAME? (bad)", torch.allclose(output_bad, output_bad_after))
+```
+
+------
+
+## ✅ **这份示例里做了啥**
+
+### ✅ 正确做法：
+
+- `my_embed` 用 `register_buffer` 注册 ➜ 会进 `state_dict`
+- 保存结构参数 ➜ 保证动态生成可重现
+- 加载时 `.eval()` + 用同样输入验证 ➜ 输出一致
+
+### ⚠️ 错误做法：
+
+- `use_buffer=False` 时 `my_embed` 没注册 ➜ 没保存进 `state_dict`
+- 加载后 `my_embed` 会重新随机生成 ➜ 输出变了
+
+------
+
+## 🟢 **跑完会看到：**
+
+```
+✅ Output BEFORE saving: ...
+✅ Saved state_dict and config!
+✅ Output AFTER loading: ...
+🟢 SAME?  True
+
+⚠️ 演示: 如果不注册 Buffer，my_embed 不会被保存！
+⚠️ Output BEFORE (bad): ...
+⚠️ Output AFTER (bad): ...
+🟡 SAME? (bad) False
+```
+
+------
+
+## ✅ **核心 takeaway**
+
+| 做法                   | 会不会丢状态？ | 结果一致吗？ |
+| ---------------------- | -------------- | ------------ |
+| 使用 `register_buffer` | 不丢           | ✅ 一致       |
+| 不注册                 | 丢             | ❌ 不一致     |
+
+------
+
+## 🔑 **你的动态生成结构想要“只保存 state_dict 也能跑”必须做到：**
+
+1️⃣ 所有需要保存的 tensor 都是 `nn.Parameter` 或 `register_buffer`
+ 2️⃣ 动态生成的超参数一并保存
+ 3️⃣ 推理时 `.eval()`
+ 4️⃣ 输入一致 ➜ 结果一致
+
+------
+
+要不要我帮你把这个示例再加上：
+
+- `TorchScript` 的版本 ➜ 没有结构也能跑
+- ONNX 的版本 ➜ 跨框架部署
+
+需要的话我给你整理到一份可跑的跨环境模板！🚀
