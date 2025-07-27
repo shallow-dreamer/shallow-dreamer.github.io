@@ -1,0 +1,244 @@
+---
+layout:     post
+title:      "获取模型配置数据"
+subtitle:   ""
+date:       2025-07-27
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - django
+---
+
+在 Django 中进行权限数据初始化时，**无需使用私有方法**，可以通过 Django 提供的公共 API 获取模型的 `app_label`、`verbose_name` 以及默认权限等信息。以下是一个标准且合规的方式来实现基于模型自动初始化权限数据的方法：
+
+------
+
+## ✅ 一、获取模型的元信息（Meta）
+
+你可以从模型类中通过 `_meta` 获取如下信息（这是公有 API）：
+
+```python
+from django.apps import apps
+from django.contrib.auth.models import Permission
+from django.contrib.contenttypes.models import ContentType
+
+def init_permissions():
+    # 遍历所有已注册模型
+    for model in apps.get_models():
+        opts = model._meta
+        app_label = opts.app_label
+        model_name = opts.model_name
+        verbose_name = opts.verbose_name
+        verbose_name_plural = opts.verbose_name_plural
+
+        # ContentType 是权限的关键依赖
+        content_type, _ = ContentType.objects.get_or_create(
+            app_label=app_label,
+            model=model_name
+        )
+
+        # 默认权限：add, change, delete, view
+        default_perms = [
+            ('add', f'Can add {verbose_name}'),
+            ('change', f'Can change {verbose_name}'),
+            ('delete', f'Can delete {verbose_name}'),
+            ('view', f'Can view {verbose_name}'),
+        ]
+
+        for codename_prefix, name in default_perms:
+            codename = f"{codename_prefix}_{model_name}"
+            Permission.objects.get_or_create(
+                codename=codename,
+                content_type=content_type,
+                defaults={'name': name}
+            )
+```
+
+------
+
+## ✅ 二、说明
+
+- `model._meta` 是 Django 官方公开 API，可以放心使用（**不是私有方法**）。
+- `apps.get_models()` 是从 `django.apps.apps` 中获取所有已注册模型。
+- `ContentType` 是权限系统的关键，通过它将权限与模型关联。
+- `Permission.objects.get_or_create(...)` 可以在迁移脚本或信号中使用。
+
+------
+
+## ✅ 三、放置位置建议
+
+如果你是在迁移时初始化权限数据，有两个合适位置：
+
+### 方法 1：使用数据迁移
+
+在 migration 文件中添加 `RunPython` 操作：
+
+```python
+from django.db import migrations
+
+def init_permissions(apps, schema_editor):
+    # 使用 apps.get_model 而不是导入真实模型（避免依赖未迁移模型）
+    Permission = apps.get_model('auth', 'Permission')
+    ContentType = apps.get_model('contenttypes', 'ContentType')
+
+    for model in apps.get_models():
+        opts = model._meta
+        content_type, _ = ContentType.objects.get_or_create(
+            app_label=opts.app_label,
+            model=opts.model_name
+        )
+        for action in ['add', 'change', 'delete', 'view']:
+            codename = f"{action}_{opts.model_name}"
+            name = f"Can {action} {opts.verbose_name}"
+            Permission.objects.get_or_create(
+                codename=codename,
+                content_type=content_type,
+                defaults={'name': name}
+            )
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('your_app', 'xxxx_previous_migration'),
+    ]
+
+    operations = [
+        migrations.RunPython(init_permissions),
+    ]
+```
+
+### 方法 2：写在 `AppConfig.ready()` 里，但注意避免重复执行（不推荐用于权限初始化）
+
+------
+
+## ✅ 四、可选：扩展自定义权限
+
+若你需要添加自定义权限，可以从模型的 `Meta` 中读取：
+
+```python
+extra_permissions = getattr(opts, 'permissions', [])
+# permissions = [('export_model', 'Can export model')]
+```
+
+------
+
+如需根据特定 app 或模型过滤，也可以加判断：
+
+```python
+if opts.app_label != 'your_app':
+    continue
+```
+
+------
+
+如需我帮你封装成支持初始化默认 + 自定义权限的通用函数，也可以告诉我。
+
+你**可以在 `AppConfig.ready()` 中导入真实模型来初始化权限数据**，但必须注意以下几点，确保代码运行时机和环境正确，避免循环导入或迁移错误。
+
+------
+
+## ✅ 可以在 `AppConfig.ready()` 中导入真实模型
+
+你可以这样做：
+
+```python
+# your_app/apps.py
+from django.apps import AppConfig
+
+class YourAppConfig(AppConfig):
+    name = 'your_app'
+
+    def ready(self):
+        from django.contrib.auth.models import Permission
+        from django.contrib.contenttypes.models import ContentType
+        from .models import YourModel1, YourModel2  # ✅ 导入真实模型
+        from django.db.utils import OperationalError, ProgrammingError
+
+        try:
+            self.init_model_permissions()
+        except (OperationalError, ProgrammingError):
+            # 数据库还未准备好（如 migrate 初期），避免错误
+            pass
+
+    def init_model_permissions(self):
+        from django.contrib.auth.models import Permission
+        from django.contrib.contenttypes.models import ContentType
+        from .models import YourModel1, YourModel2  # 可以导入多个模型
+
+        models = [YourModel1, YourModel2]
+        for model in models:
+            opts = model._meta
+            content_type, _ = ContentType.objects.get_or_create(
+                app_label=opts.app_label,
+                model=opts.model_name
+            )
+            for action in ['add', 'change', 'delete', 'view']:
+                codename = f"{action}_{opts.model_name}"
+                name = f"Can {action} {opts.verbose_name}"
+                Permission.objects.get_or_create(
+                    codename=codename,
+                    content_type=content_type,
+                    defaults={'name': name}
+                )
+```
+
+------
+
+## ⚠️ 注意事项
+
+### 1. 避免在迁移时触发
+
+`AppConfig.ready()` 会在以下情形触发：
+
+- 运行服务器 (`runserver`)
+- 管理命令 (`shell`, `migrate`, `celery`, 等等)
+
+若在数据库尚未创建时触发权限初始化，可能会因 `auth_permission` 等表未准备好导致错误。
+
+解决方案是：
+
+```python
+try:
+    self.init_model_permissions()
+except (OperationalError, ProgrammingError):
+    # 数据库未准备好（例如 migrate 初期），可跳过或打印 warning
+    pass
+```
+
+------
+
+### 2. 避免重复执行
+
+`ready()` 会在每个进程中执行一次（甚至可能多次），你应该确保：
+
+- 不重复创建权限（使用 `get_or_create` 是关键）
+- 或者通过某种标记（例如某个设置项或数据库记录）来保证只初始化一次
+
+------
+
+### 3. 避免循环导入
+
+- 避免在 `apps.py` 顶部导入模型
+- 应该在 `ready()` 函数内局部导入模型，避免循环依赖
+
+------
+
+## ✅ 总结
+
+| 事项                 | 说明                                    |
+| -------------------- | --------------------------------------- |
+| ✅ 是否可导入真实模型 | 是，可以在 `ready()` 内导入             |
+| ✅ 是否适合初始化权限 | 是，可以做初始化，但需注意只执行一次    |
+| ⚠️ 是否要捕获异常     | 是，避免 `migrate` 初期数据库未建表报错 |
+| ⚠️ 是否会重复执行     | 是，需避免重复创建或添加幂等逻辑        |
+
+------
+
+如果你需要对所有模型进行扫描初始化权限，且避免导入每个模型类，也可以通过：
+
+```python
+from django.apps import apps
+apps.get_models()  # 拿到所有模型
+```
+
+如你还想在这里支持自定义权限（`Meta.permissions`），我可以一起帮你封装一个通用函数。是否需要？
