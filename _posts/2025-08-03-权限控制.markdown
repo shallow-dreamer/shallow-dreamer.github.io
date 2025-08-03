@@ -1,0 +1,349 @@
+---
+layout:     post
+title:      "权限控制"
+subtitle:   ""
+date:       2025-08-03
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - django
+---
+
+如果一个模型实例与你的“工具模型”之间**没有任何字段级关联**（没有外键、没有间接连接字段、没有嵌套工具 ID 等信息），但你仍希望通过工具的权限配置来控制访问权限，那你必须通过其他**上下文信息**来建立**逻辑上的关联**，比如：
+
+------
+
+### ✅ 场景设定（无字段关联，但有逻辑关联）
+
+假设你有以下情况：
+
+- `Tool` 是你的工具模型，权限配置关联在它上面；
+- `Report` 是一个完全独立的模型，没有外键或字段指向 `Tool`；
+- 但在业务上你知道，访问某个 `Report` 时，其实是跟某个 `Tool` 相关的，比如 URL 路由里有 `tool_id` 或 `request.user` 只能操作某些工具下的报告。
+
+------
+
+### ✅ 解决方案：从请求上下文建立“权限影子路径”
+
+你可以：
+
+1. 在 `ViewSet` 中，从 URL 或其他上下文中提取 `tool_id`；
+2. 在 `has_permission` 或 `has_object_permission` 中用 `tool_id` 去查对应的工具；
+3. 使用 `ToolPermissionChecker` 类似的工具类判断该用户是否有权限；
+4. 如果权限失败，拒绝访问。
+
+------
+
+### ✅ 示例代码
+
+#### 权限类：`ToolBasedPermission`
+
+```python
+from rest_framework.permissions import BasePermission
+from rest_framework.exceptions import PermissionDenied
+from yourapp.models import Tool
+from yourapp.utils import check_user_tool_permission  # 你定义的通用权限检查器
+
+class ToolBasedPermission(BasePermission):
+    """
+    即使对象与 Tool 无关联，我们也从 URL 参数等获取 tool_id，再做权限判断。
+    """
+
+    def has_permission(self, request, view):
+        tool_id = view.kwargs.get('tool_id') or request.query_params.get('tool_id')
+
+        if not tool_id:
+            raise PermissionDenied('Missing tool ID in request.')
+
+        try:
+            tool = Tool.objects.get(pk=tool_id)
+        except Tool.DoesNotExist:
+            raise PermissionDenied('Tool not found.')
+
+        if not check_user_tool_permission(user=request.user, tool=tool):
+            raise PermissionDenied('You do not have permission to access this tool.')
+
+        # 缓存工具对象，后续 has_object_permission 可使用
+        request._tool = tool
+        return True
+
+    def has_object_permission(self, request, view, obj):
+        """
+        此处的 obj 是 Report 等无 tool 字段的对象，但我们从 request 中找到 tool 信息做权限控制。
+        """
+        tool = getattr(request, "_tool", None)
+        if tool is None:
+            return False
+
+        return check_user_tool_permission(user=request.user, tool=tool)
+```
+
+------
+
+### ✅ 视图中的用法
+
+```python
+class ReportViewSet(viewsets.ModelViewSet):
+    queryset = Report.objects.all()
+    serializer_class = ReportSerializer
+    permission_classes = [ToolBasedPermission]
+
+    def get_queryset(self):
+        # 可选：根据 tool_id 过滤数据
+        tool_id = self.kwargs.get('tool_id')
+        if tool_id:
+            return Report.objects.filter(tool_id=tool_id)  # 假如你能推断到这一层
+        return super().get_queryset()
+```
+
+------
+
+### ✅ 通用权限检查器（可重用）
+
+```python
+def check_user_tool_permission(user, tool):
+    # 检查用户是否属于该工具允许的群组或部门
+    if not user.is_authenticated:
+        return False
+
+    group_ids = tool.group_permissions.values_list("group_id", flat=True)
+    dept_ids = tool.department_permissions.values_list("department_id", flat=True)
+
+    if user.groups.filter(id__in=group_ids).exists():
+        return True
+
+    if hasattr(user, 'department') and user.department_id in dept_ids:
+        return True
+
+    return False
+```
+
+------
+
+### ✅ 说明
+
+- `has_permission` 用于：请求阶段还未取得对象时，根据 URL 参数进行初步权限过滤；
+- `has_object_permission` 用于：对象存在后进行更细粒度的权限控制；
+- 即使模型之间无关联，也能通过**请求上下文建立逻辑关联**，实现权限控制。
+
+------
+
+需要我帮你按你当前的模型结构具体写一份完整权限类和视图示例吗？你也可以提供你的 `Tool` 权限模型结构，我来帮你完善。
+
+在 DRF 的权限类中，如果你希望当用户**没有权限访问某个资源**时返回 **自定义状态码和错误信息**（比如返回 `200 OK`，而不是默认的 `403 Forbidden`），你不能在权限类内部直接修改响应。
+
+但你**可以在视图中统一捕获权限失败的异常**，然后自定义响应。下面是完整的示例做法：
+
+------
+
+## ✅ 自定义权限类 + 自定义异常 + 自定义异常处理器
+
+### 1. 自定义异常类
+
+```python
+from rest_framework.exceptions import APIException
+
+class CustomPermissionDenied(APIException):
+    status_code = 200
+    default_detail = '无权限访问该资源'
+    default_code = 'permission_denied'
+
+    def __init__(self, detail=None, code=None):
+        if detail is not None:
+            self.detail = {'error': detail}
+        else:
+            self.detail = {'error': self.default_detail}
+```
+
+------
+
+### 2. 自定义权限类（在没有权限时抛出这个异常）
+
+```python
+from rest_framework.permissions import BasePermission
+from .exceptions import CustomPermissionDenied
+
+class ToolAccessPermission(BasePermission):
+    def has_permission(self, request, view):
+        # 可以加一些通用逻辑
+        return True
+
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        # 自定义判断逻辑，例如从工具权限表中判断是否拥有权限
+        if not self.user_has_tool_access(user, obj):
+            raise CustomPermissionDenied("你没有该工具的访问权限")
+        return True
+
+    def user_has_tool_access(self, user, obj):
+        # 实际判断逻辑（简化演示）
+        return False  # 假设没有权限
+```
+
+------
+
+### 3. 配置视图
+
+```python
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from .permissions import ToolAccessPermission
+from .models import SomeModel
+
+class ToolDetailView(APIView):
+    permission_classes = [ToolAccessPermission]
+
+    def get_object(self):
+        return SomeModel.objects.first()
+
+    def get(self, request, *args, **kwargs):
+        obj = self.get_object()
+        self.check_object_permissions(request, obj)
+        return Response({"data": "你有权限"})
+```
+
+------
+
+### 4. 效果（请求结果）
+
+```json
+HTTP 200 OK
+{
+  "error": "你没有该工具的访问权限"
+}
+```
+
+------
+
+## ✅ 总结说明
+
+| 点                                  | 说明                                                         |
+| ----------------------------------- | ------------------------------------------------------------ |
+| `raise CustomPermissionDenied(...)` | 是关键，它中断正常流程并抛出异常                             |
+| `status_code = 200`                 | 实现返回 200                                                 |
+| `self.detail = {'error': detail}`   | 控制错误信息格式                                             |
+| 权限类抛出异常后                    | DRF 自动进入全局异常处理逻辑，返回你定义的 `APIException` 响应 |
+
+------
+
+如果你还希望根据不同情况返回不同内容（比如返回某个错误码或提示），可以扩展 `CustomPermissionDenied` 添加 `code` 字段或额外信息。
+
+需要我帮你加上这个吗？
+
+如果你说的 **“一定要在 `permission_class` 中实现自定义状态码（比如返回 200 并附带错误信息）”** ——那只能说：**这不是 Django REST Framework 的推荐做法，也违反了它的处理流程，但可以通过“Hack”的方式实现**。
+
+------
+
+## ⚠️ 警告：以下是一个“非标准”的方案，仅在你明确知道后果的前提下使用
+
+DRF 在内部调用 `permission.has_permission()` / `has_object_permission()` 的时候，如果你抛出了异常，它会捕获并统一处理为 403 错误。
+
+但你可以抛出自定义异常类型，然后**在全局异常处理器**中捕捉，并返回你想要的 `status=200`。
+
+------
+
+## ✅ 实现方案：自定义异常 + 全局异常处理器
+
+### Step 1: 自定义异常
+
+```python
+from rest_framework.exceptions import APIException
+
+class CustomPermissionMessage(APIException):
+    status_code = 200  # <--- 你想返回的状态码
+    default_detail = '没有权限访问'
+    default_code = 'permission_denied'
+```
+
+------
+
+### Step 2: 权限类中抛出异常
+
+```python
+from rest_framework.permissions import BasePermission
+
+class ToolPermission(BasePermission):
+    def has_permission(self, request, view):
+        # 假设某种检查不通过
+        if not request.user.is_authenticated:
+            raise CustomPermissionMessage("您未登录，无法访问该资源。")
+        return True
+```
+
+------
+
+### Step 3: 在 settings.py 中注册自定义异常处理器
+
+```python
+# settings.py
+REST_FRAMEWORK = {
+    'EXCEPTION_HANDLER': 'your_project.utils.custom_exception_handler'
+}
+```
+
+------
+
+### Step 4: 自定义异常处理器
+
+```python
+# your_project/utils.py
+
+from rest_framework.views import exception_handler
+from rest_framework.response import Response
+
+def custom_exception_handler(exc, context):
+    # 先使用 DRF 默认处理
+    response = exception_handler(exc, context)
+
+    # 如果是我们自定义的异常，则用自定义的 response 替换
+    if isinstance(exc, CustomPermissionMessage):
+        return Response({
+            'success': False,
+            'message': str(exc.detail),
+            'code': 'PERMISSION_ERROR'
+        }, status=exc.status_code)
+
+    return response
+```
+
+------
+
+## ✅ 测试效果：
+
+当用户未通过权限验证时：
+
+```json
+HTTP 200 OK
+{
+  "success": false,
+  "message": "您未登录，无法访问该资源。",
+  "code": "PERMISSION_ERROR"
+}
+```
+
+------
+
+## ✅ 优点：
+
+- 可控返回结构和状态码
+- 权限逻辑仍保持在 `permission_class`
+- 不需要在每个视图中手动处理
+
+------
+
+## ❌ 缺点与风险：
+
+| 问题             | 说明                                                |
+| ---------------- | --------------------------------------------------- |
+| 非标准实现       | DRF 权限失败按设计应返回 403，而不是 200            |
+| 接口不语义化     | 返回 200 但表示失败，容易误导客户端逻辑             |
+| 第三方工具不兼容 | Swagger / OpenAPI 或客户端 SDK 可能认为权限校验成功 |
+
+------
+
+## ✅ 最终建议
+
+- 如果你能控制前后端规范，并且你有充足理由（如业务要求响应始终 200），可以采用上面这种方式。
+- 否则，更推荐你在视图中做权限检查并返回 `Response(..., status=200)`，将权限类当作布尔逻辑工具来使用。
+
+如果你希望我封装一个可复用的工具类来帮助你更方便地实现这样的逻辑，我也可以帮你写。
