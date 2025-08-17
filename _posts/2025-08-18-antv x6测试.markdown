@@ -1,0 +1,1674 @@
+---
+layout:     post
+title:      "antv x6测试"
+subtitle:   ""
+date:       2025-08-18
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - antv x6
+---
+
+
+
+没问题！下面给你一套**完整可落地的 Vue3 + antv/x6 图编辑器脚手架**，核心目标是：**与 X6 解耦 / 高度可扩展 / 注释详细**。你可以把这些文件直接放进一个 Vite + Vue3 + TS 项目里运行（我给了最小依赖清单）。
+ 功能点：自定义“元器件”节点（SVG 图标）、业务数据绑定、业务面板联动、命令总线、事件总线、节点注册表、端口与连线校验、持久化接口可替换。
+
+------
+
+# 1) 最小依赖
+
+```json
+// package.json（关键依赖）
+{
+  "name": "x6-vue3-editor",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@antv/x6": "^2.16.1",
+    "mitt": "^3.0.1",
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vite": "^5.2.0",
+    "@vitejs/plugin-vue": "^5.0.0",
+    "vue-tsc": "^2.0.22"
+  }
+}
+```
+
+------
+
+# 2) 入口文件
+
+```ts
+// src/main.ts
+import { createApp } from 'vue'
+import App from './App.vue'
+import './styles.css' // 可选：基本样式
+createApp(App).mount('#app')
+<!-- src/App.vue -->
+<template>
+  <DiagramEditor />
+</template>
+<script setup lang="ts">
+import DiagramEditor from './views/DiagramEditor.vue'
+</script>
+// src/env.d.ts
+/// <reference types="vite/client" />
+// vite.config.ts
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import path from 'node:path'
+
+export default defineConfig({
+  plugins: [vue()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src')
+    }
+  }
+})
+```
+
+------
+
+# 3) 类型与常量（解耦 X6 的公共契约）
+
+```ts
+// src/core/types.ts
+/**
+ * 业务数据的基础结构：你可以扩展成你的领域模型
+ */
+export interface BizData {
+  id: string
+  type: string
+  label?: string
+  payload?: Record<string, any> // 任意业务字段
+}
+
+/**
+ * 新增节点的入参（与 X6 无关）
+ */
+export interface CreateNodeInput {
+  type: string                 // 节点类型（如：resistor）
+  position: { x: number; y: number }
+  bizData: BizData             // 业务数据（将存储到 node.data）
+}
+
+/**
+ * 可替换的持久化接口；默认提供 localStorage 实现
+ */
+export interface Persistence {
+  save(diagramId: string, json: string): Promise<void>
+  load(diagramId: string): Promise<string | null>
+}
+
+/**
+ * 端口定义（解耦后，你的节点类再映射到 X6 端口）
+ */
+export interface PortSpec {
+  id: string
+  group: 'in' | 'out'
+  // 你还可以加入电气参数、方向、锚点等领域属性
+}
+```
+
+------
+
+# 4) 事件总线（业务 ↔ 图 的低耦合通信）
+
+```ts
+// src/core/graph/GraphEvents.ts
+import mitt from 'mitt'
+import type { BizData } from '../types'
+
+type Events = {
+  'node:click': { id: string; biz: BizData }
+  'node:contextmenu': { id: string; biz: BizData; event: MouseEvent }
+  'selection:changed': { nodes: BizData[] }
+  'edge:connected': { sourceId: string; targetId: string }
+  'graph:loaded': { count: number }
+}
+
+export const GraphEvents = mitt<Events>()
+```
+
+------
+
+# 5) 命令总线（可插入中间件，统一做日志/权限/埋点）
+
+```ts
+// src/core/command/CommandBus.ts
+type CommandHandler<P, R> = (payload: P) => Promise<R> | R
+type Next<P, R> = (payload: P) => Promise<R>
+
+export type Middleware<P, R> = (payload: P, next: Next<P, R>) => Promise<R>
+
+export class CommandBus {
+  private handlers = new Map<string, CommandHandler<any, any>>()
+  private middlewares: Middleware<any, any>[] = []
+
+  use<P, R>(mw: Middleware<P, R>) {
+    this.middlewares.push(mw)
+  }
+
+  register<P, R>(name: string, handler: CommandHandler<P, R>) {
+    this.handlers.set(name, handler)
+  }
+
+  async exec<P, R>(name: string, payload: P): Promise<R> {
+    const handler = this.handlers.get(name)
+    if (!handler) throw new Error(`[CommandBus] Handler not found: ${name}`)
+
+    // 组装中间件链
+    const composed = this.middlewares.reduceRight<Next<P, R>>(
+      (next, mw) => (p: P) => mw(p, next),
+      (p: P) => Promise.resolve(handler(p))
+    )
+    return composed(payload)
+  }
+}
+
+// 单例导出
+export const commandBus = new CommandBus()
+
+// 示例中间件：日志 + 错误兜底
+commandBus.use(async (payload, next) => {
+  console.debug('[CommandBus] ->', payload)
+  try {
+    const res = await next(payload)
+    console.debug('[CommandBus] <-', res)
+    return res
+  } catch (e) {
+    console.error('[CommandBus] !!', e)
+    throw e
+  }
+})
+```
+
+------
+
+# 6) 持久化（默认 LocalStorage，可换成 HTTP/S3）
+
+```ts
+// src/core/persistence/LocalStoragePersistence.ts
+import type { Persistence } from '../types'
+
+export class LocalStoragePersistence implements Persistence {
+  async save(diagramId: string, json: string) {
+    localStorage.setItem(`diagram:${diagramId}`, json)
+  }
+  async load(diagramId: string) {
+    return localStorage.getItem(`diagram:${diagramId}`)
+  }
+}
+```
+
+------
+
+# 7) 节点基类 + 节点注册表（与 X6 映射集中在这里）
+
+```ts
+// src/core/nodes/BaseNode.ts
+import type { BizData, PortSpec } from '../types'
+
+/**
+ * 与 X6 无关的“领域节点”抽象。
+ * 子类只关心业务属性和端口定义，如何渲染交给适配器去做。
+ */
+export abstract class BaseNode {
+  constructor(
+    protected biz: BizData,
+    protected position: { x: number; y: number }
+  ) {}
+
+  /** 显示名称（用于图上 label） */
+  abstract displayName(): string
+  /** 图标路径（SVG）或内联 SVG */
+  abstract icon(): string
+  /** 端口清单（in/out） */
+  abstract ports(): PortSpec[]
+
+  /** 提供默认尺寸，也可让子类覆写 */
+  size() { return { width: 96, height: 48 } }
+
+  /** 业务数据暴露（用于外部持久化/面板显示） */
+  toBiz(): BizData { return this.biz }
+
+  /** 生成“引擎无关”的结构，交由 X6 适配器翻译 */
+  toEngineAgnostic() {
+    return {
+      type: this.biz.type,
+      position: this.position,
+      size: this.size(),
+      label: this.displayName(),
+      icon: this.icon(),
+      ports: this.ports(),
+      biz: this.toBiz(),
+    }
+  }
+}
+// src/core/nodes/components/ResistorNode.ts
+import { BaseNode } from '../BaseNode'
+import type { BizData, PortSpec } from '../../types'
+
+export class ResistorNode extends BaseNode {
+  displayName() { return this.biz.label ?? '电阻' }
+  icon() { return '/icons/resistor.svg' } // 放到 public/icons 下
+  ports(): PortSpec[] {
+    // 简化：左右各一个端口
+    return [
+      { id: `${this.biz.id}:in`, group: 'in' },
+      { id: `${this.biz.id}:out`, group: 'out' },
+    ]
+  }
+}
+// src/core/nodes/components/CapacitorNode.ts
+import { BaseNode } from '../BaseNode'
+import type { PortSpec } from '../../types'
+
+export class CapacitorNode extends BaseNode {
+  displayName() { return this.biz.label ?? '电容' }
+  icon() { return '/icons/capacitor.svg' }
+  ports(): PortSpec[] {
+    return [
+      { id: `${this.biz.id}:in`, group: 'in' },
+      { id: `${this.biz.id}:out`, group: 'out' },
+    ]
+  }
+}
+// src/core/graph/NodeRegistry.ts
+import type { BaseNode } from '../nodes/BaseNode'
+
+/**
+ * 节点注册表：领域节点类的“工厂目录”
+ * ——新增节点，只需新建类 + register。
+ */
+const registry: Record<string, new (...args: any[]) => BaseNode> = {}
+
+export const NodeRegistry = {
+  register(type: string, ctor: new (...args: any[]) => BaseNode) {
+    registry[type] = ctor
+  },
+  create(type: string, ...args: any[]): BaseNode {
+    const ctor = registry[type]
+    if (!ctor) throw new Error(`[NodeRegistry] Unregistered: ${type}`)
+    return new ctor(...args)
+  },
+  has(type: string) {
+    return !!registry[type]
+  }
+}
+```
+
+> 在入口处完成注册（见下方 GraphManager 初始化）。
+
+------
+
+# 8) X6 适配器与 Graph 管理器（唯一接触 X6 的层）
+
+```ts
+// src/core/graph/X6Adapter.ts
+import type { Graph } from '@antv/x6'
+import type { PortSpec } from '../types'
+
+/**
+ * 将“引擎无关”的节点数据，转换成 X6 NodeConfig。
+ * ——若未来更换引擎，只需替换本文件的实现。
+ */
+export function toX6NodeConfig(agnostic: {
+  type: string
+  position: { x: number; y: number }
+  size: { width: number; height: number }
+  label: string
+  icon: string
+  ports: PortSpec[]
+  biz: any
+}) {
+  const { position, size, label, icon, ports, biz } = agnostic
+
+  // X6 端口组与布局：左右两组
+  const portGroups = {
+    in: { position: 'left' as const, attrs: { circle: { r: 4, magnet: true } } },
+    out:{ position: 'right' as const, attrs: { circle: { r: 4, magnet: true } } }
+  }
+
+  return {
+    shape: 'rect',
+    x: position.x,
+    y: position.y,
+    width: size.width,
+    height: size.height,
+    data: biz, // 业务数据放在 data
+    attrs: {
+      body: { stroke: '#1f2937', fill: '#fff', rx: 6, ry: 6 },
+      label: { text: label, fontSize: 12, refY: 0.5, refY2: 0 },
+      image: { 'xlink:href': icon, width: 20, height: 20, x: 8, y: 14 }
+    },
+    ports: {
+      groups: portGroups,
+      items: ports.map(p => ({ id: p.id, group: p.group }))
+    }
+  }
+}
+
+/**
+ * X6 层的连线校验规则：只允许 out → in。
+ */
+export function createConnectingOptions() {
+  return {
+    allowBlank: false,
+    allowLoop: false,
+    allowNode: false,
+    highlight: true,
+    snap: true,
+    validateConnection({ sourcePort, targetPort }) {
+      // 简单校验：端口命名里包含 :out → :in
+      return !!(sourcePort?.id?.includes(':out') && targetPort?.id?.includes(':in'))
+    }
+  }
+}
+// src/core/graph/GraphManager.ts
+import { Graph } from '@antv/x6'
+import { GraphEvents } from './GraphEvents'
+import { NodeRegistry } from './NodeRegistry'
+import { toX6NodeConfig, createConnectingOptions } from './X6Adapter'
+import type { CreateNodeInput, Persistence } from '../types'
+
+export class GraphManager {
+  private graph!: Graph
+  private persistence: Persistence
+  private diagramId: string
+
+  constructor(opts: { container: HTMLElement; persistence: Persistence; diagramId: string }) {
+    this.persistence = opts.persistence
+    this.diagramId = opts.diagramId
+    this.graph = new Graph({
+      container: opts.container,
+      grid: { size: 10, visible: true },
+      panning: true,
+      mousewheel: { enabled: true, modifiers: ['ctrl'] },
+      connecting: createConnectingOptions(),
+      selecting: { enabled: true, multiple: true, rubberband: true },
+      history: { enabled: true }
+    })
+
+    this.bindEvents()
+  }
+
+  /** 统一绑定 X6 事件，并转换成业务层事件 */
+  private bindEvents() {
+    this.graph.on('node:click', ({ node }) => {
+      const biz = node.getData()
+      GraphEvents.emit('node:click', { id: node.id, biz })
+    })
+
+    this.graph.on('node:contextmenu', ({ node, e }) => {
+      e.preventDefault()
+      const biz = node.getData()
+      GraphEvents.emit('node:contextmenu', { id: node.id, biz, event: e })
+    })
+
+    this.graph.on('selection:changed', () => {
+      const nodes = this.graph.getSelectedCells()
+        .filter(c => c.isNode())
+        .map(n => (n as any).getData())
+      GraphEvents.emit('selection:changed', { nodes })
+    })
+
+    this.graph.on('edge:connected', ({ isNew, edge }) => {
+      if (!isNew) return
+      const sourceId = edge.getSourceCellId()
+      const targetId = edge.getTargetCellId()
+      GraphEvents.emit('edge:connected', { sourceId, targetId })
+    })
+  }
+
+  /** 新增节点（领域 → 引擎无关 → X6） */
+  addNode(input: CreateNodeInput) {
+    const node = NodeRegistry.create(input.type, input.bizData, input.position)
+    const config = toX6NodeConfig(node.toEngineAgnostic())
+    this.graph.addNode(config)
+    return config
+  }
+
+  /** 保存到持久化 */
+  async save() {
+    const json = JSON.stringify(this.graph.toJSON())
+    await this.persistence.save(this.diagramId, json)
+  }
+
+  /** 从持久化加载 */
+  async load() {
+    const json = await this.persistence.load(this.diagramId)
+    if (json) {
+      this.graph.fromJSON(JSON.parse(json))
+      GraphEvents.emit('graph:loaded', { count: this.graph.getNodes().length })
+    }
+  }
+
+  /** 导出 PNG/SVG 等，可继续扩展 */
+  async exportPNG() {
+    return await this.graph.toPNG({ backgroundColor: '#ffffff' })
+  }
+
+  /** 对外暴露 Graph 实例（谨慎使用） */
+  get raw() { return this.graph }
+}
+```
+
+------
+
+# 9) 业务服务（与图无关，做数据加工/校验/远端请求等）
+
+```ts
+// src/core/services/BusinessService.ts
+import type { BizData } from '../types'
+
+/**
+ * 模拟业务服务：在真实项目里，这里可以发 HTTP、做权限校验、审计日志等。
+ */
+export class BusinessService {
+  getNodeTitle(biz: BizData) {
+    // 统一命名规范：可在这里决定 label 展现
+    return biz.label ?? `${biz.type} #${biz.id.slice(-4)}`
+  }
+
+  validateAddNode(biz: BizData) {
+    // 例：同一个图里不允许重复 id
+    if (!biz.id) throw new Error('biz.id required')
+    return true
+  }
+}
+```
+
+------
+
+# 10) 组件：画布与页面
+
+```vue
+<!-- src/components/GraphCanvas.vue -->
+<template>
+  <div ref="container" class="graph-canvas"></div>
+</template>
+
+<script setup lang="ts">
+import { onMounted, ref, onBeforeUnmount, watchEffect } from 'vue'
+import { GraphManager } from '@/core/graph/GraphManager'
+import { LocalStoragePersistence } from '@/core/persistence/LocalStoragePersistence'
+import { GraphEvents } from '@/core/graph/GraphEvents'
+import { commandBus } from '@/core/command/CommandBus'
+
+// 将 GraphManager 暴露给父组件（可选）
+const container = ref<HTMLDivElement>()
+let manager: GraphManager | null = null
+
+onMounted(async () => {
+  if (!container.value) return
+  manager = new GraphManager({
+    container: container.value,
+    persistence: new LocalStoragePersistence(),
+    diagramId: 'demo-diagram-001'
+  })
+  await manager.load()
+
+  // 注册命令：添加节点（页面/工具栏可通过 CommandBus 触发）
+  commandBus.register('node.add', (payload: {
+    type: string; x: number; y: number; biz: any
+  }) => {
+    return manager!.addNode({
+      type: payload.type,
+      position: { x: payload.x, y: payload.y },
+      bizData: payload.biz
+    })
+  })
+
+  // 注册命令：保存图
+  commandBus.register('graph.save', async () => {
+    await manager!.save()
+    return true
+  })
+})
+
+onBeforeUnmount(() => {
+  // 如需销毁释放事件监听，这里处理（X6 内部已做大部分清理）
+})
+</script>
+
+<style scoped>
+.graph-canvas {
+  width: 100%;
+  height: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+</style>
+<!-- src/views/DiagramEditor.vue -->
+<template>
+  <div class="page">
+    <div class="left">
+      <div class="toolbar">
+        <button @click="addResistor">+ 电阻</button>
+        <button @click="addCapacitor">+ 电容</button>
+        <button @click="save">💾 保存</button>
+      </div>
+      <GraphCanvas />
+    </div>
+
+    <aside class="right">
+      <h3>业务面板</h3>
+      <div v-if="selected">
+        <div class="row"><b>ID</b><span>{{ selected.id }}</span></div>
+        <div class="row"><b>类型</b><span>{{ selected.type }}</span></div>
+        <div class="row"><b>标题</b><span>{{ selected.label }}</span></div>
+        <pre class="payload">{{ selected.payload }}</pre>
+      </div>
+      <div v-else>点击节点查看业务数据</div>
+    </aside>
+  </div>
+</template>
+
+<script setup lang="ts">
+import GraphCanvas from '@/components/GraphCanvas.vue'
+import { GraphEvents } from '@/core/graph/GraphEvents'
+import { commandBus } from '@/core/command/CommandBus'
+import { ref, onMounted } from 'vue'
+import { BusinessService } from '@/core/services/BusinessService'
+import { NodeRegistry } from '@/core/graph/NodeRegistry'
+import { ResistorNode } from '@/core/nodes/components/ResistorNode'
+import { CapacitorNode } from '@/core/nodes/components/CapacitorNode'
+
+/** 在应用启动阶段统一注册节点类型（新增类型只需在此注册） */
+NodeRegistry.register('resistor', ResistorNode)
+NodeRegistry.register('capacitor', CapacitorNode)
+
+const bizService = new BusinessService()
+const selected = ref<any | null>(null)
+
+onMounted(() => {
+  // 监听来自 Graph 的事件（通过 GraphEvents 解耦）
+  GraphEvents.on('node:click', ({ biz }) => {
+    selected.value = {
+      id: biz.id,
+      type: biz.type,
+      label: biz.label,
+      payload: JSON.stringify(biz.payload ?? {}, null, 2)
+    }
+  })
+})
+
+function addResistor() {
+  const id = crypto.randomUUID()
+  commandBus.exec('node.add', {
+    type: 'resistor',
+    x: 60 + Math.random() * 200,
+    y: 60 + Math.random() * 120,
+    biz: { id, type: 'resistor', label: '电阻 10Ω', payload: { ohm: 10 } }
+  })
+}
+function addCapacitor() {
+  const id = crypto.randomUUID()
+  commandBus.exec('node.add', {
+    type: 'capacitor',
+    x: 100 + Math.random() * 220,
+    y: 100 + Math.random() * 160,
+    biz: { id, type: 'capacitor', label: '电容 100uF', payload: { uf: 100 } }
+  })
+}
+function save() {
+  commandBus.exec('graph.save', undefined)
+}
+</script>
+
+<style scoped>
+.page { display: grid; grid-template-columns: 1fr 320px; gap: 12px; height: 100vh; padding: 12px; box-sizing: border-box; }
+.left { display: grid; grid-template-rows: auto 1fr; gap: 8px; }
+.toolbar { display: flex; gap: 8px; }
+.right { border-left: 1px solid #eee; padding-left: 12px; overflow: auto; }
+.row { display: grid; grid-template-columns: 80px 1fr; margin: 6px 0; }
+.payload { background: #f8fafc; padding: 8px; border-radius: 6px; }
+</style>
+```
+
+------
+
+# 11) 静态资源（示例图标）
+
+把你的 SVG 放到 `public/icons/`：
+
+```
+public/icons/resistor.svg
+public/icons/capacitor.svg
+```
+
+（你可替换为任何开源图标库的 SVG：Tabler/Lucide/Phosphor/Iconoir 等，把路径放到节点类的 `icon()` 即可。）
+
+------
+
+# 12) 一些关键设计点（为何解耦 & 怎么扩展）
+
+- **引擎解耦**：领域节点 `BaseNode` → 产出“引擎无关结构” → `X6Adapter` 负责把它翻译成 X6 的配置。未来若换引擎，只改 Adapter 层。
+- **节点扩展**：新增一个节点类型 = 新建子类（定义 ports/icon/尺寸/显示名）+ NodeRegistry 注册；页面无需改其他逻辑。
+- **业务交互**：`GraphEvents` 把 X6 事件转为业务事件；页面/侧栏只关心 `BizData`，不接触 X6 Node。
+- **命令体系**：`CommandBus` 使“调用图操作”统一走命令通道；在中间件里可挂**权限、埋点、错误捕获**。
+- **可插拔持久化**：`Persistence` 接口默认 LocalStorage，随时替换为 HTTP/S3/IndexedDB。
+- **连线规则**：`createConnectingOptions()` 集中管理端口组与连接校验（示例只允许 `out → in`）。
+
+没问题！我在你现有的解耦架构上，一次性把你要的 1/2/3/4 都补齐：
+
+1. **自定义 Vue 组件节点（含小型业务表单 Mini-UI）**
+2. **边样式/路由/锚点/吸附对齐线**
+3. **Dagre 自动布局（命令触发）**
+4. **右键菜单 / 快捷键 / 历史撤销 / 小地图 / 标尺（可选）**
+
+下面给出**可直接拷贝**的代码补丁，均含注释且保持“**领域 → 适配器**”解耦。
+
+------
+
+# 0) 依赖补充（可选依赖走动态导入，未安装也不崩）
+
+```json
+// package.json（新增/确认）
+{
+  "dependencies": {
+    "@antv/x6": "^2.16.1",
+    "@antv/layout": "^0.3.26",                // ③ Dagre 布局（可选）
+    "@antv/x6-plugin-minimap": "^2.2.4",      // ④ 小地图（可选）
+    "mitt": "^3.0.1",
+    "vue": "^3.4.0"
+  }
+}
+```
+
+> 没装这些“可选”插件时，代码会自动降级运行。
+
+------
+
+# 1) 自定义 Vue 节点渲染（Mini-UI）
+
+## 1.1 Vue 节点组件（业务小卡片 + 内联可编辑）
+
+```vue
+<!-- src/nodes/ui/BusinessMiniCard.vue -->
+<template>
+  <div class="mini-wrap" @dblclick.stop="editing=true">
+    <div class="row">
+      <img :src="icon" class="ico" />
+      <div class="title">{{ model.label }}</div>
+    </div>
+
+    <div class="kv">
+      <label>备注</label>
+      <template v-if="!editing">
+        <span class="value">{{ model.payload?.note ?? '—' }}</span>
+      </template>
+      <template v-else>
+        <input v-model="draftNote" @keydown.enter.stop.prevent="save" />
+        <button class="btn" @click.stop="save">保存</button>
+      </template>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+/**
+ * 一个最小的节点内 UI：支持双击编辑备注，并把改动写回 node.data（biz 数据）。
+ * 通过 props 接收：biz（业务数据）、icon、onUpdate（回写函数）。
+ */
+import { ref, watch } from 'vue'
+
+const props = defineProps<{
+  biz: { id: string; type: string; label?: string; payload?: Record<string, any> }
+  icon: string
+  onUpdate: (next: any) => void
+}>()
+
+const editing = ref(false)
+const model = ref({ ...props.biz })
+const draftNote = ref(model.value.payload?.note ?? '')
+
+watch(() => props.biz, (v) => {
+  model.value = { ...v }
+  draftNote.value = v.payload?.note ?? ''
+})
+
+function save() {
+  const next = {
+    ...model.value,
+    payload: { ...(model.value.payload ?? {}), note: draftNote.value }
+  }
+  props.onUpdate(next)
+  editing.value = false
+}
+</script>
+
+<style scoped>
+.mini-wrap { font: 12px/1.4 system-ui, -apple-system; width: 180px; border-radius: 8px; border: 1px solid #e5e7eb; background: #fff; padding: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.ico { width: 18px; height: 18px; }
+.title { font-weight: 600; color: #111827; }
+.kv { display: grid; grid-template-columns: 40px 1fr; align-items: center; gap: 8px; }
+.kv label { color: #6b7280; }
+.value { color: #111827; }
+input { width: 100%; padding: 2px 6px; border: 1px solid #e5e7eb; border-radius: 4px; }
+.btn { margin-left: 6px; padding: 2px 6px; border: 1px solid #e5e7eb; border-radius: 4px; background: #f9fafb; }
+</style>
+```
+
+## 1.2 Vue 节点渲染器：把 Vue 组件挂进 X6 HTML 节点（foreignObject）
+
+```ts
+// src/core/graph/VueNodeRenderer.ts
+/**
+ * 用 X6 的 HTML 组件能力把 Vue 组件挂进节点。
+ * 保持“领域无关”：仅接受 biz/icon，更新时通过回调写回 node.data。
+ */
+import { createApp } from 'vue'
+import type { Graph } from '@antv/x6'
+import BusinessMiniCard from '@/nodes/ui/BusinessMiniCard.vue'
+
+export function registerVueCard(graph: Graph) {
+  // 使用 X6 的 registerHTMLComponent（2.x）
+  const Comp = graph.registerHTMLComponent((node) => {
+    const wrap = document.createElement('div')
+    const biz = node.getData() || {}
+    const icon = node.getAttrByPath('image/xlink:href')
+
+    const app = createApp(BusinessMiniCard, {
+      biz,
+      icon,
+      onUpdate: (next: any) => {
+        // 写回 node.data，并触发视图更新（外部面板也能收到）
+        node.setData(next, { overwrite: true })
+      }
+    })
+    app.mount(wrap)
+
+    // 当节点被销毁时自动卸载
+    node.on('removed', () => app.unmount())
+    return wrap
+  })
+
+  return Comp // 作为 shape 的 html 组件引用
+}
+```
+
+## 1.3 适配器扩展：当节点声明要用 Vue 渲染时，输出 html 形状
+
+```ts
+// src/core/graph/X6Adapter.ts（在原文件基础上补充）
+import type { PortSpec } from '../types'
+import type { Graph } from '@antv/x6'
+import { registerVueCard } from './VueNodeRenderer'
+
+let registeredHtml: any | null = null
+
+export function toX6NodeConfig(agnostic: {
+  type: string
+  position: { x: number; y: number }
+  size: { width: number; height: number }
+  label: string
+  icon: string
+  ports: PortSpec[]
+  biz: any
+  // 新增：是否用 Vue 渲染（由领域节点决定）
+  renderAsVue?: boolean
+}, graph?: Graph) {
+  const { position, size, label, icon, ports, biz, renderAsVue } = agnostic
+
+  const portGroups = {
+    in:  { position: 'left'  as const, attrs: { circle: { r: 4, magnet: true } } },
+    out: { position: 'right' as const, attrs: { circle: { r: 4, magnet: true } } }
+  }
+
+  if (renderAsVue && graph) {
+    // ——Vue 节点：用 html shape 承载，label 交给组件内部管理
+    if (!registeredHtml) registeredHtml = registerVueCard(graph)
+    return {
+      shape: 'html',
+      x: position.x,
+      y: position.y,
+      width: size.width,
+      height: size.height,
+      data: biz,
+      html: registeredHtml,
+      attrs: {
+        body: { stroke: '#64748b', fill: '#fff', rx: 8, ry: 8 },
+        image: { 'xlink:href': icon } // 传给组件用
+      },
+      ports: { groups: portGroups, items: ports.map(p => ({ id: p.id, group: p.group })) }
+    }
+  }
+
+  // ——普通节点：用 rect + label + image
+  return {
+    shape: 'rect',
+    x: position.x,
+    y: position.y,
+    width: size.width,
+    height: size.height,
+    data: biz,
+    attrs: {
+      body: { stroke: '#1f2937', fill: '#fff', rx: 6, ry: 6 },
+      label: { text: label, fontSize: 12, refY: 0.5, refY2: 0 },
+      image: { 'xlink:href': icon, width: 20, height: 20, x: 8, y: 14 }
+    },
+    ports: { groups: portGroups, items: ports.map(p => ({ id: p.id, group: p.group })) }
+  }
+}
+```
+
+> 领域节点若想启用 Vue 渲染，只需在 `toEngineAgnostic()` 结果里加 `renderAsVue: true`。
+
+## 1.4 示例：让电阻节点用 Vue 渲染
+
+```ts
+// src/core/nodes/components/ResistorNode.ts（在原有基础上覆盖 toEngineAgnostic）
+import { BaseNode } from '../BaseNode'
+import type { PortSpec } from '../../types'
+
+export class ResistorNode extends BaseNode {
+  displayName() { return this.biz.label ?? '电阻' }
+  icon() { return '/icons/resistor.svg' }
+  ports(): PortSpec[] {
+    return [
+      { id: `${this.biz.id}:in`, group: 'in' },
+      { id: `${this.biz.id}:out`, group: 'out' },
+    ]
+  }
+  // 关键：声明 renderAsVue
+  toEngineAgnostic() {
+    return {
+      ...super.toEngineAgnostic(),
+      renderAsVue: true
+    }
+  }
+}
+```
+
+------
+
+# 2) 边样式 / 路由 / 锚点 / 吸附对齐线
+
+```ts
+// src/core/graph/X6Adapter.ts（补充一个统一“连线样式/路由”工厂）
+export function createConnectingOptions() {
+  return {
+    allowBlank: false,
+    allowLoop: false,
+    allowNode: false,
+    highlight: true,
+    snap: true,
+    router: { name: 'manhattan' },         // 直角路由
+    connector: { name: 'rounded', args: { radius: 6 } }, // 圆角
+    anchor: 'center',
+    validateConnection({ sourcePort, targetPort }) {
+      return !!(sourcePort?.id?.includes(':out') && targetPort?.id?.includes(':in'))
+    },
+    createEdge() {
+      // 统一边的样式（箭头、颜色、宽度）
+      return {
+        shape: 'edge',
+        attrs: {
+          line: {
+            stroke: '#475569',
+            strokeWidth: 1.6,
+            targetMarker: { name: 'classic', size: 8 }
+          }
+        },
+        zIndex: 1
+      }
+    }
+  }
+}
+// src/core/graph/GraphManager.ts（构造时启用吸附线/对齐）
+this.graph = new Graph({
+  container: opts.container,
+  grid: { size: 10, visible: true },
+  panning: true,
+  mousewheel: { enabled: true, modifiers: ['ctrl'] },
+  connecting: createConnectingOptions(),
+  selecting: { enabled: true, multiple: true, rubberband: true },
+  history: { enabled: true },
+  snapline: true             // 对齐辅助线
+})
+```
+
+------
+
+# 3) Dagre 自动布局（命令触发，未装也不崩）
+
+```ts
+// src/core/command/layout.ts
+/**
+ * Command: graph.layout
+ * 使用 @antv/layout 的 DagreLayout 做 LR 布局
+ * 可通过 payload 覆盖 rankdir/nodesep/ranksep。
+ */
+import type { Graph } from '@antv/x6'
+
+export async function dagreLayout(graph: Graph, opts?: {
+  rankdir?: 'LR' | 'TB' | 'RL' | 'BT'
+  nodesep?: number
+  ranksep?: number
+}) {
+  try {
+    const mod = await import('@antv/layout')
+    const Dagre = (mod as any).layout.DagreLayout
+    const snap = graph.toJSON()
+
+    const input = {
+      nodes: snap.nodes.map((n: any) => ({
+        id: n.id, width: n.size?.width ?? n.width ?? 120, height: n.size?.height ?? n.height ?? 40
+      })),
+      edges: snap.edges.map((e: any) => ({ source: e.source, target: e.target }))
+    }
+
+    const engine = new Dagre({
+      rankdir: opts?.rankdir ?? 'LR',
+      nodesep: opts?.nodesep ?? 40,
+      ranksep: opts?.ranksep ?? 80
+    })
+    const res = engine.layout(input)
+    const pos = new Map(res.nodes.map((n: any) => [n.id, { x: n.x, y: n.y }]))
+
+    graph.batchUpdate(() => {
+      graph.getNodes().forEach((node) => {
+        const p = pos.get(node.id)
+        if (p) node.position(p)
+      })
+    })
+  } catch (e) {
+    console.warn('[layout] @antv/layout 未安装，跳过布局', e)
+  }
+}
+```
+
+在 `GraphCanvas.vue` 初始化命令：
+
+```ts
+// src/components/GraphCanvas.vue（onMounted 内注册命令）
+import { dagreLayout } from '@/core/command/layout'
+
+commandBus.register('graph.layout', (payload?: { rankdir?: any; nodesep?: number; ranksep?: number }) => {
+  return dagreLayout(manager!.raw, payload)
+})
+```
+
+在页面上绑定按钮：
+
+```vue
+<!-- src/views/DiagramEditor.vue（工具栏增加布局按钮） -->
+<button @click="layout">↔ 自动布局</button>
+
+<script setup lang="ts">
+function layout() {
+  commandBus.exec('graph.layout', { rankdir: 'LR', nodesep: 40, ranksep: 80 })
+}
+</script>
+```
+
+------
+
+# 4) 右键菜单 / 快捷键 / 历史撤销 / 小地图 / 标尺
+
+## 4.1 右键菜单（完全解耦：监听 GraphEvents）
+
+```vue
+<!-- src/components/ContextMenu.vue -->
+<template>
+  <div v-if="show" class="ctx" :style="{ left: x + 'px', top: y + 'px' }" @contextmenu.prevent>
+    <div class="item" @click="emit('inspect')">查看详情</div>
+    <div class="item" @click="emit('edit')">编辑标题</div>
+    <div class="item danger" @click="emit('remove')">删除节点</div>
+  </div>
+</template>
+
+<script setup lang="ts">
+const props = defineProps<{ show: boolean; x: number; y: number }>()
+const emit = defineEmits<{
+  (e: 'inspect'): void
+  (e: 'edit'): void
+  (e: 'remove'): void
+}>()
+</script>
+
+<style scoped>
+.ctx { position: fixed; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.08); min-width: 140px; z-index: 9999; }
+.item { padding: 8px 12px; cursor: pointer; }
+.item:hover { background: #f3f4f6; }
+.danger { color: #b91c1c; }
+</style>
+```
+
+在页面里使用：
+
+```vue
+<!-- src/views/DiagramEditor.vue（片段） -->
+<ContextMenu
+  :show="menu.show" :x="menu.x" :y="menu.y"
+  @inspect="inspect()" @edit="editTitle()" @remove="removeNode()" />
+
+<script setup lang="ts">
+import ContextMenu from '@/components/ContextMenu.vue'
+import { GraphEvents } from '@/core/graph/GraphEvents'
+import { commandBus } from '@/core/command/CommandBus'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+
+const menu = ref({ show: false, x: 0, y: 0, nodeId: '' })
+
+onMounted(() => {
+  const handler = (p: any) => {
+    menu.value = { show: true, x: p.event.clientX, y: p.event.clientY, nodeId: p.id }
+    window.addEventListener('click', closeMenu, { once: true })
+  }
+  GraphEvents.on('node:contextmenu', handler)
+  onBeforeUnmount(() => GraphEvents.off('node:contextmenu', handler))
+})
+
+function closeMenu() { menu.value.show = false }
+
+function inspect() {
+  // 你可以打开右侧面板的“详细模式”
+  closeMenu()
+}
+function editTitle() {
+  // 简化实现：把 biz.label 改掉（实际可弹框）
+  // 通过命令查找并写 node.data（这里演示直接用 X6 API 也可）
+  closeMenu()
+}
+function removeNode() {
+  commandBus.exec('node.delete', { id: menu.value.nodeId })
+  closeMenu()
+}
+</script>
+```
+
+> 下面注册 `node.delete` 命令。
+
+## 4.2 快捷键 + 历史撤销（CommandBus 封装）
+
+```ts
+// src/core/command/builtin.ts
+import type { Graph } from '@antv/x6'
+
+export function registerBuiltinCommands(graph: Graph, bus: any) {
+  bus.register('graph.undo', () => graph.history.undo())
+  bus.register('graph.redo', () => graph.history.redo())
+  bus.register('node.delete', ({ id }: { id?: string }) => {
+    if (id) graph.getCellById(id)?.remove()
+    else graph.removeCells(graph.getSelectedCells())
+  })
+  bus.register('graph.fit', () => graph.centerContent({ padding: 40 }))
+}
+```
+
+在 `GraphCanvas.vue` 初始化时调用：
+
+```ts
+import { registerBuiltinCommands } from '@/core/command/builtin'
+
+registerBuiltinCommands(manager.raw, commandBus)
+
+// 绑定快捷键（无需 X6 Keyboard 插件也能工作）
+window.addEventListener('keydown', (e) => {
+  const meta = e.ctrlKey || e.metaKey
+  if (meta && e.key.toLowerCase() === 'z') { e.preventDefault(); commandBus.exec('graph.undo', undefined) }
+  if ((meta && e.key.toLowerCase() === 'y') || (meta && e.shiftKey && e.key.toLowerCase() === 'z')) { e.preventDefault(); commandBus.exec('graph.redo', undefined) }
+  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); commandBus.exec('node.delete', {}) }
+  if (meta && e.key.toLowerCase() === 'f') { e.preventDefault(); commandBus.exec('graph.fit', undefined) }
+})
+```
+
+## 4.3 小地图（可选插件，自动降级）
+
+```ts
+// src/core/graph/Minimap.ts
+import type { Graph } from '@antv/x6'
+
+export async function tryMountMinimap(graph: Graph, container: HTMLElement) {
+  try {
+    const { MiniMap } = await import('@antv/x6-plugin-minimap')
+    graph.use(new MiniMap({ container, width: 200, height: 140 }))
+  } catch (e) {
+    console.warn('[minimap] 未安装 @antv/x6-plugin-minimap，跳过', e)
+  }
+}
+```
+
+页面容器：
+
+```vue
+<!-- src/views/DiagramEditor.vue 工具栏下方加一个小区域 -->
+<div class="miniwrap"><div ref="mini" /></div>
+
+<script setup lang="ts">
+import { tryMountMinimap } from '@/core/graph/Minimap'
+import { onMounted, ref } from 'vue'
+const mini = ref<HTMLDivElement>()
+
+// 等 GraphCanvas 初始化完成后，你可以通过 Global Bus/Ref 拿到 graph 实例；
+// 这里为简单起见，在 GraphCanvas 内部调用 tryMountMinimap 更直接（见下）。
+</script>
+
+<style scoped>
+.miniwrap { position: absolute; right: 16px; bottom: 16px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px; }
+</style>
+```
+
+在 `GraphCanvas.vue` 的 `onMounted` 中直接挂载（最简单）：
+
+```ts
+import { tryMountMinimap } from '@/core/graph/Minimap'
+// ...
+await manager.load()
+if (container.value) {
+  const miniDiv = document.createElement('div')
+  miniDiv.style.position = 'absolute'
+  miniDiv.style.right = '12px'
+  miniDiv.style.bottom = '12px'
+  miniDiv.style.background = '#fff'
+  miniDiv.style.border = '1px solid #e5e7eb'
+  miniDiv.style.borderRadius = '8px'
+  miniDiv.style.padding = '6px'
+  container.value.appendChild(miniDiv)
+  tryMountMinimap(manager.raw, miniDiv)
+}
+```
+
+## 4.4 标尺（轻量实现）
+
+X6 没有官方“标尺”插件。为保持解耦，我们做一个**纯 DOM 叠加**的轻量标尺（不依赖图引擎）：
+
+```vue
+<!-- src/components/RulerOverlay.vue -->
+<template>
+  <div class="ruler-x" />
+  <div class="ruler-y" />
+</template>
+
+<style scoped>
+.ruler-x, .ruler-y { position: absolute; background-image: linear-gradient(to right, transparent 24px, #e5e7eb 24px), linear-gradient(to right, transparent 4px, #f1f5f9 4px); pointer-events: none; }
+.ruler-x { top: 0; left: 0; right: 0; height: 24px; background-size: 25px 1px, 5px 1px; background-repeat: repeat-x; }
+.ruler-y { top: 0; left: 0; bottom: 0; width: 24px; background-size: 1px 25px, 1px 5px; background-repeat: repeat-y; }
+</style>
+```
+
+把它**绝对定位**到 Graph 容器上层即可（在 `GraphCanvas.vue` 模板里加 `<RulerOverlay />`，容器设 `position: relative`）。
+
+------
+
+# 5) 把一切串起来（关键改动汇总）
+
+### 5.1 GraphCanvas.vue（完整片段：新增小地图、快捷键、命令）
+
+```vue
+<!-- src/components/GraphCanvas.vue -->
+<template>
+  <div ref="container" class="graph-canvas">
+    <RulerOverlay />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { GraphManager } from '@/core/graph/GraphManager'
+import { LocalStoragePersistence } from '@/core/persistence/LocalStoragePersistence'
+import { commandBus } from '@/core/command/CommandBus'
+import { registerBuiltinCommands } from '@/core/command/builtin'
+import { dagreLayout } from '@/core/command/layout'
+import { tryMountMinimap } from '@/core/graph/Minimap'
+import RulerOverlay from '@/components/RulerOverlay.vue'
+
+const container = ref<HTMLDivElement>()
+let manager: GraphManager
+
+onMounted(async () => {
+  if (!container.value) return
+  container.value.style.position = 'relative' // 给 RulerOverlay 绝对定位提供参照
+
+  manager = new GraphManager({
+    container: container.value,
+    persistence: new LocalStoragePersistence(),
+    diagramId: 'demo-diagram-001'
+  })
+  registerBuiltinCommands(manager.raw, commandBus)
+
+  // 可选：初次加载
+  await manager.load()
+
+  // 可选：小地图
+  const miniDiv = document.createElement('div')
+  miniDiv.style.position = 'absolute'
+  miniDiv.style.right = '12px'
+  miniDiv.style.bottom = '12px'
+  miniDiv.style.background = '#fff'
+  miniDiv.style.border = '1px solid #e5e7eb'
+  miniDiv.style.borderRadius = '8px'
+  miniDiv.style.padding = '6px'
+  container.value.appendChild(miniDiv)
+  tryMountMinimap(manager.raw, miniDiv)
+
+  // 命令注册：新增、保存、布局
+  commandBus.register('node.add', (p: { type: string; x: number; y: number; biz: any }) =>
+    manager.addNode({ type: p.type, position: { x: p.x, y: p.y }, bizData: p.biz })
+  )
+  commandBus.register('graph.save', () => manager.save())
+  commandBus.register('graph.layout', (payload?: any) => dagreLayout(manager.raw, payload))
+
+  // 快捷键
+  window.addEventListener('keydown', (e) => {
+    const meta = e.ctrlKey || e.metaKey
+    if (meta && e.key.toLowerCase() === 'z') { e.preventDefault(); commandBus.exec('graph.undo', undefined) }
+    if ((meta && e.key.toLowerCase() === 'y') || (meta && e.shiftKey && e.key.toLowerCase() === 'z')) { e.preventDefault(); commandBus.exec('graph.redo', undefined) }
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); commandBus.exec('node.delete', {}) }
+    if (meta && e.key.toLowerCase() === 'f') { e.preventDefault(); commandBus.exec('graph.fit', undefined) }
+    if (meta && e.key.toLowerCase() === 'l') { e.preventDefault(); commandBus.exec('graph.layout', { rankdir: 'LR' }) }
+  })
+})
+</script>
+
+<style scoped>
+.graph-canvas { width: 100%; height: 100%; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }
+</style>
+```
+
+### 5.2 DiagramEditor.vue（工具栏新增按钮、右键菜单）
+
+```vue
+<!-- src/views/DiagramEditor.vue（关键片段） -->
+<div class="toolbar">
+  <button @click="addResistor">+ 电阻(Vue渲染)</button>
+  <button @click="addCapacitor">+ 电容</button>
+  <button @click="layout">↔ 布局</button>
+  <button @click="save">💾 保存</button>
+</div>
+<ContextMenu
+  :show="menu.show" :x="menu.x" :y="menu.y"
+  @inspect="inspect" @edit="editTitle" @remove="removeNode" />
+
+<script setup lang="ts">
+import ContextMenu from '@/components/ContextMenu.vue'
+import { GraphEvents } from '@/core/graph/GraphEvents'
+import { commandBus } from '@/core/command/CommandBus'
+import { ref, onMounted } from 'vue'
+import { NodeRegistry } from '@/core/graph/NodeRegistry'
+import { ResistorNode } from '@/core/nodes/components/ResistorNode'
+import { CapacitorNode } from '@/core/nodes/components/CapacitorNode'
+
+NodeRegistry.register('resistor', ResistorNode)
+NodeRegistry.register('capacitor', CapacitorNode)
+
+const selected = ref<any | null>(null)
+const menu = ref({ show: false, x: 0, y: 0, nodeId: '' })
+
+onMounted(() => {
+  GraphEvents.on('node:click', ({ biz }) => {
+    selected.value = { ...biz, payload: JSON.stringify(biz.payload ?? {}, null, 2) }
+  })
+  GraphEvents.on('node:contextmenu', ({ id, event }) => {
+    menu.value = { show: true, x: event.clientX, y: event.clientY, nodeId: id }
+    window.addEventListener('click', () => (menu.value.show = false), { once: true })
+  })
+})
+
+function addResistor() {
+  commandBus.exec('node.add', {
+    type: 'resistor',
+    x: 80 + Math.random() * 200,
+    y: 80 + Math.random() * 160,
+    biz: { id: crypto.randomUUID(), type: 'resistor', label: '电阻 10Ω', payload: { ohm: 10, note: '双击节点可编辑' } }
+  })
+}
+function addCapacitor() {
+  commandBus.exec('node.add', {
+    type: 'capacitor',
+    x: 120 + Math.random() * 200,
+    y: 120 + Math.random() * 160,
+    biz: { id: crypto.randomUUID(), type: 'capacitor', label: '电容 100uF', payload: { uf: 100 } }
+  })
+}
+function layout()    { commandBus.exec('graph.layout', { rankdir: 'LR' }) }
+function save()      { commandBus.exec('graph.save', undefined) }
+function removeNode(){ commandBus.exec('node.delete', { id: menu.value.nodeId }) }
+
+function inspect()   { /* 打开更详细的业务抽屉即可 */ }
+function editTitle() { /* 弹出输入框，更新 data.label；可用 GraphEvents+命令实现 */ }
+</script>
+```
+
+------
+
+## 你现在拥有的能力清单
+
+- ✅ **Vue 组件化节点**（`BusinessMiniCard`）+ 数据回写（`node.setData`）
+- ✅ **统一边样式 / 路由 / 锚点 / 吸附对齐**（`createConnectingOptions`）
+- ✅ **Dagre 自动布局命令**（`graph.layout`）
+- ✅ **右键菜单 / 快捷键 / 历史撤销 / 小地图 / 轻量标尺**
+- ✅ 仍然保持：**领域节点 → 引擎无关结构 → X6 适配器** 的解耦路径
+
+------
+
+明白 ✅，你需要一份可以直接用于 **antv/x6 节点图标**的 **开源元器件 SVG 图标库**推荐。我帮你整理了几个方向，都是可 clone、可直接用的：
+
+------
+
+## 🔌 通用图标库（开源免费，SVG 可直接使用）
+
+1. **Tabler Icons**
+   - ⭐ [GitHub](https://github.com/tabler/tabler-icons)
+   - 超过 **4600+** 免费开源 SVG 图标，MIT 协议。
+   - 风格统一，适合作为电气/流程/通用元器件的基础图标。
+2. **Remix Icon**
+   - ⭐ [GitHub](https://github.com/Remix-Design/RemixIcon)
+   - 面向产品和工具的现代化图标集，SVG 可直接拿来当节点图标。
+3. **Heroicons**
+   - ⭐ [GitHub](https://github.com/tailwindlabs/heroicons)
+   - Tailwind 官方出品，SVG/React/Vue 版本都有，图标线条简洁，适合交互型节点。
+
+------
+
+## ⚡️ 专门的“元器件 / 电气 / 工程”图标库
+
+1. **Material Design Icons (MDI)**
+   - ⭐ [GitHub](https://github.com/Templarian/MaterialDesign)
+   - 包含很多电子、电气、硬件符号（电阻、电容、电池、芯片、云服务等）。
+   - SVG 可直接用，特别适合电气、工业节点。
+2. **Openmoji**
+   - ⭐ [GitHub](https://github.com/hfg-gmuend/openmoji)
+   - 超过 **4000+** Emoji 风格的 SVG 图标，包含 **电路符号、元器件、科学设备**。
+   - 适合可视化场景，风格活泼。
+3. **Lucide**（Feather Icons 衍生版）
+   - ⭐ [GitHub](https://github.com/lucide-icons/lucide)
+   - 大量线性图标，其中也有计算机/网络/电气相关的符号，轻量可扩展。
+
+------
+
+## 🛠 使用方式（在 X6 节点里加载 SVG 图标）
+
+假设你在 `assets/icons` 下存放 `resistor.svg`，节点定义时这样用：
+
+```ts
+import { Graph } from '@antv/x6'
+
+// 加载 svg 图标
+import resistorIcon from '@/assets/icons/resistor.svg'
+
+Graph.registerNode('resistor-node', {
+  inherit: 'rect',
+  width: 60,
+  height: 40,
+  attrs: {
+    body: {
+      stroke: '#333',
+      fill: '#fff',
+      rx: 6,
+      ry: 6,
+    },
+    icon: {
+      'xlink:href': resistorIcon, // SVG 文件路径
+      width: 24,
+      height: 24,
+      x: 18,
+      y: 8,
+    },
+    label: {
+      text: '电阻器',
+      fill: '#333',
+      fontSize: 12,
+      refY: 35,
+    },
+  },
+})
+```
+
+这样你就能快速把 **SVG 图标库 → X6 节点**结合起来。
+
+------
+
+当然可以 👍
+ 在 **antv/x6** 里做可扩展设计时，一般会定义 **基类节点**（BaseNode）和**连接桩（ports）配置**，然后在其基础上扩展不同业务图样。下面我给你一个 Vue3 项目中可直接复用的例子（与你之前需要的“解耦 + 扩展性好”保持一致）。
+
+------
+
+## 1. 基类节点（BaseNode）
+
+基类节点封装一些通用属性（样式、连接桩配置、业务数据字段），所有业务节点都继承它。
+
+```ts
+// src/graph/nodes/BaseNode.ts
+import { Shape } from '@antv/x6'
+
+export const BaseNode = Shape.Rect.define({
+  width: 120,
+  height: 40,
+  attrs: {
+    body: {
+      stroke: '#5F95FF',
+      fill: '#EFF4FF',
+      strokeWidth: 1,
+    },
+    label: {
+      text: 'Base Node',
+      fill: '#333',
+      fontSize: 14,
+    },
+  },
+  ports: {
+    groups: {
+      top: {
+        position: 'top',
+        attrs: {
+          circle: {
+            r: 4,
+            magnet: true, // 允许连接
+            stroke: '#5F95FF',
+            strokeWidth: 1,
+            fill: '#fff',
+          },
+        },
+      },
+      right: {
+        position: 'right',
+        attrs: {
+          circle: {
+            r: 4,
+            magnet: true,
+            stroke: '#5F95FF',
+            strokeWidth: 1,
+            fill: '#fff',
+          },
+        },
+      },
+      bottom: {
+        position: 'bottom',
+        attrs: {
+          circle: {
+            r: 4,
+            magnet: true,
+            stroke: '#5F95FF',
+            strokeWidth: 1,
+            fill: '#fff',
+          },
+        },
+      },
+      left: {
+        position: 'left',
+        attrs: {
+          circle: {
+            r: 4,
+            magnet: true,
+            stroke: '#5F95FF',
+            strokeWidth: 1,
+            fill: '#fff',
+          },
+        },
+      },
+    },
+    items: [
+      { id: 'port-top', group: 'top' },
+      { id: 'port-right', group: 'right' },
+      { id: 'port-bottom', group: 'bottom' },
+      { id: 'port-left', group: 'left' },
+    ],
+  },
+})
+```
+
+------
+
+## 2. 业务节点示例
+
+在 `BaseNode` 上扩展，设置不同形状、颜色、业务数据。
+
+```ts
+// src/graph/nodes/TaskNode.ts
+import { BaseNode } from './BaseNode'
+import { Graph } from '@antv/x6'
+
+// 注册一个任务节点（继承 BaseNode）
+Graph.registerNode(
+  'task-node',
+  {
+    inherit: 'rect', // 继承 rect 基础形状
+    width: 140,
+    height: 50,
+    attrs: {
+      body: {
+        stroke: '#13C2C2',
+        fill: '#E6FFFB',
+      },
+      label: {
+        text: '任务节点',
+        fontSize: 14,
+        fill: '#006D75',
+      },
+    },
+  },
+  true
+)
+```
+
+------
+
+## 3. 决策节点（菱形）
+
+可以定义不同的几何图样，比如决策节点用菱形：
+
+```ts
+// src/graph/nodes/DecisionNode.ts
+import { Graph } from '@antv/x6'
+
+Graph.registerNode(
+  'decision-node',
+  {
+    inherit: 'polygon',
+    width: 100,
+    height: 60,
+    attrs: {
+      body: {
+        stroke: '#FA8C16',
+        fill: '#FFF7E6',
+      },
+      label: {
+        text: '条件判断',
+        fontSize: 14,
+        fill: '#874D00',
+      },
+    },
+    points: [
+      [0, 30],
+      [50, 0],
+      [100, 30],
+      [50, 60],
+    ],
+  },
+  true
+)
+```
+
+------
+
+## 4. 在 Graph 中使用
+
+```ts
+// src/graph/initGraph.ts
+import { Graph } from '@antv/x6'
+import './nodes/BaseNode'
+import './nodes/TaskNode'
+import './nodes/DecisionNode'
+
+export function initGraph(container: HTMLElement) {
+  const graph = new Graph({
+    container,
+    grid: true,
+    connecting: {
+      allowBlank: false,
+      allowLoop: false,
+      highlight: true,
+    },
+  })
+
+  // 添加一个任务节点
+  graph.addNode({
+    shape: 'task-node',
+    x: 40,
+    y: 40,
+    data: { bizType: 'task', bizId: 1 },
+  })
+
+  // 添加一个决策节点
+  graph.addNode({
+    shape: 'decision-node',
+    x: 240,
+    y: 100,
+    data: { bizType: 'decision', bizId: 2 },
+  })
+
+  return graph
+}
+```
+
+------
+
+## 5. Vue3 组件挂载
+
+```vue
+<!-- src/components/GraphCanvas.vue -->
+<template>
+  <div ref="containerRef" style="width: 100%; height: 600px; border: 1px solid #ddd"></div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { initGraph } from '../graph/initGraph'
+
+const containerRef = ref<HTMLDivElement>()
+
+onMounted(() => {
+  if (containerRef.value) {
+    initGraph(containerRef.value)
+  }
+})
+</script>
+```
+
+------
+
+✅ 上面这套结构里：
+
+- **BaseNode** → 定义通用样式和连接桩
+- **TaskNode / DecisionNode** → 基于 `Graph.registerNode` 注册不同类型业务节点
+- **initGraph** → 单独封装 `Graph` 初始化逻辑
+- **GraphCanvas.vue** → Vue3 组件挂载
+
+这样做到了 **解耦 & 可扩展**：以后只要在 `nodes/` 文件夹下新建一个节点定义文件并注册即可。
+
+------
+
