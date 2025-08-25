@@ -713,3 +713,470 @@ def calculate_sigma_bands(y_true, y_pred, use_percentage=False):
 
 ------
 
+明白了。我们需要绘制一个 **Sigma 图**，其中：
+
+- **x 轴**：绝对差值与实际值的百分比，即
+
+  percentage_error=∣ypred−ytrue∣∣ytrue∣×100\text{percentage\_error} = \frac{|y_{\text{pred}} - y_{\text{true}}|}{|y_{\text{true}}|} \times 100
+
+- **y 轴**：该百分比误差出现的概率（通过直方图估计）。
+
+- **Sigma 线**：基于误差分布的均值和标准差，绘制 ±nσ 范围（n 可为 3、4、5 等）。
+
+------
+
+### 完整可运行代码
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+
+# 示例数据：真实值和预测值
+np.random.seed(42)
+y_true = np.random.uniform(50, 150, 1000)   # 真实值
+y_pred = y_true + np.random.normal(0, 10, 1000)  # 预测值
+
+# 计算百分比误差
+percentage_error = np.abs(y_pred - y_true) / np.abs(y_true) * 100
+
+# 绘制 Sigma 图函数
+def plot_sigma_chart(errors, sigma_level=3, bins=20):
+    """
+    绘制 Sigma 图（带直方图和概率密度曲线）
+    :param errors: 百分比误差数组
+    :param sigma_level: sigma 范围（如3,4,5）
+    :param bins: 直方图分箱数
+    """
+    # 计算均值和标准差
+    mu, sigma = np.mean(errors), np.std(errors)
+    
+    # 直方图统计
+    counts, bin_edges = np.histogram(errors, bins=bins, density=True)
+    bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+    
+    # 高斯拟合曲线
+    x = np.linspace(0, np.max(errors), 500)
+    pdf = norm.pdf(x, mu, sigma)
+    
+    # 绘图
+    plt.figure(figsize=(10, 6))
+    plt.bar(bin_centers, counts, width=(bin_edges[1]-bin_edges[0]),
+            alpha=0.6, color='skyblue', label='误差分布 (直方图)')
+    plt.plot(x, pdf, 'r-', lw=2, label='正态拟合曲线')
+    
+    # 绘制 ±nσ 范围虚线
+    for n in [-sigma_level, sigma_level]:
+        plt.axvline(mu + n * sigma, color='green', linestyle='--', 
+                    label=f'{n:+}σ 范围' if n > 0 else None)
+    
+    # 均值线
+    plt.axvline(mu, color='black', linestyle='-', label='均值')
+    
+    # 标签和标题
+    plt.xlabel('误差百分比 (%)')
+    plt.ylabel('概率密度')
+    plt.title(f'{sigma_level}-Sigma 图 (误差百分比分布)')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+# 绘制 3-Sigma 图
+plot_sigma_chart(percentage_error, sigma_level=3, bins=20)
+
+# 可切换为 4-Sigma、5-Sigma
+# plot_sigma_chart(percentage_error, sigma_level=4, bins=20)
+# plot_sigma_chart(percentage_error, sigma_level=5, bins=20)
+```
+
+------
+
+### 代码说明
+
+1. **percentage_error**：计算预测值与真实值的绝对差的百分比。
+2. **直方图**：用 `np.histogram` 获取频率分布，`density=True` 转换为概率密度。
+3. **正态曲线**：用 `scipy.stats.norm.pdf` 绘制拟合曲线。
+4. **Sigma 范围**：用 ±nσ 在图中画出虚线。
+5. **bins** 参数可以控制柱状图数量（推荐 20 左右）。
+
+------
+
+理解了，你需要的是：
+
+- **x轴**：预测值与实际值之间的相对误差百分比 `((预测值 - 实际值) / 实际值) * 100`
+- **y轴**：该误差出现的概率（直方图归一化）
+- **附加功能**：绘制不同 σ 区间（如 1σ、2σ、3σ、4σ、5σ） 的范围线
+
+### 完整代码（可直接运行）
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+
+# 模拟数据（实际使用时替换为真实数据）
+np.random.seed(42)
+actual = np.random.uniform(50, 150, 1000)  # 实际值
+predicted = actual + np.random.normal(0, 10, 1000)  # 预测值
+
+# 计算相对误差百分比（可正可负）
+relative_error_percent = (predicted - actual) / actual * 100
+
+# 统计直方图数据
+num_bins = 20  # 直方图柱数，可调整
+counts, bin_edges = np.histogram(relative_error_percent, bins=num_bins, density=True)
+
+# 计算每个柱的中心
+bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+# 估计误差分布的均值和标准差
+mu, sigma = np.mean(relative_error_percent), np.std(relative_error_percent)
+
+# 生成正态分布曲线
+x = np.linspace(min(relative_error_percent), max(relative_error_percent), 500)
+pdf = norm.pdf(x, mu, sigma)
+
+# 绘图
+plt.figure(figsize=(10, 6))
+
+# 绘制直方图
+plt.bar(bin_centers, counts, width=bin_edges[1]-bin_edges[0], alpha=0.6, color='skyblue', edgecolor='black', label='误差分布')
+
+# 绘制正态分布曲线
+plt.plot(x, pdf, 'r-', lw=2, label=f'正态分布拟合\nμ={mu:.2f}%, σ={sigma:.2f}%')
+
+# 绘制多级sigma虚线
+for s in [1, 2, 3, 4, 5]:  # 可自行调整sigma级数
+    left, right = mu - s * sigma, mu + s * sigma
+    plt.axvline(left, color='gray', linestyle='--', linewidth=1)
+    plt.axvline(right, color='gray', linestyle='--', linewidth=1)
+    plt.text(right, max(counts)*0.9, f'{s}σ', rotation=90, verticalalignment='top')
+
+# 添加标签和图例
+plt.xlabel('预测误差百分比 (%)')
+plt.ylabel('概率密度')
+plt.title('预测误差分布及多σ区间')
+plt.legend()
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.show()
+```
+
+------
+
+### 主要特性
+
+1. **x轴**：误差百分比（带正负号，非绝对值）。
+2. **y轴**：概率密度，由 `density=True` 归一化保证。
+3. **可调整 sigma 级数**：修改 `for s in [1, 2, 3, 4, 5]:` 即可。
+4. **直方图 + 正态拟合曲线 + 多级 σ 虚线**。
+
+------
+
+以下是基于你现有的 `x` 和 `y` 数据绘制 **可调 sigma 控制图** 的完整示例，支持 `3σ`、`4σ`、`5σ` 等任意级别：
+
+------
+
+### 完整 Python 代码
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_sigma_chart(x, y, sigma_level=3):
+    """
+    使用已有的 x 和 y 数据绘制 sigma 控制图。
+    
+    参数:
+        x: 自变量数据 (列表或 NumPy 数组)
+        y: 因变量数据 (列表或 NumPy 数组)
+        sigma_level: sigma 水平（如 3 表示 3σ，4 表示 4σ）
+    """
+    # 转换为 NumPy 数组以便计算
+    x = np.array(x)
+    y = np.array(y)
+
+    # 计算均值和标准差
+    mean_y = np.mean(y)
+    std_y = np.std(y)
+
+    # 计算上限线和下限线
+    upper_limit = mean_y + sigma_level * std_y
+    lower_limit = mean_y - sigma_level * std_y
+
+    # 开始绘图
+    plt.figure(figsize=(10, 6))
+    plt.plot(x, y, 'bo-', label='Data')  # 数据点
+
+    # 绘制均值线
+    plt.axhline(y=mean_y, color='green', linestyle='-', linewidth=2, label='Mean')
+
+    # 绘制上限线和下限线
+    plt.axhline(y=upper_limit, color='red', linestyle='--', linewidth=1.5, label=f'+{sigma_level}σ')
+    plt.axhline(y=lower_limit, color='red', linestyle='--', linewidth=1.5, label=f'-{sigma_level}σ')
+
+    # 标题和标签
+    plt.title(f'Sigma Chart ({sigma_level}σ)')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+# 示例：假设你已有训练数据 x 和 y
+x = np.arange(1, 21)  # 训练数据的索引
+y = np.random.normal(loc=50, scale=5, size=20)  # 模拟符合正态分布的训练结果
+
+# 绘制 3σ 控制图
+plot_sigma_chart(x, y, sigma_level=3)
+
+# 可以修改 sigma_level 参数来绘制 4σ 或 5σ
+# plot_sigma_chart(x, y, sigma_level=4)
+# plot_sigma_chart(x, y, sigma_level=5)
+```
+
+------
+
+### 代码特点
+
+1. **完全独立**：可直接运行，无需重新指定 `x` 和 `y`。
+2. **sigma 可调**：通过 `sigma_level` 轻松切换 3σ、4σ、5σ。
+3. **适合线性回归训练结果**：直接传入模型训练中的数据即可。
+
+------
+
+下面是一个可直接运行的 Python 脚本，用于绘制线性回归预测残差的 **N-Sigma 控制图**，并且支持调整为 3σ、4σ、5σ 等：
+
+------
+
+### 完整代码
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+
+# ========== 数据准备 ==========
+np.random.seed(42)
+X = np.linspace(0, 10, 100).reshape(-1, 1)  # 特征
+y = 3 * X.flatten() + 5 + np.random.normal(0, 2, 100)  # 线性关系 + 噪声
+
+# 切分训练集和测试集
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# ========== 训练线性回归模型 ==========
+model = LinearRegression()
+model.fit(X_train, y_train)
+
+# 预测
+y_pred = model.predict(X_test)
+
+# ========== 计算残差 ==========
+residuals = y_test - y_pred
+mean_residual = np.mean(residuals)
+std_residual = np.std(residuals)
+
+# ========== 可调参数：sigma 范围 ==========
+sigma_level = 3  # 可改为 4、5 等
+
+# 计算控制限
+upper_limit = mean_residual + sigma_level * std_residual
+lower_limit = mean_residual - sigma_level * std_residual
+
+# ========== 绘制 N-Sigma 控制图 ==========
+plt.figure(figsize=(10, 6))
+plt.plot(residuals, marker='o', linestyle='-', label='Residuals')
+plt.axhline(mean_residual, color='green', linestyle='--', label='Mean')
+plt.axhline(upper_limit, color='red', linestyle='--', label=f'+{sigma_level}σ')
+plt.axhline(lower_limit, color='red', linestyle='--', label=f'-{sigma_level}σ')
+
+# 标记超出 Nσ 的点
+outliers = np.where((residuals > upper_limit) | (residuals < lower_limit))[0]
+plt.scatter(outliers, residuals[outliers], color='red', s=80, edgecolors='black', label='Outliers')
+
+plt.title(f'{sigma_level}-Sigma Control Chart for Regression Residuals')
+plt.xlabel('Sample Index')
+plt.ylabel('Residual')
+plt.legend()
+plt.grid(True)
+plt.show()
+```
+
+------
+
+### 运行效果
+
+- 横轴是测试样本索引。
+- 纵轴是残差值。
+- 绿色虚线是残差均值，红色虚线是 ±Nσ 控制线。
+- 超出 ±Nσ 的点会被标记为红色点。
+
+------
+
+下面是一个可以直接运行的示例代码，用于绘制符合正态分布的线性回归残差数据的 **3-Sigma 图**，包含：
+
+- **柱状图**（误差百分比直方图）
+- **累积分布曲线（σ线）**
+- **3 条虚线**（±1σ、±2σ、±3σ 位置）
+
+### Python 代码
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+
+# ================================
+# 1. 生成示例数据（线性回归残差）
+# ================================
+np.random.seed(42)
+# 假设真实误差为正态分布 N(0, 0.1)
+errors = np.random.normal(loc=0, scale=0.1, size=1000)
+
+# 转换为绝对差值百分比 (例如预测值的 1 为基准)
+abs_errors_pct = np.abs(errors) * 100
+
+# ================================
+# 2. 计算均值和标准差
+# ================================
+mean = np.mean(abs_errors_pct)
+std = np.std(abs_errors_pct)
+
+# ================================
+# 3. 绘制直方图 + 累积分布曲线
+# ================================
+plt.figure(figsize=(10, 6))
+
+# --- 直方图 ---
+counts, bins, patches = plt.hist(
+    abs_errors_pct, bins=20, density=True, alpha=0.6, color='skyblue', label='误差直方图'
+)
+
+# --- 计算正态分布拟合曲线 ---
+x = np.linspace(0, max(abs_errors_pct) * 1.1, 500)
+pdf = norm.pdf(x, mean, std)  # 概率密度函数
+cdf = norm.cdf(x, mean, std)  # 累积分布函数 (σ线)
+
+# --- 绘制概率密度曲线 ---
+plt.plot(x, pdf, 'r-', lw=2, label='正态分布曲线')
+
+# --- 绘制累积分布曲线 ---
+plt.plot(x, cdf, 'g-', lw=2, label='累积分布曲线 (σ)')
+
+# ================================
+# 4. 绘制 1σ、2σ、3σ 虚线
+# ================================
+for i in range(1, 4):
+    plt.axvline(mean + i * std, color='gray', linestyle='--', lw=1)
+    plt.axvline(max(0, mean - i * std), color='gray', linestyle='--', lw=1)
+    plt.text(mean + i * std, max(pdf)*0.8, f'+{i}σ', rotation=90)
+    plt.text(max(0, mean - i * std), max(pdf)*0.8, f'-{i}σ', rotation=90)
+
+# ================================
+# 5. 图形美化
+# ================================
+plt.title('3-Sigma 误差分布图')
+plt.xlabel('绝对差值百分比 (%)')
+plt.ylabel('概率密度 / 累积分布')
+plt.legend()
+plt.grid(True, linestyle='--', alpha=0.5)
+plt.tight_layout()
+plt.show()
+```
+
+### 运行说明
+
+1. 复制代码到 `sigma_plot.py` 或 Jupyter Notebook。
+
+2. 确保安装依赖：
+
+   ```bash
+   pip install numpy matplotlib scipy
+   ```
+
+3. 运行后会显示包含 **直方图 + 正态分布拟合曲线 + 累积分布 σ 线** 的图。
+
+------
+
+以下是一个可复用的 Python 函数，可以直接传入残差数据，自动生成符合 **3σ 原则** 的分布图，并可选择是否绘制正态拟合曲线与累积分布曲线 (CDF)。
+
+------
+
+### 可复用函数
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+
+def plot_residuals_distribution(
+    residuals,
+    bins=30,
+    show_fit=True,
+    show_cdf=False,
+    title="Residuals Distribution with 3σ Rule"
+):
+    """
+    绘制残差分布图，包含 3σ 区间，可选正态拟合曲线和CDF曲线。
+
+    参数：
+        residuals (array-like): 残差数据
+        bins (int): 直方图的柱数
+        show_fit (bool): 是否显示正态分布拟合曲线
+        show_cdf (bool): 是否显示累积分布曲线
+        title (str): 图表标题
+    """
+    residuals = np.array(residuals)
+    mean = np.mean(residuals)
+    std = np.std(residuals)
+
+    # 绘制直方图
+    fig, ax1 = plt.subplots(figsize=(8, 5))
+    n, bins_hist, patches = ax1.hist(residuals, bins=bins, density=True, alpha=0.6, color='skyblue')
+
+    # 绘制正态拟合曲线
+    if show_fit:
+        x = np.linspace(min(residuals), max(residuals), 200)
+        y = norm.pdf(x, mean, std)
+        ax1.plot(x, y, 'r-', lw=2, label="Normal Fit")
+
+    # 标记 1σ、2σ、3σ 区间
+    for i, color in zip([1, 2, 3], ['g', 'orange', 'r']):
+        ax1.axvline(mean + i*std, color=color, linestyle='--', label=f'+{i}σ')
+        ax1.axvline(mean - i*std, color=color, linestyle='--', label=f'-{i}σ')
+
+    ax1.set_title(title)
+    ax1.set_xlabel("Residual")
+    ax1.set_ylabel("Density")
+    ax1.legend()
+
+    # 可选：绘制累积分布曲线
+    if show_cdf:
+        ax2 = ax1.twinx()
+        sorted_res = np.sort(residuals)
+        cdf = np.arange(1, len(residuals)+1) / len(residuals)
+        ax2.plot(sorted_res, cdf, 'k-', lw=1.5, label='CDF')
+        ax2.set_ylabel("CDF")
+        ax2.legend(loc='lower right')
+
+    plt.show()
+```
+
+------
+
+### 使用示例
+
+```python
+# 示例残差数据
+residuals = np.random.normal(0, 2, 1000)
+
+# 仅绘制直方图+拟合曲线+3σ
+plot_residuals_distribution(residuals)
+
+# 绘制直方图+拟合曲线+CDF
+plot_residuals_distribution(residuals, show_cdf=True)
+```
+
+------
+
