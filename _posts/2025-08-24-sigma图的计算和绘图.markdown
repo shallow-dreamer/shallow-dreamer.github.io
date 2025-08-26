@@ -1180,3 +1180,456 @@ plot_residuals_distribution(residuals, show_cdf=True)
 
 ------
 
+下面提供了一个完整的 Python 示例，满足以下要求：
+
+- **x 轴**：差值与实际值的百分比（可为正负值）。
+- **y 轴**：概率密度（概率）。
+- **图形**：柱状图（直方图）+ σ 范围的累计概率曲线（可选择 1σ、2σ、3σ、4σ、5σ）。
+- **直方图分箱**：默认 20 个，可调整。
+
+------
+
+### 完整示例代码
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+
+# 示例数据
+np.random.seed(42)
+actual = np.random.normal(100, 10, 1000)  # 实际值
+predicted = actual + np.random.normal(0, 5, 1000)  # 预测值
+
+# 计算差值百分比 (不取绝对值)
+diff_percentage = (predicted - actual) / actual * 100
+
+# 绘制 sigma 图函数
+def plot_sigma_hist(diff_percentage, bins=20, sigma_level=3):
+    """
+    绘制包含直方图和 sigma 线的图像
+    :param diff_percentage: 差值百分比数组
+    :param bins: 直方图分箱数
+    :param sigma_level: sigma 范围（例如 3 表示 ±3σ）
+    """
+    mean = np.mean(diff_percentage)
+    std = np.std(diff_percentage)
+
+    # 绘制直方图，density=True 使 y 轴为概率密度
+    counts, bin_edges, _ = plt.hist(diff_percentage, bins=bins, density=True,
+                                    alpha=0.6, color='skyblue', edgecolor='black',
+                                    label='差值百分比直方图')
+
+    # 生成平滑的 x 轴数据用于绘制正态分布曲线
+    x = np.linspace(min(diff_percentage), max(diff_percentage), 1000)
+    pdf = norm.pdf(x, mean, std)  # 正态分布概率密度函数
+
+    plt.plot(x, pdf, 'r-', linewidth=2, label='正态分布拟合曲线')
+
+    # 绘制 sigma 虚线
+    for i in range(1, sigma_level + 1):
+        lower = mean - i * std
+        upper = mean + i * std
+        plt.axvline(lower, color='gray', linestyle='--', linewidth=1)
+        plt.axvline(upper, color='gray', linestyle='--', linewidth=1)
+        plt.text(upper, max(pdf) * 0.9, f'+{i}σ', rotation=0, fontsize=8)
+        plt.text(lower, max(pdf) * 0.9, f'-{i}σ', rotation=0, fontsize=8)
+
+    plt.xlabel("差值百分比 (%)")
+    plt.ylabel("概率密度")
+    plt.title(f"差值百分比直方图及 ±{sigma_level}σ 范围")
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.show()
+
+# 调用函数
+plot_sigma_hist(diff_percentage, bins=20, sigma_level=4)
+```
+
+------
+
+### 代码说明
+
+1. **diff_percentage**：直接计算 `(predicted - actual) / actual * 100`，保留正负值。
+2. **直方图**：通过 `plt.hist` 绘制，`density=True` 使 y 轴为概率密度而非计数。
+3. **sigma 虚线**：根据均值和标准差绘制 ±1σ, ±2σ, ...，数量可通过参数 `sigma_level` 调整。
+4. **拟合曲线**：使用 `scipy.stats.norm.pdf` 绘制与数据匹配的正态分布曲线。
+
+------
+
+下面是将 **Matplotlib** 版本转换为 **ECharts** 版本的示例代码，并支持差值百分比、概率计算、柱状图与 sigma 线条（虚线）绘制。
+
+------
+
+### **1. 计算数据部分 (Python)**
+
+先使用 Python 处理数据，生成适合前端 ECharts 的 JSON 格式。
+
+```python
+import numpy as np
+import json
+
+# 生成示例数据
+np.random.seed(42)
+actual = np.random.normal(100, 10, 500)  # 实际值
+predicted = actual + np.random.normal(0, 5, 500)  # 预测值
+
+# 计算差值百分比 (不取绝对值)
+diff_percent = (predicted - actual) / actual * 100  # 差值百分比
+
+# 计算直方图数据
+num_bins = 20
+counts, bin_edges = np.histogram(diff_percent, bins=num_bins, density=True)
+
+# 转换为 ECharts 所需的格式 (柱状图数据)
+bar_data = [{"value": round(c, 6), "bin": f"{round(bin_edges[i],2)}~{round(bin_edges[i+1],2)}"} 
+            for i, c in enumerate(counts)]
+
+# 生成 x 轴坐标（使用每个区间的中点）
+x_data = [(bin_edges[i] + bin_edges[i+1]) / 2 for i in range(len(bin_edges)-1)]
+
+# 计算 sigma 线条
+sigma_levels = [1, 2, 3, 4, 5]  # 可动态选择
+mean = np.mean(diff_percent)
+std = np.std(diff_percent)
+
+sigma_lines = {}
+for s in sigma_levels:
+    # 理论正态分布曲线
+    x_line = np.linspace(mean - s * std, mean + s * std, 200)
+    y_line = (1/(std*np.sqrt(2*np.pi))) * np.exp(-0.5*((x_line-mean)/std)**2)
+    sigma_lines[s] = {"x": x_line.tolist(), "y": y_line.tolist()}
+
+# 导出为 JSON 供前端使用
+chart_data = {
+    "x_data": [round(x, 3) for x in x_data],
+    "bar_data": [round(c, 6) for c in counts],
+    "sigma_lines": sigma_lines
+}
+
+with open("chart_data.json", "w") as f:
+    json.dump(chart_data, f, indent=2)
+```
+
+输出文件 `chart_data.json` 的格式类似：
+
+```json
+{
+  "x_data": [-20.4, -18.3, ..., 21.7],
+  "bar_data": [0.0012, 0.0035, ...],
+  "sigma_lines": {
+    "1": {"x": [...], "y": [...]},
+    "2": {"x": [...], "y": [...]},
+    ...
+  }
+}
+```
+
+------
+
+### **2. ECharts 绘制部分 (HTML + JS)**
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Sigma 图</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <style>
+        #main {width: 900px; height: 600px;}
+    </style>
+</head>
+<body>
+<div id="main"></div>
+<script>
+fetch('chart_data.json') // 加载 Python 生成的数据
+  .then(response => response.json())
+  .then(data => {
+      var chartDom = document.getElementById('main');
+      var myChart = echarts.init(chartDom);
+
+      var option = {
+          title: { text: '差值百分比概率分布 (Sigma 图)' },
+          tooltip: { trigger: 'axis' },
+          xAxis: { 
+              type: 'category',
+              data: data.x_data,
+              name: '差值百分比(%)'
+          },
+          yAxis: {
+              type: 'value',
+              name: '概率密度'
+          },
+          series: [
+              {
+                  name: '概率分布',
+                  type: 'bar',
+                  data: data.bar_data,
+                  barWidth: '60%',
+                  itemStyle: { color: '#5470C6' }
+              },
+              ...Object.keys(data.sigma_lines).map(s => ({
+                  name: s + 'σ',
+                  type: 'line',
+                  data: data.sigma_lines[s].x.map((x, i) => [x, data.sigma_lines[s].y[i]]),
+                  lineStyle: { type: 'dashed' },
+                  smooth: true
+              }))
+          ]
+      };
+
+      myChart.setOption(option);
+  });
+</script>
+</body>
+</html>
+```
+
+------
+
+### **特点**
+
+- `bar_data` 显示柱状图（概率分布）。
+- `sigma_lines` 以虚线显示不同 sigma 范围内的理论正态分布曲线。
+- 只需修改 `sigma_levels` 即可支持 4σ、5σ 等。
+
+------
+
+好的，以下是优化后的版本，确保：
+
+- **只有一条主曲线**（正态分布拟合曲线）。
+- **通过虚线标记不同 σ 区间**。
+- **在 Tooltip 中显示区间的累计概率**。
+
+------
+
+### **1. Python 端计算数据**
+
+```python
+import numpy as np
+import json
+from scipy.stats import norm
+
+# 模拟数据
+np.random.seed(42)
+actual = np.random.normal(100, 10, 500)
+predicted = actual + np.random.normal(0, 5, 500)
+
+# 差值百分比
+diff_percent = (predicted - actual) / actual * 100
+
+# 统计直方图数据
+num_bins = 20
+counts, bin_edges = np.histogram(diff_percent, bins=num_bins, density=True)
+x_data = [(bin_edges[i] + bin_edges[i+1]) / 2 for i in range(len(bin_edges)-1)]
+
+# 正态分布拟合
+mean = np.mean(diff_percent)
+std = np.std(diff_percent)
+x_line = np.linspace(mean - 4*std, mean + 4*std, 200)
+y_line = norm.pdf(x_line, mean, std)
+
+# Sigma 区间概率
+sigma_levels = [1, 2, 3, 4, 5]
+sigma_lines = []
+sigma_probs = []
+for s in sigma_levels:
+    left = mean - s * std
+    right = mean + s * std
+    prob = norm.cdf(right, mean, std) - norm.cdf(left, mean, std)
+    sigma_lines.append(left)
+    sigma_lines.append(right)
+    sigma_probs.append({"sigma": s, "probability": round(prob, 4)})
+
+chart_data = {
+    "x_data": [round(x, 3) for x in x_data],
+    "bar_data": [round(c, 6) for c in counts],
+    "curve": {"x": x_line.tolist(), "y": y_line.tolist()},
+    "sigma_lines": sigma_lines,
+    "sigma_probs": sigma_probs
+}
+
+with open("chart_data.json", "w") as f:
+    json.dump(chart_data, f, indent=2)
+```
+
+------
+
+### **2. ECharts 前端 HTML**
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Sigma 图</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <style>
+        #main {width: 900px; height: 600px;}
+    </style>
+</head>
+<body>
+<div id="main"></div>
+<script>
+fetch('chart_data.json')
+  .then(response => response.json())
+  .then(data => {
+      var chartDom = document.getElementById('main');
+      var myChart = echarts.init(chartDom);
+
+      var option = {
+          title: { text: '差值百分比概率分布 (Sigma 图)' },
+          tooltip: {
+              trigger: 'axis',
+              formatter: function(params) {
+                  let info = '';
+                  params.forEach(p => {
+                      info += `${p.seriesName}: ${p.value[1]?.toFixed(4) || p.value.toFixed(4)}<br/>`;
+                  });
+                  info += '<br/>Sigma 区间概率:<br/>';
+                  data.sigma_probs.forEach(sp => {
+                      info += `${sp.sigma}σ: ${sp.probability}<br/>`;
+                  });
+                  return info;
+              }
+          },
+          xAxis: { type: 'value', name: '差值百分比(%)' },
+          yAxis: { type: 'value', name: '概率密度' },
+          series: [
+              {
+                  name: '概率分布',
+                  type: 'bar',
+                  data: data.x_data.map((x,i)=>[x, data.bar_data[i]]),
+                  barWidth: '60%',
+                  itemStyle: { color: '#5470C6' }
+              },
+              {
+                  name: '拟合曲线',
+                  type: 'line',
+                  smooth: true,
+                  data: data.curve.x.map((x, i) => [x, data.curve.y[i]]),
+                  lineStyle: { width: 2, color: 'red' }
+              }
+          ],
+          markLine: {
+              symbol: 'none',
+              lineStyle: { type: 'dashed', color: 'black' },
+              data: data.sigma_lines.map(v => ({ xAxis: v }))
+          }
+      };
+
+      myChart.setOption(option);
+  });
+</script>
+</body>
+</html>
+```
+
+------
+
+### **优化内容**
+
+- 仅一条红色拟合曲线 (`拟合曲线`)。
+- 虚线 (`markLine`) 标记不同 σ 区间。
+- `tooltip` 中显示所有 σ 区间的累计概率。
+
+------
+
+是的，需要提供分桶优化方案，否则：
+
+- **数据点过多** 会导致 ECharts 渲染性能下降（卡顿或浏览器崩溃）。
+- **报错 `Cannot read properties of undefined (reading 'x')`** 通常是因为 Python 生成的 JSON 数据中某些值缺失或格式不一致（如 `x` 或 `y` 为 `None`、NaN 或列表索引错误）。
+
+------
+
+### **分桶优化思路**
+
+1. **分桶采样**：将大规模数据分成固定数量的桶，每个桶只保留平均值或中位数。
+2. **分辨率控制**：例如，最多保留 500~1000 个点，避免超过浏览器渲染能力。
+3. **数据格式校验**：确保 JSON 中每个点都有 `x`、`y` 且为数值类型。
+
+------
+
+### **Python 端计算 + 分桶优化示例**
+
+```python
+import numpy as np
+import json
+
+def generate_sigma_data(mean, std, size=10000, max_points=800):
+    x = np.linspace(mean - 4*std, mean + 4*std, size)
+    y = 1/(std * np.sqrt(2*np.pi)) * np.exp(-0.5*((x-mean)/std)**2)
+    
+    # 分桶采样
+    if size > max_points:
+        step = size // max_points
+        x = x[::step]
+        y = y[::step]
+    
+    data = [{"x": float(xi), "y": float(yi)} for xi, yi in zip(x, y)]
+    return json.dumps(data, ensure_ascii=False)
+
+print(generate_sigma_data(0, 1, size=50000))
+```
+
+------
+
+### **前端 index.html 读取 JSON + 绘制 ECharts**
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Sigma 曲线</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5"></script>
+</head>
+<body>
+  <div id="main" style="width:100%;height:500px;"></div>
+  <script>
+    fetch('sigma_data.json') // Python 输出保存为该文件
+      .then(response => response.json())
+      .then(data => {
+        // 检查数据有效性
+        data = data.filter(p => p.x !== undefined && p.y !== undefined);
+
+        var chart = echarts.init(document.getElementById('main'));
+        chart.setOption({
+          title: { text: 'Sigma 曲线' },
+          tooltip: { trigger: 'axis' },
+          xAxis: { type: 'value' },
+          yAxis: { type: 'value' },
+          series: [{
+            type: 'line',
+            smooth: true,
+            data: data.map(p => [p.x, p.y]),
+            markLine: {
+              symbol: 'none',
+              lineStyle: { type: 'dashed' },
+              data: [
+                { xAxis: -1 }, // -1σ
+                { xAxis: 1 },  // +1σ
+                { xAxis: -2 },
+                { xAxis: 2 }
+              ]
+            }
+          }]
+        });
+      })
+      .catch(err => console.error(err));
+  </script>
+</body>
+</html>
+```
+
+------
+
+### **关键优化点**
+
+- **分桶采样** 避免性能问题。
+- **JSON 结构统一**：确保 `x`、`y` 都是浮点数且不为空。
+- **ECharts `markLine`** 用于绘制虚线标记 sigma 区间。
+
+------
+
