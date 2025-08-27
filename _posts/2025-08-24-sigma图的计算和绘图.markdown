@@ -1633,3 +1633,651 @@ print(generate_sigma_data(0, 1, size=50000))
 
 ------
 
+在 ECharts 中，你可以使用 **markLine** 或者额外的 **series**（带 `type: 'line'` 和虚线样式）来绘制 sigma 竖线，同时结合 **tooltip** 和 **label** 来显示概率数值提示。以下是完整示例：
+
+------
+
+### 1. **前端 ECharts 配置示例**
+
+```javascript
+var chart = echarts.init(document.getElementById('main'));
+
+var xData = [...]; // 由 Python 计算返回
+var yData = [...]; // 概率密度曲线数据
+
+chart.setOption({
+    title: { text: 'Sigma 曲线示例' },
+    tooltip: {
+        trigger: 'axis',
+        formatter: function (params) {
+            let point = params[0]; // 曲线点
+            return `x: ${point.value[0].toFixed(2)}<br/>概率: ${point.value[1].toFixed(4)}`;
+        }
+    },
+    xAxis: { type: 'value', name: 'X' },
+    yAxis: { type: 'value', name: '概率密度' },
+    series: [
+        {
+            name: 'Sigma 曲线',
+            type: 'line',
+            data: xData.map((x, i) => [x, yData[i]]),
+            smooth: true,
+            lineStyle: { color: 'blue' },
+            markLine: {
+                symbol: 'none',
+                lineStyle: {
+                    type: 'dashed',
+                    color: 'red'
+                },
+                label: {
+                    formatter: function (params) {
+                        // 自定义竖线提示
+                        return `Sigma: ${params.value}`;
+                    }
+                },
+                data: [
+                    { xAxis: -1 }, // -1 sigma
+                    { xAxis: 1 },  // 1 sigma
+                    { xAxis: 2 },  // 2 sigma
+                ]
+            }
+        }
+    ]
+});
+```
+
+------
+
+### 2. **关键点说明**
+
+1. **sigma 竖线**
+   - 通过 `series.markLine.data` 添加竖线。
+   - 每个对象 `{xAxis: value}` 表示一条竖线。
+2. **概率提示**
+   - 使用 `tooltip.formatter` 获取当前曲线点概率值。
+   - 也可通过 `markPoint` 或 `markLine.label` 显示固定文本。
+3. **虚线样式**
+   - `lineStyle.type = 'dashed'`。
+
+------
+
+### 3. **结合 Python 计算**
+
+Python 返回的 JSON 数据应包含：
+
+```json
+{
+  "xData": [...],
+  "yData": [...],
+  "sigmaLines": [-1, 1, 2]
+}
+```
+
+前端直接替换 `markLine.data`。
+
+------
+
+可以使用 **ECharts 的 markLine + markPoint + graphic 组件**，将概率值直接显示在对应 σ 区域之间，而不依赖 tooltip。
+
+------
+
+## **方案：使用 graphic 在图上标注数值**
+
+### **核心思路**
+
+1. 用 `line` 或 `scatter` 系列绘制分布曲线。
+2. 使用 `markLine` 绘制 σ 分界虚线（±1σ, ±2σ, ±3σ）。
+3. 使用 `graphic` 在图表上固定显示概率值，不随鼠标移动。
+
+------
+
+### **示例代码（带直接概率显示）**
+
+```javascript
+const sigmaValues = [
+    {x: -1, prob: '34.1%'},
+    {x: 1, prob: '34.1%'},
+    {x: -2, prob: '13.6%'},
+    {x: 2, prob: '13.6%'},
+    {x: -3, prob: '2.1%'},
+    {x: 3, prob: '2.1%'},
+];
+
+const option = {
+    title: { text: '正态分布与 Sigma 区间' },
+    tooltip: { show: false }, // 不使用 tooltip
+    xAxis: { type: 'value', min: -4, max: 4 },
+    yAxis: { type: 'value' },
+    series: [
+        {
+            name: 'Normal Curve',
+            type: 'line',
+            smooth: true,
+            data: generateNormalDistribution(), // 由 Python 计算并传入
+            markLine: {
+                symbol: 'none',
+                lineStyle: { type: 'dashed', color: '#999' },
+                data: [
+                    {xAxis: -1}, {xAxis: 1},
+                    {xAxis: -2}, {xAxis: 2},
+                    {xAxis: -3}, {xAxis: 3}
+                ]
+            }
+        }
+    ],
+    graphic: sigmaValues.map(item => ({
+        type: 'text',
+        left: `${50 + (item.x + 4) * 100 / 8}%`, // 位置换算
+        top: '40%',
+        style: {
+            text: item.prob,
+            fill: '#000',
+            font: '14px sans-serif',
+            textAlign: 'center'
+        }
+    }))
+};
+```
+
+------
+
+### **关键说明**
+
+- `graphic` 用于直接在图上显示数值，`left` 和 `top` 可通过比例换算到 x、y 坐标。
+- 若需要动态计算坐标，可通过 `myChart.convertToPixel()` 在图表渲染后更新位置。
+- Python 端只需提供 `sigmaValues` 的 x 坐标和概率值。
+
+------
+
+### **可选优化**
+
+- 分桶优化：Python 端减少曲线点数，避免 JSON 过大。
+- 坐标自动映射：监听 `chart.on('finished')` 事件，用像素映射调整文字位置。
+
+------
+
+可以通过 **`markLine` 绘制竖线**，再用 **`graphic` 组件** 在图表内直接渲染文字，避免 tooltip。以下是示例代码（假设已有正态分布曲线数据）：
+
+------
+
+### **1. 计算概率区间及位置**
+
+```python
+import numpy as np
+from scipy.stats import norm
+
+mu, sigma = 0, 1  # 均值和标准差
+x = np.linspace(-4, 4, 500)
+y = norm.pdf(x, mu, sigma)
+
+# sigma 区间
+sigmas = [1, 2, 3]
+prob_values = []
+for s in sigmas:
+    left, right = mu - s * sigma, mu + s * sigma
+    prob = norm.cdf(right, mu, sigma) - norm.cdf(left, mu, sigma)
+    prob_values.append({"sigma": s, "prob": round(prob * 100, 2), "pos": right})
+```
+
+------
+
+### **2. 生成 ECharts 数据**
+
+```python
+chart_data = {
+    "xAxis": {"type": "value"},
+    "yAxis": {"type": "value"},
+    "series": [{
+        "type": "line",
+        "data": list(map(list, zip(x.tolist(), y.tolist()))),
+        "smooth": True
+    }],
+    "markLine": {
+        "symbol": "none",
+        "lineStyle": {"type": "dashed"},
+        "data": [
+            {"xAxis": mu - s * sigma} for s in sigmas
+        ] + [
+            {"xAxis": mu + s * sigma} for s in sigmas
+        ]
+    }
+}
+```
+
+------
+
+### **3. 添加文字标签（不使用 Tooltip）**
+
+```javascript
+let option = JSON.parse('{{ chart_data | tojson | safe }}');
+
+// 使用 graphic 绘制文本
+option.graphic = [
+    {% for item in prob_values %}
+    {
+        type: 'text',
+        left: myChart.convertToPixel({xAxisIndex: 0}, {{ item["pos"] }}),
+        top: 20,
+        style: {
+            text: '{{ item["sigma"] }}σ: {{ item["prob"] }}%',
+            fill: '#000',
+            font: '14px Arial'
+        }
+    },
+    {% endfor %}
+];
+```
+
+------
+
+### **关键点**
+
+1. `convertToPixel` 将数据坐标转换为像素位置（需在 `myChart.on('finished')` 中调用更新）。
+2. `graphic` 组件用于绘制文字，而非 tooltip。
+3. 文字可放在顶部或竖线附近，位置通过计算得到。
+
+------
+
+好的，下面给出一个 **ECharts 实现 Sigma 区域概率值显示** 的方案，直接在图上显示，不依赖 tooltip。
+
+------
+
+### **核心思路**
+
+1. 使用 **line** 或 **scatter** 系列绘制原始曲线；
+2. 使用 **markLine** 绘制 σ 区域竖线；
+3. 使用 **graphic** 或 **markPoint** 在竖线之间放置概率文本。
+
+------
+
+### **示例代码**
+
+```javascript
+var sigmaValues = [1, 2, 3];  // 1σ, 2σ, 3σ
+var sigmaProbabilities = ['68.27%', '95.45%', '99.73%']; // 对应概率
+var sigmaPositions = [10, 20, 30]; // x轴位置，可替换为动态计算
+
+var option = {
+  title: {
+    text: 'Sigma 区域概率分布',
+    left: 'center'
+  },
+  xAxis: { type: 'value' },
+  yAxis: { type: 'value' },
+  series: [
+    {
+      type: 'line',
+      smooth: true,
+      data: [...Array(100).keys()].map(x => [x, Math.exp(-(x-50)*(x-50)/200)]),
+      markLine: {
+        symbol: 'none',
+        lineStyle: { color: '#aaa', type: 'dashed' },
+        data: sigmaPositions.map(x => ({ xAxis: x }))
+      }
+    }
+  ],
+  graphic: sigmaProbabilities.map((p, i) => ({
+    type: 'text',
+    left: (sigmaPositions[i] + sigmaPositions[i-1] || 0) / 2, // 区域中点
+    top: 50, // 调整到合适高度
+    style: {
+      text: p,
+      fill: '#333',
+      font: 'bold 14px sans-serif'
+    }
+  }))
+};
+
+myChart.setOption(option);
+```
+
+------
+
+### **关键点**
+
+- `graphic` 可在任意位置绘制文本，直接显示在图表上；
+- `left` 和 `top` 可以使用函数根据坐标轴位置计算；
+- 可结合 `chart.convertToPixel` 方法让文本随坐标系缩放。
+
+------
+
+下面提供一个完整的 ECharts 配置示例，直接在浏览器中运行即可，展示正态分布曲线，并在 ±1σ、±2σ、±3σ 区域之间显示对应概率值（不使用 tooltip，而是直接在图中显示文本标签）：
+
+------
+
+### **HTML + JavaScript 示例**
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>正态分布 Sigma 图</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <style>
+        #main {
+            width: 1000px;
+            height: 600px;
+        }
+    </style>
+</head>
+<body>
+    <div id="main"></div>
+    <script>
+        // 生成正态分布数据
+        function gaussian(x, mean, sigma) {
+            return (1 / (sigma * Math.sqrt(2 * Math.PI))) *
+                Math.exp(-Math.pow(x - mean, 2) / (2 * sigma * sigma));
+        }
+
+        let mean = 0;
+        let sigma = 1;
+        let xData = [];
+        let yData = [];
+        for (let x = -4; x <= 4; x += 0.1) {
+            xData.push(x.toFixed(1));
+            yData.push(gaussian(x, mean, sigma));
+        }
+
+        // σ 区域概率
+        const sigmaLabels = [
+            {pos: 0.5, text: '68.27% (±1σ)'},
+            {pos: 1.5, text: '95.45% (±2σ)'},
+            {pos: 2.5, text: '99.73% (±3σ)'}
+        ];
+
+        let chartDom = document.getElementById('main');
+        let myChart = echarts.init(chartDom);
+
+        let option = {
+            title: {
+                text: '正态分布曲线及Sigma区域',
+                left: 'center'
+            },
+            xAxis: {
+                type: 'value',
+                min: -4,
+                max: 4,
+                name: 'X',
+            },
+            yAxis: {
+                type: 'value',
+                name: 'Probability Density'
+            },
+            series: [
+                {
+                    type: 'line',
+                    data: xData.map((x, i) => [parseFloat(x), yData[i]]),
+                    smooth: true,
+                    lineStyle: {
+                        width: 2,
+                        color: '#5470C6'
+                    },
+                    areaStyle: {
+                        opacity: 0.2
+                    }
+                }
+            ],
+            graphic: [
+                // 竖线 ±1σ、±2σ、±3σ
+                ...[1, 2, 3, -1, -2, -3].map(s => ({
+                    type: 'line',
+                    left: myChart.convertToPixel({xAxisIndex: 0}, s),
+                    shape: {x1: 0, y1: 0, x2: 0, y2: 400},
+                    style: {stroke: '#FF6B6B', lineWidth: 1.5},
+                    silent: true
+                })),
+                // 概率标签
+                ...sigmaLabels.map(s => ({
+                    type: 'text',
+                    left: myChart.convertToPixel({xAxisIndex: 0}, s.pos),
+                    top: 100 + s.pos * 20,
+                    style: {
+                        text: s.text,
+                        fill: '#333',
+                        font: '14px sans-serif'
+                    }
+                }))
+            ]
+        };
+
+        myChart.setOption(option);
+
+        // 确保缩放时 graphic 更新位置
+        window.addEventListener('resize', () => {
+            myChart.setOption(option);
+        });
+    </script>
+</body>
+</html>
+```
+
+------
+
+### **关键特性**
+
+1. **竖线**：使用 `graphic` 组件绘制，分别对应 ±1σ、±2σ、±3σ。
+2. **概率值文本**：直接通过 `graphic.text` 绘制在区域上方，不依赖 tooltip。
+3. **数据生成**：通过高斯函数生成曲线。
+
+------
+
+你遇到的错误：
+
+```
+Cannot read properties of undefined (reading 'queryComponents')
+```
+
+通常是因为 **ECharts 渲染过程中 series 或 graphic 元素的定义不完整**，或直接在 `option` 里访问了还未初始化的组件。
+
+------
+
+### 直接在图上标注 σ 区域概率值的完整示例
+
+下面给出一个可直接运行的示例，使用 **ECharts + graphic 元素** 在高斯分布图上标注 1σ、2σ、3σ 区域对应的概率值。
+
+```html
+<!DOCTYPE html>
+<html style="height: 100%">
+<head>
+  <meta charset="utf-8">
+  <title>ECharts Gaussian Sigma 区域标注</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+<body style="height: 100%; margin: 0">
+  <div id="main" style="height: 100%"></div>
+  <script>
+    // 计算高斯分布 y 值
+    function gaussian(x, mean = 0, std = 1) {
+      return Math.exp(-0.5 * Math.pow((x - mean) / std, 2)) / (std * Math.sqrt(2 * Math.PI));
+    }
+
+    const xData = [];
+    const yData = [];
+    for (let i = -4; i <= 4; i += 0.01) {
+      xData.push(i);
+      yData.push(gaussian(i));
+    }
+
+    // 定义 sigma 区间及概率值
+    const sigmaRegions = [
+      { range: [-1, 1], color: 'rgba(255, 215, 0, 0.4)', text: '68.27%' },
+      { range: [-2, 2], color: 'rgba(50, 205, 50, 0.3)', text: '95.45%' },
+      { range: [-3, 3], color: 'rgba(100, 149, 237, 0.3)', text: '99.73%' }
+    ];
+
+    const option = {
+      title: { text: '高斯分布及 σ 区域概率', left: 'center' },
+      tooltip: { trigger: 'axis' },
+      xAxis: { type: 'value', min: -4, max: 4 },
+      yAxis: { type: 'value' },
+      series: [
+        {
+          type: 'line',
+          data: xData.map((x, i) => [x, yData[i]]),
+          smooth: true,
+          lineStyle: { width: 2 }
+        }
+      ],
+      graphic: sigmaRegions.flatMap(region => [
+        {
+          type: 'rect',
+          shape: {
+            x: (region.range[0] + 4) / 8 * window.innerWidth,
+            y: 0,
+            width: (region.range[1] - region.range[0]) / 8 * window.innerWidth,
+            height: window.innerHeight
+          },
+          style: { fill: region.color },
+          silent: true
+        },
+        {
+          type: 'text',
+          style: {
+            text: region.text,
+            x: ((region.range[0] + region.range[1]) / 2 + 4) / 8 * window.innerWidth,
+            y: window.innerHeight * 0.2,
+            textAlign: 'center',
+            textVerticalAlign: 'middle',
+            font: 'bold 16px Arial',
+            fill: '#000'
+          }
+        }
+      ])
+    };
+
+    const chartDom = document.getElementById('main');
+    const myChart = echarts.init(chartDom);
+    myChart.setOption(option);
+
+    // 监听 resize 更新 graphic 元素
+    window.addEventListener('resize', () => {
+      myChart.resize();
+      myChart.setOption(option); // 重新应用，避免尺寸错位
+    });
+  </script>
+</body>
+</html>
+```
+
+------
+
+### 关键点
+
+1. 使用 `graphic` 手动绘制 **rect + text**，直接在画布上显示概率值，而非 tooltip。
+2. `shape` 中的 `x`、`y`、`width`、`height` 需根据容器宽高动态计算。
+3. 使用 `flatMap` 将多个区域的矩形与文字元素一次性添加。
+
+------
+
+以下是一个可直接运行的 **ECharts** 代码示例，实现了：
+
+- 在均值处绘制竖线。
+- 在 ±1σ、±2σ、±3σ 处绘制竖线。
+- 在竖线旁边标注对应区域的概率值，避免重叠。
+
+### HTML 文件（直接运行）
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Gaussian with Sigma Regions</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+    <style>
+        #main {
+            width: 900px;
+            height: 600px;
+            margin: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="main"></div>
+    <script>
+        var chartDom = document.getElementById('main');
+        var myChart = echarts.init(chartDom);
+
+        // 生成正态分布数据
+        function gaussian(x, mean, sigma) {
+            return Math.exp(-Math.pow(x - mean, 2) / (2 * sigma * sigma)) / (sigma * Math.sqrt(2 * Math.PI));
+        }
+
+        var mean = 0;
+        var sigma = 1;
+        var data = [];
+        for (var x = -4; x <= 4; x += 0.05) {
+            data.push([x, gaussian(x, mean, sigma)]);
+        }
+
+        // 区域概率值
+        var sigmaRegions = [
+            {sigma: 1, prob: '68.27%'},
+            {sigma: 2, prob: '95.45%'},
+            {sigma: 3, prob: '99.73%'}
+        ];
+
+        // 生成竖线标记
+        var markLines = [
+            {
+                xAxis: mean,
+                label: { formatter: 'Mean' },
+                lineStyle: { color: 'black', type: 'solid' }
+            }
+        ];
+        sigmaRegions.forEach(function(region, index) {
+            markLines.push({
+                xAxis: mean + region.sigma,
+                label: {
+                    formatter: region.prob,
+                    position: index % 2 === 0 ? 'top' : 'bottom',
+                    distance: 12 + index * 5 // 防止重叠
+                },
+                lineStyle: { color: '#666', type: 'dashed' }
+            });
+            markLines.push({
+                xAxis: mean - region.sigma,
+                label: {
+                    formatter: region.prob,
+                    position: index % 2 === 0 ? 'bottom' : 'top',
+                    distance: 12 + index * 5
+                },
+                lineStyle: { color: '#666', type: 'dashed' }
+            });
+        });
+
+        var option = {
+            title: {
+                text: 'Normal Distribution with Sigma Regions'
+            },
+            tooltip: { trigger: 'axis' },
+            xAxis: { type: 'value' },
+            yAxis: { type: 'value' },
+            series: [
+                {
+                    type: 'line',
+                    data: data,
+                    smooth: true,
+                    markLine: {
+                        symbol: 'none',
+                        data: markLines
+                    }
+                }
+            ]
+        };
+
+        myChart.setOption(option);
+    </script>
+</body>
+</html>
+```
+
+### 功能特点
+
+- 每条 σ 竖线分别绘制，且通过 `distance` 和 `position` 调整标签避免重叠。
+- 中心线显示均值标签 "Mean"。
+- 代码可直接运行，无需额外依赖。
+
+------
+
