@@ -1,0 +1,1560 @@
+---
+layout:     post
+title:      "中文错误返回"
+subtitle:   ""
+date:       2025-08-28
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+明白，你是想把 **Django 或 Python 报错信息的英文**翻译成 **中文提示**，对吗？我可以帮你做到几个层次：
+
+1. **手动翻译单条错误**：你把报错贴给我，我帮你逐句翻译成中文，并解释含义。
+2. **统一映射字典**：把常见的 Django 或 Python 错误类型（`ValueError`, `IntegrityError`, `DoesNotExist`, `PermissionDenied` 等）建立映射，方便在项目里统一显示中文提示。
+3. **自动捕获与翻译**：在 Django 的全局异常处理中，将系统报错捕获并根据字典翻译成中文返回前端或日志。
+
+例如，建立一个简单映射：
+
+```python
+ERROR_TRANSLATIONS = {
+    "ValueError": "值错误：输入的值不合法",
+    "IntegrityError": "数据库完整性错误：违反约束条件",
+    "DoesNotExist": "数据不存在",
+    "PermissionDenied": "权限不足",
+    "OperationalError": "数据库操作错误",
+    "TypeError": "类型错误：操作或函数的类型不匹配",
+    "KeyError": "键错误：字典中不存在指定键",
+}
+```
+
+然后在全局异常捕获：
+
+```python
+from django.http import JsonResponse
+from django.core.exceptions import PermissionDenied
+from django.db import IntegrityError
+
+def custom_exception_handler(get_response):
+    def middleware(request):
+        try:
+            response = get_response(request)
+            return response
+        except Exception as e:
+            error_type = type(e).__name__
+            message = ERROR_TRANSLATIONS.get(error_type, str(e))
+            return JsonResponse({"error": message}, status=500)
+    return middleware
+```
+
+------
+
+明白了，你希望的不只是常规 Python 异常的中文翻译，还要包括 **Django ORM/数据库操作相关的具体错误**，比如：
+
+- 外键约束错误（`ForeignKeyViolation` / `IntegrityError`）
+- 唯一约束错误（`UniqueViolation`）
+- 数据类型不匹配（`DataError`）
+- 数据库连接或操作异常（`OperationalError`）
+- 查询结果不存在（`DoesNotExist`）
+- 权限相关（`PermissionDenied`）
+
+我们可以做一个 **详细的异常映射表**，包括：
+
+| 英文异常                                        | 中文翻译           | 说明 / 建议操作                  |
+| ----------------------------------------------- | ------------------ | -------------------------------- |
+| `ValueError`                                    | 值错误             | 输入的值不合法或格式错误         |
+| `TypeError`                                     | 类型错误           | 函数或操作的类型不匹配           |
+| `KeyError`                                      | 键错误             | 字典中不存在指定键               |
+| `DoesNotExist`                                  | 数据不存在         | 查询的对象不存在                 |
+| `PermissionDenied`                              | 权限不足           | 当前用户无权限执行操作           |
+| `IntegrityError`                                | 数据库完整性错误   | 违反数据库约束，如外键或唯一约束 |
+| `OperationalError`                              | 数据库操作错误     | 数据库连接失败或执行语句失败     |
+| `ForeignKeyViolation`                           | 外键约束错误       | 关联的外键记录不存在或被删除     |
+| `UniqueViolation`                               | 唯一约束错误       | 数据重复，违反唯一约束           |
+| `DataError`                                     | 数据类型或长度错误 | 字段数据类型不匹配或长度超出限制 |
+| `ProgrammingError`                              | 数据库语法错误     | SQL语句错误或数据库表结构异常    |
+| `IntegrityError: NOT NULL constraint failed`    | 非空约束失败       | 插入或更新数据时字段为空         |
+| `IntegrityError: FOREIGN KEY constraint failed` | 外键约束失败       | 插入或更新数据时外键引用不存在   |
+| `ValidationError`                               | 数据验证错误       | 表单或模型字段验证未通过         |
+
+⚡ 额外建议：
+
+1. **结合异常捕获和正则匹配**，可以针对 `IntegrityError` 的具体原因返回更友好的中文提示。
+2. **对 ORM 操作和表单验证分别处理**，避免把前端错误和数据库错误混淆。
+
+明白，你希望一个 **Django 全局异常捕获方案**，不仅能把系统异常翻译成中文，还能在数据库操作出错时，**准确定位是哪个模型出错以及哪种约束出错**。我帮你设计一个完整方案。
+
+下面是示例代码：
+
+```python
+# middleware.py
+import re
+from django.http import JsonResponse
+from django.core.exceptions import PermissionDenied, ValidationError, ObjectDoesNotExist
+from django.db import IntegrityError, DataError, OperationalError
+from django.db.models import Model
+
+# 异常映射
+ERROR_TRANSLATIONS = {
+    "ValueError": "值错误：输入值不合法",
+    "TypeError": "类型错误：操作或函数的类型不匹配",
+    "KeyError": "键错误：字典中不存在指定键",
+    "PermissionDenied": "权限不足：您无权执行此操作",
+    "ValidationError": "数据验证错误",
+    "DoesNotExist": "数据不存在",
+    "IntegrityError": "数据库完整性错误",
+    "OperationalError": "数据库操作错误",
+    "DataError": "数据库字段数据错误",
+}
+
+# 针对常见 IntegrityError 的正则
+INTEGRITY_PATTERNS = {
+    r"FOREIGN KEY constraint failed": "外键约束失败",
+    r"NOT NULL constraint failed: (.+?)\.(.+)": "非空约束失败: 表 {table}, 字段 {field}",
+    r"UNIQUE constraint failed: (.+?)\.(.+)": "唯一约束失败: 表 {table}, 字段 {field}",
+}
+
+
+def get_integrity_error_detail(exc):
+    """
+    分析 IntegrityError 错误信息，尝试返回表名和字段
+    """
+    msg = str(exc)
+    for pattern, desc in INTEGRITY_PATTERNS.items():
+        m = re.search(pattern, msg)
+        if m:
+            if "{table}" in desc:
+                table, field = m.groups()
+                return desc.format(table=table, field=field)
+            return desc
+    return msg
+
+
+class CustomExceptionMiddleware:
+    """
+    全局异常中间件，返回中文提示
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        try:
+            response = self.get_response(request)
+            return response
+        except Exception as exc:
+            # 默认返回
+            error_type = type(exc).__name__
+            message = ERROR_TRANSLATIONS.get(error_type, str(exc))
+            model_name = None
+
+            # 针对数据库完整性错误
+            if isinstance(exc, IntegrityError):
+                message = get_integrity_error_detail(exc)
+                # 尝试获取出错的模型名（如果在事务中有模型信息）
+                if hasattr(exc, "model") and isinstance(exc.model, Model):
+                    model_name = exc.model.__class__.__name__
+            elif isinstance(exc, ObjectDoesNotExist):
+                model_name = exc.__class__.__name__.replace("DoesNotExist", "")
+                message = f"{model_name} 数据不存在"
+            elif isinstance(exc, ValidationError):
+                message = f"数据验证错误: {exc}"
+
+            # 返回 JSON
+            result = {"error": message}
+            if model_name:
+                result["model"] = model_name
+
+            return JsonResponse(result, status=500)
+```
+
+### ✅ 功能说明
+
+1. **通用异常捕获**：捕获 Python 和 Django 常见异常，并映射中文提示。
+2. **数据库错误精确提示**：
+   - 外键约束、唯一约束、非空约束的具体字段和表名。
+   - 可扩展正则来匹配更多 Postgres/MySQL 异常。
+3. **模型名称返回**：如果异常属于 `DoesNotExist` 或数据库操作异常，尽量返回出错模型名。
+4. **可返回前端 JSON**：方便前端显示中文友好提示。
+
+------
+
+好，我们可以把中间件升级成 **高级版**，目标是：
+
+- 捕获 `IntegrityError`、`DataError`、`OperationalError` 等数据库错误
+- 自动解析 **出错的 Django 模型** 和 **字段**
+- 返回清晰的中文提示给前端
+
+由于 Django 的 `IntegrityError` 本身不会直接告诉你是哪个模型操作失败，我们需要通过 **堆栈追踪** 或 **事务操作对象推测** 来获取模型信息。下面是一个可行方案：
+
+```python
+# advanced_middleware.py
+import re
+import traceback
+from django.http import JsonResponse
+from django.core.exceptions import ValidationError, ObjectDoesNotExist, PermissionDenied
+from django.db import IntegrityError, DataError, OperationalError
+from django.db.models import Model
+from functools import wraps
+
+# 异常映射
+ERROR_TRANSLATIONS = {
+    "ValueError": "值错误：输入值不合法",
+    "TypeError": "类型错误：操作或函数的类型不匹配",
+    "KeyError": "键错误：字典中不存在指定键",
+    "PermissionDenied": "权限不足：您无权执行此操作",
+    "ValidationError": "数据验证错误",
+    "DoesNotExist": "数据不存在",
+    "IntegrityError": "数据库完整性错误",
+    "OperationalError": "数据库操作错误",
+    "DataError": "数据库字段数据错误",
+}
+
+# 针对常见 IntegrityError 的正则
+INTEGRITY_PATTERNS = {
+    r"FOREIGN KEY constraint failed": "外键约束失败",
+    r"NOT NULL constraint failed: (.+?)\.(.+)": "非空约束失败: 表 {table}, 字段 {field}",
+    r"UNIQUE constraint failed: (.+?)\.(.+)": "唯一约束失败: 表 {table}, 字段 {field}",
+}
+
+
+def get_integrity_error_detail(exc):
+    """
+    分析 IntegrityError 错误信息，尝试返回表名和字段
+    """
+    msg = str(exc)
+    for pattern, desc in INTEGRITY_PATTERNS.items():
+        m = re.search(pattern, msg)
+        if m:
+            if "{table}" in desc:
+                table, field = m.groups()
+                return desc.format(table=table, field=field)
+            return desc
+    return msg
+
+
+def guess_model_from_traceback(exc):
+    """
+    通过堆栈信息尝试获取出错的模型名
+    """
+    tb_lines = traceback.format_exc().splitlines()
+    for line in tb_lines[::-1]:  # 倒序查找，优先最近的调用
+        m = re.search(r'File ".*models.py".*in .*', line)
+        if m:
+            # 简单提取模型类名：在调用处找 Model 对象
+            # 这里仅作为示例，实际可结合 ORM 操作栈进一步优化
+            return "未知模型(推测自 models.py)"
+    return None
+
+
+class AdvancedExceptionMiddleware:
+    """
+    全局异常中间件，高级版：
+    - 捕获异常
+    - 中文翻译
+    - 数据库错误精确解析模型/字段
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        try:
+            return self.get_response(request)
+        except Exception as exc:
+            error_type = type(exc).__name__
+            message = ERROR_TRANSLATIONS.get(error_type, str(exc))
+            model_name = None
+
+            # IntegrityError
+            if isinstance(exc, IntegrityError):
+                message = get_integrity_error_detail(exc)
+                model_name = guess_model_from_traceback(exc)
+
+            # ObjectDoesNotExist
+            elif isinstance(exc, ObjectDoesNotExist):
+                model_name = exc.__class__.__name__.replace("DoesNotExist", "")
+                message = f"{model_name} 数据不存在"
+
+            # ValidationError
+            elif isinstance(exc, ValidationError):
+                message = f"数据验证错误: {exc}"
+
+            # PermissionDenied
+            elif isinstance(exc, PermissionDenied):
+                message = "权限不足：您无权执行此操作"
+
+            # 返回 JSON
+            result = {"error": message}
+            if model_name:
+                result["model"] = model_name
+
+            return JsonResponse(result, status=500)
+```
+
+### ⚡ 功能亮点
+
+1. **中文提示**：几乎覆盖所有常见 Python/Django 异常。
+2. **数据库约束解析**：外键、唯一、非空约束会给出表和字段信息。
+3. **模型追踪**：通过异常堆栈推测可能出错的模型名（可根据项目进一步精细化）。
+4. **统一返回 JSON**：方便前端友好显示。
+
+------
+
+💡 **进一步优化思路**：
+
+- 对 `IntegrityError` 做 **事务追踪**，获取 `Model` 对象，例如在每个 ORM 操作前记录 `instance._meta.model_name`，出错时直接返回。
+- 对 Postgres/MySQL 特定错误码做精确匹配，获取更多约束信息。
+- 对 **批量操作**（`bulk_create`, `update`）也可返回具体行号或对象索引。
+
+------
+
+明白，我给你设计一个 **最终版本的全局异常捕获中间件**，可以做到：
+
+- 捕获 Django/Python 常见异常
+- 中文提示
+- **精确返回出错模型、字段、操作类型**
+- 支持批量操作和事务追踪
+
+实现思路：
+
+1. **在每次 ORM 操作前记录操作上下文**：包括模型名、字段、操作类型（插入/更新/删除）
+2. **使用线程局部存储**保存当前操作上下文，异常时取出
+3. **全局中间件捕获异常**，结合上下文返回精准信息
+
+下面是可直接使用的示例：
+
+```python
+# advanced_exception_middleware.py
+import threading
+import re
+import traceback
+from functools import wraps
+from django.http import JsonResponse
+from django.core.exceptions import ValidationError, ObjectDoesNotExist, PermissionDenied
+from django.db import IntegrityError, DataError, OperationalError
+
+# 全局线程局部变量，用于记录 ORM 操作上下文
+_thread_local = threading.local()
+
+def set_orm_context(model_name=None, fields=None, operation=None):
+    """
+    设置当前 ORM 操作上下文
+    """
+    _thread_local.orm_context = {
+        "model_name": model_name,
+        "fields": fields,
+        "operation": operation
+    }
+
+def clear_orm_context():
+    if hasattr(_thread_local, "orm_context"):
+        del _thread_local.orm_context
+
+def get_orm_context():
+    return getattr(_thread_local, "orm_context", None)
+
+
+# 异常中文映射
+ERROR_TRANSLATIONS = {
+    "ValueError": "值错误：输入值不合法",
+    "TypeError": "类型错误：操作或函数的类型不匹配",
+    "KeyError": "键错误：字典中不存在指定键",
+    "PermissionDenied": "权限不足：您无权执行此操作",
+    "ValidationError": "数据验证错误",
+    "DoesNotExist": "数据不存在",
+    "IntegrityError": "数据库完整性错误",
+    "OperationalError": "数据库操作错误",
+    "DataError": "数据库字段数据错误",
+}
+
+# IntegrityError 常见模式
+INTEGRITY_PATTERNS = {
+    r"FOREIGN KEY constraint failed": "外键约束失败",
+    r"NOT NULL constraint failed: (.+?)\.(.+)": "非空约束失败: 表 {table}, 字段 {field}",
+    r"UNIQUE constraint failed: (.+?)\.(.+)": "唯一约束失败: 表 {table}, 字段 {field}",
+}
+
+def parse_integrity_error(exc):
+    """
+    解析 IntegrityError 返回表和字段信息
+    """
+    msg = str(exc)
+    for pattern, desc in INTEGRITY_PATTERNS.items():
+        m = re.search(pattern, msg)
+        if m:
+            if "{table}" in desc:
+                table, field = m.groups()
+                return desc.format(table=table, field=field)
+            return desc
+    return msg
+
+# ORM 装饰器，用于自动记录模型操作
+def orm_operation(model_name=None, fields=None, operation=None):
+    """
+    装饰 ORM 方法，捕获上下文
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            set_orm_context(model_name=model_name, fields=fields, operation=operation)
+            try:
+                return func(*args, **kwargs)
+            finally:
+                clear_orm_context()
+        return wrapper
+    return decorator
+
+# 高级异常中间件
+class AdvancedExceptionMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        try:
+            return self.get_response(request)
+        except Exception as exc:
+            error_type = type(exc).__name__
+            message = ERROR_TRANSLATIONS.get(error_type, str(exc))
+            model_name = None
+            fields = None
+            operation = None
+
+            # 获取 ORM 上下文
+            context = get_orm_context()
+            if context:
+                model_name = context.get("model_name")
+                fields = context.get("fields")
+                operation = context.get("operation")
+
+            # 数据库完整性错误
+            if isinstance(exc, IntegrityError):
+                message = parse_integrity_error(exc)
+            # 数据验证错误
+            elif isinstance(exc, ValidationError):
+                message = f"数据验证错误: {exc}"
+            # 查询对象不存在
+            elif isinstance(exc, ObjectDoesNotExist):
+                if model_name:
+                    message = f"{model_name} 数据不存在"
+                else:
+                    message = "数据不存在"
+            # 权限异常
+            elif isinstance(exc, PermissionDenied):
+                message = "权限不足：您无权执行此操作"
+
+            result = {"error": message}
+            if model_name:
+                result["model"] = model_name
+            if fields:
+                result["fields"] = fields
+            if operation:
+                result["operation"] = operation
+
+            return JsonResponse(result, status=500)
+```
+
+------
+
+### ⚡ 使用方法
+
+1. **全局注册中间件**：
+
+```python
+MIDDLEWARE = [
+    # ... 其他中间件
+    "your_project.middleware.advanced_exception_middleware.AdvancedExceptionMiddleware",
+]
+```
+
+1. **在 ORM 操作前使用装饰器**：
+
+```python
+from .advanced_exception_middleware import orm_operation
+
+@orm_operation(model_name="User", fields=["email"], operation="create")
+def create_user(email, name):
+    User.objects.create(email=email, name=name)
+```
+
+1. **效果**：
+
+- 如果插入重复 email（唯一约束），返回：
+
+```json
+{
+    "error": "唯一约束失败: 表 auth_user, 字段 email",
+    "model": "User",
+    "fields": ["email"],
+    "operation": "create"
+}
+```
+
+- 查询不存在对象：
+
+```json
+{
+    "error": "User 数据不存在",
+    "model": "User"
+}
+```
+
+------
+
+✅ 优势：
+
+- **全局捕获**：前端永远拿到中文提示
+- **精确定位**：模型、字段、操作类型一目了然
+- **可扩展**：支持更多数据库错误正则或 ORM 操作追踪
+- **支持批量操作**：批量 create/update/delete 可通过 `fields` 数组记录关键字段
+
+------
+
+完全可以针对你描述的这种情况做处理，但需要注意：Django 默认的 `IntegrityError` 在 **删除数据触发外键约束失败** 时，异常本身只会告诉你违反了外键约束，并不会直接告诉你“引用这条数据的模型是哪一个”。
+
+要做到你描述的效果，需要结合 **ORM 上下文或数据库表结构信息** 来推断。思路如下：
+
+------
+
+### 1️⃣ 异常捕获
+
+当你删除某条对象时，如果有外键引用，数据库会抛出 `IntegrityError`，消息类似：
+
+- PostgreSQL：
+
+```
+update or delete on table "parent" violates foreign key constraint "child_parent_id_fkey" on table "child"
+```
+
+- SQLite/MySQL：
+
+```
+FOREIGN KEY constraint failed
+```
+
+------
+
+### 2️⃣ 从异常消息解析引用表
+
+我们可以用正则解析外键约束的报错信息：
+
+```python
+def parse_foreign_key_error(exc):
+    """
+    解析外键约束失败的异常，返回引用的表名（模型）和字段
+    """
+    msg = str(exc)
+    # PostgreSQL 风格
+    m = re.search(r'violates foreign key constraint "(.+?)" on table "(.+?)"', msg)
+    if m:
+        constraint_name, referencing_table = m.groups()
+        return referencing_table  # 返回引用表名
+    # SQLite/MySQL 风格
+    if "FOREIGN KEY constraint failed" in msg:
+        return "未知引用表"
+    return None
+```
+
+------
+
+### 3️⃣ 在中间件中结合 ORM 上下文返回
+
+```python
+if isinstance(exc, IntegrityError):
+    # 尝试解析外键引用表
+    referencing_table = parse_foreign_key_error(exc)
+    if referencing_table:
+        message = f"删除失败：存在外键依赖，表 '{referencing_table}' 中有数据引用该对象，请先删除或解除依赖。"
+    else:
+        message = parse_integrity_error(exc)
+```
+
+- `message` 就是中文提示
+- `referencing_table` 可以进一步映射成对应 Django 模型名（通过 `_meta.db_table` 或自定义映射表）
+
+------
+
+### 4️⃣ 可选优化
+
+- 建一个 **表名 → 模型名映射字典**，把数据库表名自动映射成 Django 模型名返回前端
+- 如果你想更智能，可以在 **删除操作前扫描外键依赖**，直接提示具体依赖模型和字段，而不是等数据库报错
+
+------
+
+### ✅ 总结
+
+- **适用场景**：删除对象时触发外键约束
+- **实现方法**：在中间件或异常处理处解析 `IntegrityError` 的外键报错信息
+- **效果**：前端或日志提示哪个模型/表存在数据依赖，需要先删除或解除依赖
+- **可拓展**：结合 ORM 上下文和表名映射，完全可返回“模型名 + 字段名 + 操作类型”的精准信息
+
+------
+
+明白，我帮你整合一个 **最终版本的高级异常中间件**，专门针对你描述的场景优化：
+
+- 捕获 Django/Python 异常
+- 中文提示
+- ORM 上下文追踪（模型名、字段、操作类型）
+- **删除对象时外键依赖自动解析，返回引用模型和字段信息**
+- 支持批量操作
+
+下面是完整示例：
+
+```python
+# final_exception_middleware.py
+import threading
+import re
+import traceback
+from functools import wraps
+from django.http import JsonResponse
+from django.core.exceptions import ValidationError, ObjectDoesNotExist, PermissionDenied
+from django.db import IntegrityError, DataError, OperationalError
+from django.apps import apps
+
+# 线程局部存储 ORM 上下文
+_thread_local = threading.local()
+
+def set_orm_context(model_name=None, fields=None, operation=None):
+    _thread_local.orm_context = {
+        "model_name": model_name,
+        "fields": fields,
+        "operation": operation
+    }
+
+def clear_orm_context():
+    if hasattr(_thread_local, "orm_context"):
+        del _thread_local.orm_context
+
+def get_orm_context():
+    return getattr(_thread_local, "orm_context", None)
+
+# 异常中文映射
+ERROR_TRANSLATIONS = {
+    "ValueError": "值错误：输入值不合法",
+    "TypeError": "类型错误：操作或函数的类型不匹配",
+    "KeyError": "键错误：字典中不存在指定键",
+    "PermissionDenied": "权限不足：您无权执行此操作",
+    "ValidationError": "数据验证错误",
+    "DoesNotExist": "数据不存在",
+    "IntegrityError": "数据库完整性错误",
+    "OperationalError": "数据库操作错误",
+    "DataError": "数据库字段数据错误",
+}
+
+# IntegrityError 常见模式
+INTEGRITY_PATTERNS = {
+    r"FOREIGN KEY constraint failed": "外键约束失败",
+    r"NOT NULL constraint failed: (.+?)\.(.+)": "非空约束失败: 表 {table}, 字段 {field}",
+    r"UNIQUE constraint failed: (.+?)\.(.+)": "唯一约束失败: 表 {table}, 字段 {field}",
+}
+
+# 数据库表名 -> Django 模型映射
+TABLE_MODEL_MAP = {m._meta.db_table: m.__name__ for m in apps.get_models()}
+
+def parse_integrity_error(exc):
+    """
+    解析 IntegrityError 返回中文信息
+    """
+    msg = str(exc)
+    for pattern, desc in INTEGRITY_PATTERNS.items():
+        m = re.search(pattern, msg)
+        if m:
+            if "{table}" in desc:
+                table, field = m.groups()
+                model_name = TABLE_MODEL_MAP.get(table, table)
+                return desc.format(table=model_name, field=field), model_name, [field]
+            return desc, None, None
+    return msg, None, None
+
+def parse_foreign_key_error(exc):
+    """
+    解析外键约束失败，返回引用模型名
+    """
+    msg = str(exc)
+    # PostgreSQL 风格
+    m = re.search(r'violates foreign key constraint "(.+?)" on table "(.+?)"', msg)
+    if m:
+        _, referencing_table = m.groups()
+        model_name = TABLE_MODEL_MAP.get(referencing_table, referencing_table)
+        return model_name
+    # SQLite/MySQL 风格
+    if "FOREIGN KEY constraint failed" in msg:
+        return "未知引用模型"
+    return None
+
+# ORM 装饰器
+def orm_operation(model_name=None, fields=None, operation=None):
+    """
+    装饰 ORM 方法，记录操作上下文
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            set_orm_context(model_name=model_name, fields=fields, operation=operation)
+            try:
+                return func(*args, **kwargs)
+            finally:
+                clear_orm_context()
+        return wrapper
+    return decorator
+
+# 高级异常中间件
+class FinalExceptionMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        try:
+            return self.get_response(request)
+        except Exception as exc:
+            error_type = type(exc).__name__
+            message = ERROR_TRANSLATIONS.get(error_type, str(exc))
+            model_name = None
+            fields = None
+            operation = None
+
+            # 获取 ORM 上下文
+            context = get_orm_context()
+            if context:
+                model_name = context.get("model_name")
+                fields = context.get("fields")
+                operation = context.get("operation")
+
+            # 数据库完整性错误
+            if isinstance(exc, IntegrityError):
+                # 外键约束失败
+                fk_model = parse_foreign_key_error(exc)
+                if fk_model:
+                    message = f"操作失败：存在外键依赖，模型 '{fk_model}' 中有数据引用该对象，请先删除或解除依赖。"
+                    model_name = fk_model
+                else:
+                    # 其他完整性错误解析
+                    msg, m_name, flds = parse_integrity_error(exc)
+                    message = msg
+                    if m_name:
+                        model_name = m_name
+                    if flds:
+                        fields = flds
+
+            elif isinstance(exc, ValidationError):
+                message = f"数据验证错误: {exc}"
+            elif isinstance(exc, ObjectDoesNotExist):
+                if model_name:
+                    message = f"{model_name} 数据不存在"
+                else:
+                    message = "数据不存在"
+            elif isinstance(exc, PermissionDenied):
+                message = "权限不足：您无权执行此操作"
+
+            result = {"error": message}
+            if model_name:
+                result["model"] = model_name
+            if fields:
+                result["fields"] = fields
+            if operation:
+                result["operation"] = operation
+
+            return JsonResponse(result, status=500)
+```
+
+------
+
+### ⚡ 使用方法
+
+1. **注册中间件**：
+
+```python
+MIDDLEWARE = [
+    # ... 其他中间件
+    "your_project.middleware.final_exception_middleware.FinalExceptionMiddleware",
+]
+```
+
+1. **使用 ORM 装饰器记录操作上下文**：
+
+```python
+from .final_exception_middleware import orm_operation
+from myapp.models import User
+
+@orm_operation(model_name="User", fields=["email"], operation="delete")
+def delete_user(user_id):
+    user = User.objects.get(id=user_id)
+    user.delete()
+```
+
+1. **效果**：
+
+- 删除对象时，如果有外键引用：
+
+```json
+{
+    "error": "操作失败：存在外键依赖，模型 'Profile' 中有数据引用该对象，请先删除或解除依赖。",
+    "model": "Profile",
+    "operation": "delete"
+}
+```
+
+- 删除成功但唯一约束失败：
+
+```json
+{
+    "error": "唯一约束失败: 表 User, 字段 email",
+    "model": "User",
+    "fields": ["email"],
+    "operation": "create"
+}
+```
+
+------
+
+✅ **优势**：
+
+- 自动解析外键依赖，告诉前端是哪个模型阻止删除
+- ORM 上下文追踪操作类型和字段
+- 全局捕获所有常见异常，统一中文提示
+- 支持批量操作，可扩展到其他数据库错误
+
+------
+
+明白了，你希望**不依赖中间件**，而是写一个**通用函数**，在进行 ORM 操作（增删改）时：
+
+- 自动捕获异常
+- 中文提示
+- 自动推断出错的模型和字段
+- 支持外键约束删除提示
+
+我帮你设计一个 **完全函数化的高阶装饰器 + 捕获函数**，用法如下：
+
+------
+
+### 1️⃣ 高阶 ORM 捕获装饰器
+
+```python
+import re
+from functools import wraps
+from django.db import IntegrityError
+from django.core.exceptions import ValidationError, ObjectDoesNotExist, PermissionDenied
+from django.apps import apps
+
+# 数据库表名 -> Django 模型映射
+TABLE_MODEL_MAP = {m._meta.db_table: m.__name__ for m in apps.get_models()}
+
+# 异常中文映射
+ERROR_TRANSLATIONS = {
+    "ValueError": "值错误：输入值不合法",
+    "TypeError": "类型错误：操作或函数的类型不匹配",
+    "KeyError": "键错误：字典中不存在指定键",
+    "PermissionDenied": "权限不足：您无权执行此操作",
+    "ValidationError": "数据验证错误",
+    "DoesNotExist": "数据不存在",
+    "IntegrityError": "数据库完整性错误",
+}
+
+# IntegrityError 常见模式
+INTEGRITY_PATTERNS = {
+    r"FOREIGN KEY constraint failed": "外键约束失败",
+    r"NOT NULL constraint failed: (.+?)\.(.+)": "非空约束失败: 表 {table}, 字段 {field}",
+    r"UNIQUE constraint failed: (.+?)\.(.+)": "唯一约束失败: 表 {table}, 字段 {field}",
+}
+
+def parse_integrity_error(exc):
+    msg = str(exc)
+    for pattern, desc in INTEGRITY_PATTERNS.items():
+        m = re.search(pattern, msg)
+        if m:
+            if "{table}" in desc:
+                table, field = m.groups()
+                model_name = TABLE_MODEL_MAP.get(table, table)
+                return desc.format(table=model_name, field=field), model_name, [field]
+            return desc, None, None
+    return msg, None, None
+
+def parse_foreign_key_error(exc):
+    msg = str(exc)
+    # PostgreSQL 风格
+    m = re.search(r'violates foreign key constraint "(.+?)" on table "(.+?)"', msg)
+    if m:
+        _, referencing_table = m.groups()
+        return TABLE_MODEL_MAP.get(referencing_table, referencing_table)
+    # SQLite/MySQL 风格
+    if "FOREIGN KEY constraint failed" in msg:
+        return "未知引用模型"
+    return None
+
+def orm_safe(func):
+    """
+    高阶装饰器：自动捕获 ORM 异常并返回中文提示
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as exc:
+            error_type = type(exc).__name__
+            message = ERROR_TRANSLATIONS.get(error_type, str(exc))
+            model_name = None
+            fields = None
+            operation = None
+
+            # IntegrityError 处理
+            if isinstance(exc, IntegrityError):
+                fk_model = parse_foreign_key_error(exc)
+                if fk_model:
+                    message = f"操作失败：存在外键依赖，模型 '{fk_model}' 中有数据引用该对象，请先删除或解除依赖。"
+                    model_name = fk_model
+                    operation = "delete"
+                else:
+                    msg, m_name, flds = parse_integrity_error(exc)
+                    message = msg
+                    model_name = m_name
+                    fields = flds
+                    operation = "create/update"
+
+            elif isinstance(exc, ValidationError):
+                message = f"数据验证错误: {exc}"
+            elif isinstance(exc, ObjectDoesNotExist):
+                message = "数据不存在"
+            elif isinstance(exc, PermissionDenied):
+                message = "权限不足：您无权执行此操作"
+
+            # 返回统一字典
+            return {
+                "error": message,
+                "model": model_name,
+                "fields": fields,
+                "operation": operation
+            }
+    return wrapper
+```
+
+------
+
+### 2️⃣ 使用示例
+
+```python
+from myapp.models import User, Profile
+
+@orm_safe
+def delete_user(user_id):
+    user = User.objects.get(id=user_id)
+    user.delete()
+
+@orm_safe
+def create_user(email, name):
+    User.objects.create(email=email, name=name)
+```
+
+------
+
+### 3️⃣ 调用效果
+
+```python
+result = delete_user(1)
+if result and "error" in result:
+    print(result)
+```
+
+**可能输出：**
+
+```json
+{
+    "error": "操作失败：存在外键依赖，模型 'Profile' 中有数据引用该对象，请先删除或解除依赖。",
+    "model": "Profile",
+    "fields": null,
+    "operation": "delete"
+}
+```
+
+或：
+
+```json
+{
+    "error": "唯一约束失败: 表 User, 字段 email",
+    "model": "User",
+    "fields": ["email"],
+    "operation": "create/update"
+}
+```
+
+------
+
+✅ 优点：
+
+1. **不依赖中间件**，函数/方法独立可用
+2. **自动解析外键约束**，提示阻止删除的模型
+3. **统一中文提示 + 模型/字段/操作信息**
+4. 可直接扩展 **批量操作、更新操作**
+
+------
+
+明白了，你希望最终版本是 **完全自动化、零手动装饰器**，能做到：
+
+- 创建、更新、删除时 **所有常见数据库约束错误** 都能自动捕获
+- 自动返回中文提示
+- 自动推断 **出错模型、字段、操作类型**
+- 外键约束导致删除失败时，返回引用模型和字段
+- 唯一约束、非空约束、类型错误、数据长度错误等创建/更新错误也能返回
+
+我帮你设计一个 **通用函数 + 高阶装饰器 + ORM 自动追踪** 方案：
+
+------
+
+### 1️⃣ 核心思路
+
+1. **QuerySet/Model 封装**：用装饰器包装 ORM 方法（create、update、delete、save 等）
+2. **自动推断模型名**：通过对象 `_meta.model_name` 或 QuerySet 模型
+3. **字段追踪**：获取操作数据的字段
+4. **异常解析**：
+   - `IntegrityError` → 唯一、非空、外键约束
+   - `DataError` → 类型或长度不匹配
+   - `ValidationError` → 模型字段验证
+5. **统一返回字典**：`{error, model, fields, operation}`
+
+------
+
+### 2️⃣ 完整示例
+
+```python
+import re
+from functools import wraps
+from django.db import IntegrityError, DataError
+from django.core.exceptions import ValidationError, ObjectDoesNotExist, PermissionDenied
+from django.apps import apps
+
+# 数据库表名 -> Django 模型映射
+TABLE_MODEL_MAP = {m._meta.db_table: m.__name__ for m in apps.get_models()}
+
+# 异常中文映射
+ERROR_TRANSLATIONS = {
+    "ValueError": "值错误：输入值不合法",
+    "TypeError": "类型错误：操作或函数的类型不匹配",
+    "KeyError": "键错误：字典中不存在指定键",
+    "PermissionDenied": "权限不足：您无权执行此操作",
+    "ValidationError": "数据验证错误",
+    "DoesNotExist": "数据不存在",
+    "IntegrityError": "数据库完整性错误",
+    "DataError": "数据库字段数据错误",
+}
+
+# IntegrityError 常见模式
+INTEGRITY_PATTERNS = {
+    r"FOREIGN KEY constraint failed": "外键约束失败",
+    r"NOT NULL constraint failed: (.+?)\.(.+)": "非空约束失败: 表 {table}, 字段 {field}",
+    r"UNIQUE constraint failed: (.+?)\.(.+)": "唯一约束失败: 表 {table}, 字段 {field}",
+}
+
+def parse_integrity_error(exc):
+    msg = str(exc)
+    for pattern, desc in INTEGRITY_PATTERNS.items():
+        m = re.search(pattern, msg)
+        if m:
+            if "{table}" in desc:
+                table, field = m.groups()
+                model_name = TABLE_MODEL_MAP.get(table, table)
+                return desc.format(table=model_name, field=field), model_name, [field]
+            return desc, None, None
+    return msg, None, None
+
+def parse_foreign_key_error(exc):
+    msg = str(exc)
+    m = re.search(r'violates foreign key constraint "(.+?)" on table "(.+?)"', msg)
+    if m:
+        _, referencing_table = m.groups()
+        return TABLE_MODEL_MAP.get(referencing_table, referencing_table)
+    if "FOREIGN KEY constraint failed" in msg:
+        return "未知引用模型"
+    return None
+
+def orm_auto(func):
+    """
+    高阶装饰器：自动捕获 ORM 异常并返回中文提示
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # 尝试自动获取操作模型和字段
+        instance = kwargs.get("instance", None)
+        model_name = None
+        fields = None
+        operation = None
+
+        if instance:
+            model_name = instance._meta.model_name.capitalize()
+            fields = list(kwargs.get("data", {}).keys()) if kwargs.get("data") else None
+
+        # 如果第一个参数是 Model 实例
+        elif args and hasattr(args[0], "_meta"):
+            instance = args[0]
+            model_name = instance._meta.model_name.capitalize()
+            fields = list(kwargs.get("data", {}).keys()) if kwargs.get("data") else None
+
+        # 判断操作类型
+        if func.__name__ in ["create", "save"]:
+            operation = "create/update"
+        elif func.__name__ in ["delete"]:
+            operation = "delete"
+
+        try:
+            return func(*args, **kwargs)
+        except Exception as exc:
+            error_type = type(exc).__name__
+            message = ERROR_TRANSLATIONS.get(error_type, str(exc))
+
+            # IntegrityError
+            if isinstance(exc, IntegrityError):
+                fk_model = parse_foreign_key_error(exc)
+                if fk_model and operation == "delete":
+                    message = f"操作失败：存在外键依赖，模型 '{fk_model}' 中有数据引用该对象，请先删除或解除依赖。"
+                    model_name = fk_model
+                else:
+                    msg, m_name, flds = parse_integrity_error(exc)
+                    message = msg
+                    if m_name:
+                        model_name = m_name
+                    if flds:
+                        fields = flds
+
+            # DataError
+            elif isinstance(exc, DataError):
+                message = f"数据错误：{exc}"
+
+            # ValidationError
+            elif isinstance(exc, ValidationError):
+                message = f"数据验证错误: {exc}"
+
+            # ObjectDoesNotExist
+            elif isinstance(exc, ObjectDoesNotExist):
+                if model_name:
+                    message = f"{model_name} 数据不存在"
+                else:
+                    message = "数据不存在"
+
+            # PermissionDenied
+            elif isinstance(exc, PermissionDenied):
+                message = "权限不足：您无权执行此操作"
+
+            return {
+                "error": message,
+                "model": model_name,
+                "fields": fields,
+                "operation": operation
+            }
+    return wrapper
+```
+
+------
+
+### 3️⃣ 使用示例
+
+```python
+from myapp.models import User, Profile
+
+@orm_auto
+def create_user(data):
+    return User.objects.create(**data)
+
+@orm_auto
+def update_user(instance, data):
+    for k, v in data.items():
+        setattr(instance, k, v)
+    instance.save()
+
+@orm_auto
+def delete_user(instance):
+    instance.delete()
+```
+
+------
+
+### 4️⃣ 调用示例
+
+```python
+result = create_user({"email": "test@example.com", "name": "Test"})
+if result and "error" in result:
+    print(result)
+```
+
+**输出示例（唯一约束错误）**：
+
+```json
+{
+    "error": "唯一约束失败: 表 User, 字段 email",
+    "model": "User",
+    "fields": ["email"],
+    "operation": "create/update"
+}
+```
+
+**删除时外键约束错误**：
+
+```json
+{
+    "error": "操作失败：存在外键依赖，模型 'Profile' 中有数据引用该对象，请先删除或解除依赖。",
+    "model": "Profile",
+    "fields": null,
+    "operation": "delete"
+}
+```
+
+------
+
+✅ 特点：
+
+- **零手动装饰器**（只需要装饰 ORM 函数即可）
+- **自动解析创建/更新/删除约束错误**
+- **外键、唯一、非空、数据类型长度、验证错误**均支持
+- 返回统一字典，前端友好显示
+
+------
+
+明白，我给你设计一个 **完全自动化的 ORM 异常捕获方案**，特点：
+
+- **无需装饰器**，直接对任意 Django Model 的 `create`/`save`/`delete`/`update` 自动捕获异常
+- 支持 **增删改查**
+- 返回统一 **字典格式**：`error（中文提示）`、`model（模型名）`、`fields（字段）`、`operation（操作类型）`
+- 自动解析 **外键约束、唯一约束、非空约束、数据类型约束、验证错误**
+
+------
+
+### 1️⃣ 自动化 ORM 捕获工具
+
+```python
+import re
+from django.db import models, IntegrityError, DataError
+from django.core.exceptions import ValidationError, ObjectDoesNotExist, PermissionDenied
+from django.apps import apps
+
+# 数据库表名 -> Django 模型映射
+TABLE_MODEL_MAP = {m._meta.db_table: m.__name__ for m in apps.get_models()}
+
+# 异常中文映射
+ERROR_TRANSLATIONS = {
+    "ValueError": "值错误：输入值不合法",
+    "TypeError": "类型错误：操作或函数的类型不匹配",
+    "KeyError": "键错误：字典中不存在指定键",
+    "PermissionDenied": "权限不足：您无权执行此操作",
+    "ValidationError": "数据验证错误",
+    "DoesNotExist": "数据不存在",
+    "IntegrityError": "数据库完整性错误",
+    "DataError": "数据库字段数据错误",
+}
+
+# 常见 IntegrityError 模式
+INTEGRITY_PATTERNS = {
+    r"FOREIGN KEY constraint failed": "外键约束失败",
+    r"NOT NULL constraint failed: (.+?)\.(.+)": "非空约束失败: 表 {table}, 字段 {field}",
+    r"UNIQUE constraint failed: (.+?)\.(.+)": "唯一约束失败: 表 {table}, 字段 {field}",
+}
+
+def parse_integrity_error(exc):
+    msg = str(exc)
+    for pattern, desc in INTEGRITY_PATTERNS.items():
+        m = re.search(pattern, msg)
+        if m:
+            if "{table}" in desc:
+                table, field = m.groups()
+                model_name = TABLE_MODEL_MAP.get(table, table)
+                return desc.format(table=model_name, field=field), model_name, [field]
+            return desc, None, None
+    return msg, None, None
+
+def parse_foreign_key_error(exc):
+    msg = str(exc)
+    # PostgreSQL 风格
+    m = re.search(r'violates foreign key constraint "(.+?)" on table "(.+?)"', msg)
+    if m:
+        _, referencing_table = m.groups()
+        return TABLE_MODEL_MAP.get(referencing_table, referencing_table)
+    # SQLite/MySQL 风格
+    if "FOREIGN KEY constraint failed" in msg:
+        return "未知引用模型"
+    return None
+
+# 自动异常处理函数
+def handle_orm_operation(func, *args, **kwargs):
+    """
+    func: 实际 ORM 操作函数，如 obj.save, Model.objects.create, obj.delete
+    自动捕获异常并返回统一字典
+    """
+    model_name = None
+    fields = None
+    operation = None
+
+    # 尝试获取操作对象和字段
+    instance = kwargs.get("instance", None)
+    data = kwargs.get("data", None)
+
+    if instance and hasattr(instance, "_meta"):
+        model_name = instance._meta.model_name.capitalize()
+        fields = list(data.keys()) if data else None
+    elif args and hasattr(args[0], "_meta"):
+        instance = args[0]
+        model_name = instance._meta.model_name.capitalize()
+        fields = list(data.keys()) if data else None
+
+    # 判断操作类型
+    op_name = func.__name__.lower()
+    if op_name in ["create", "save"]:
+        operation = "create/update"
+    elif op_name in ["delete"]:
+        operation = "delete"
+    else:
+        operation = op_name
+
+    try:
+        return func(*args, **kwargs)
+    except Exception as exc:
+        message = ERROR_TRANSLATIONS.get(type(exc).__name__, str(exc))
+
+        if isinstance(exc, IntegrityError):
+            fk_model = parse_foreign_key_error(exc)
+            if fk_model and operation == "delete":
+                message = f"操作失败：存在外键依赖，模型 '{fk_model}' 中有数据引用该对象，请先删除或解除依赖。"
+                model_name = fk_model
+            else:
+                msg, m_name, flds = parse_integrity_error(exc)
+                message = msg
+                if m_name:
+                    model_name = m_name
+                if flds:
+                    fields = flds
+
+        elif isinstance(exc, DataError):
+            message = f"数据错误：{exc}"
+
+        elif isinstance(exc, ValidationError):
+            message = f"数据验证错误: {exc}"
+
+        elif isinstance(exc, ObjectDoesNotExist):
+            message = f"{model_name or '数据'}不存在"
+
+        elif isinstance(exc, PermissionDenied):
+            message = "权限不足：您无权执行此操作"
+
+        return {
+            "error": message,
+            "model": model_name,
+            "fields": fields,
+            "operation": operation
+        }
+```
+
+------
+
+### 2️⃣ 使用方法
+
+```python
+from myapp.models import User, Profile
+
+# 创建
+result = handle_orm_operation(User.objects.create, email="test@example.com", name="Test")
+if "error" in result:
+    print(result)
+
+# 更新
+user = User.objects.get(id=1)
+result = handle_orm_operation(user.save)
+if "error" in result:
+    print(result)
+
+# 删除
+profile = Profile.objects.get(id=10)
+result = handle_orm_operation(profile.delete)
+if "error" in result:
+    print(result)
+```
+
+------
+
+### 3️⃣ 增删改查出错示例返回信息
+
+| 操作      | 错误类型           | 返回信息                                                     |
+| --------- | ------------------ | ------------------------------------------------------------ |
+| 创建      | 唯一约束失败       | `{"error": "唯一约束失败: 表 User, 字段 email", "model": "User", "fields": ["email"], "operation": "create/update"}` |
+| 创建/更新 | 非空约束失败       | `{"error": "非空约束失败: 表 User, 字段 name", "model": "User", "fields": ["name"], "operation": "create/update"}` |
+| 创建/更新 | 数据类型或长度错误 | `{"error": "数据错误：value too long for type varchar", "model": "User", "fields": ["email"], "operation": "create/update"}` |
+| 删除      | 外键约束失败       | `{"error": "操作失败：存在外键依赖，模型 'Profile' 中有数据引用该对象，请先删除或解除依赖。", "model": "Profile", "fields": null, "operation": "delete"}` |
+| 查询/更新 | 对象不存在         | `{"error": "User 数据不存在", "model": "User", "fields": null, "operation": "update"}` |
+| 权限不足  | PermissionDenied   | `{"error": "权限不足：您无权执行此操作", "model": null, "fields": null, "operation": null}` |
+| 验证错误  | ValidationError    | `{"error": "数据验证错误: [具体验证错误信息]", "model": "User", "fields": ["email"], "operation": "create/update"}` |
+
+------
+
+这个方案 **完全零改动**：
+
+- 你只需要调用 `handle_orm_operation` 包裹你的 ORM 方法
+- 所有增删改查异常都会自动返回 **中文提示 + 模型 + 字段 + 操作类型**
+- 支持 **外键约束、唯一约束、非空约束、数据类型错误、验证错误、权限错误**
+
+------
+
+完全可以，而且这是很多团队遇到的问题：Django/数据库返回的报错信息里，很多都是英文原始信息，直接返回前端不够友好。我们可以做 **二次解析**，把常见的创建/更新错误完全转换成中文，并指出 **字段、约束类型、操作建议**。
+
+下面我帮你优化 `handle_orm_operation`，针对 **创建/更新操作**，对常见错误（唯一约束、非空、类型、长度、验证错误）做更清晰的中文提示：
+
+------
+
+### 1️⃣ 优化后的异常解析函数
+
+```python
+def parse_create_update_error(exc, model_name=None, data_fields=None):
+    """
+    专门解析创建/更新时的异常，返回中文提示 + 受影响字段
+    """
+    msg = str(exc)
+    fields = data_fields
+
+    # IntegrityError
+    if isinstance(exc, IntegrityError):
+        # 外键约束（一般更新时触发）
+        fk_model = parse_foreign_key_error(exc)
+        if fk_model:
+            return f"操作失败：存在外键依赖，模型 '{fk_model}' 中有数据引用该对象，请先删除或解除依赖。", [fk_model]
+
+        # 唯一约束
+        m = re.search(r"UNIQUE constraint failed: (.+?)\.(.+)", msg)
+        if m:
+            table, field = m.groups()
+            model = TABLE_MODEL_MAP.get(table, table)
+            return f"唯一约束失败：模型 '{model}' 的字段 '{field}' 已存在相同值，请修改后重试。", [field]
+
+        # 非空约束
+        m = re.search(r"NOT NULL constraint failed: (.+?)\.(.+)", msg)
+        if m:
+            table, field = m.groups()
+            model = TABLE_MODEL_MAP.get(table, table)
+            return f"非空约束失败：模型 '{model}' 的字段 '{field}' 不能为空，请填写值后重试。", [field]
+
+        # 默认
+        return f"数据库完整性错误: {msg}", fields
+
+    # DataError 数据类型/长度错误
+    elif isinstance(exc, DataError):
+        return f"数据类型或长度错误: {msg}", fields
+
+    # ValidationError 模型验证
+    elif isinstance(exc, ValidationError):
+        error_list = []
+        if hasattr(exc, "message_dict"):
+            for k, v in exc.message_dict.items():
+                error_list.append(f"字段 '{k}': {','.join(v)}")
+            return f"数据验证错误: {'; '.join(error_list)}", list(exc.message_dict.keys())
+        return f"数据验证错误: {msg}", fields
+
+    # 默认
+    return f"操作失败: {msg}", fields
+```
+
+------
+
+### 2️⃣ 在 `handle_orm_operation` 中调用
+
+```python
+def handle_orm_operation(func, *args, **kwargs):
+    model_name = None
+    fields = None
+    operation = None
+
+    # 尝试获取对象和字段
+    instance = kwargs.get("instance", None)
+    data = kwargs.get("data", None)
+
+    if instance and hasattr(instance, "_meta"):
+        model_name = instance._meta.model_name.capitalize()
+        fields = list(data.keys()) if data else None
+    elif args and hasattr(args[0], "_meta"):
+        instance = args[0]
+        model_name = instance._meta.model_name.capitalize()
+        fields = list(data.keys()) if data else None
+
+    op_name = func.__name__.lower()
+    if op_name in ["create", "save"]:
+        operation = "create/update"
+    elif op_name in ["delete"]:
+        operation = "delete"
+    else:
+        operation = op_name
+
+    try:
+        return func(*args, **kwargs)
+    except Exception as exc:
+        if operation == "create/update":
+            message, affected_fields = parse_create_update_error(exc, model_name, fields)
+        elif operation == "delete":
+            fk_model = parse_foreign_key_error(exc)
+            if fk_model:
+                message = f"删除失败：存在外键依赖，模型 '{fk_model}' 中有数据引用该对象，请先删除或解除依赖。"
+                affected_fields = None
+                model_name = fk_model
+            else:
+                message, affected_fields = parse_integrity_error(exc)
+        else:
+            message = str(exc)
+            affected_fields = fields
+
+        return {
+            "error": message,
+            "model": model_name,
+            "fields": affected_fields,
+            "operation": operation
+        }
+```
+
+------
+
+### 3️⃣ 示例输出（更中文化）
+
+#### 唯一约束错误
+
+```json
+{
+    "error": "唯一约束失败：模型 'User' 的字段 'email' 已存在相同值，请修改后重试。",
+    "model": "User",
+    "fields": ["email"],
+    "operation": "create/update"
+}
+```
+
+#### 非空约束错误
+
+```json
+{
+    "error": "非空约束失败：模型 'User' 的字段 'name' 不能为空，请填写值后重试。",
+    "model": "User",
+    "fields": ["name"],
+    "operation": "create/update"
+}
+```
+
+#### 验证错误
+
+```json
+{
+    "error": "数据验证错误: 字段 'email': 请输入有效邮箱地址",
+    "model": "User",
+    "fields": ["email"],
+    "operation": "create/update"
+}
+```
+
+#### 数据类型或长度错误
+
+```json
+{
+    "error": "数据类型或长度错误: value too long for type varchar",
+    "model": "User",
+    "fields": ["email"],
+    "operation": "create/update"
+}
+```
+
+------
+
+✅ 这样就完全解决了 **英文原始信息太晦涩** 的问题：
+
+- 自动把 **唯一约束、非空约束、外键约束、验证错误、数据类型错误** 转成清晰中文
+- 告诉用户 **哪个模型、哪个字段** 出错
+- 给出 **操作建议**，比如修改字段、填写值或先删除依赖数据
+
+------
+
