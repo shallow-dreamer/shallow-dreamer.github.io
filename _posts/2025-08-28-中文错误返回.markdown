@@ -1558,3 +1558,622 @@ def handle_orm_operation(func, *args, **kwargs):
 
 ------
 
+以下是一个通用的 Python 函数，用于将英文异常信息解析并翻译为中文，并可根据 **模型英文名到中文名的映射** 动态替换：
+
+------
+
+### 函数代码
+
+```python
+def translate_exception_message(error_message: str, model_name_map: dict = None) -> str:
+    """
+    将英文异常信息解析并翻译成中文，同时可根据模型名映射替换为中文名。
+
+    :param error_message: str, 原始英文错误信息
+    :param model_name_map: dict, 模型英文名到中文名的映射，如 {"Dataset": "数据集"}
+    :return: str, 翻译后的中文错误信息
+    """
+    if model_name_map is None:
+        model_name_map = {}
+
+    # 基本翻译映射，可持续扩充
+    translation_map = {
+        "does not exist": "不存在",
+        "already exists": "已存在",
+        "cannot be null": "不能为空",
+        "not a valid": "不是有效的",
+        "invalid": "无效的",
+        "unique constraint": "唯一约束",
+        "foreign key constraint": "外键约束",
+        "value too long": "值过长",
+        "duplicate key": "重复的键值",
+        "permission denied": "没有权限",
+        "connection refused": "无法连接数据库",
+        "timeout": "超时",
+    }
+
+    translated = error_message
+
+    # 1. 替换模型名
+    for eng_name, cn_name in model_name_map.items():
+        if eng_name in translated:
+            translated = translated.replace(eng_name, cn_name)
+
+    # 2. 替换常见错误关键词
+    for eng, cn in translation_map.items():
+        if eng in translated.lower():
+            translated = translated.replace(eng, cn).replace(eng.capitalize(), cn)
+
+    # 3. 增强处理：去掉多余技术栈信息 (可按需扩展)
+    translated = translated.replace("django.db.utils.", "").replace("IntegrityError: ", "")
+    translated = translated.replace("psycopg2.errors.", "").replace("Detail: ", "详情：")
+
+    return translated
+```
+
+------
+
+### 使用示例
+
+```python
+error_msg = "django.db.utils.IntegrityError: duplicate key value violates unique constraint \"dataset_name_key\""
+model_map = {"Dataset": "数据集"}
+
+print(translate_exception_message(error_msg, model_map))
+# 输出: "重复的键值 value violates 唯一约束 \"数据集_name_key\""
+```
+
+------
+
+### 说明
+
+1. **支持模型名替换**：`model_name_map` 用于将英文模型名替换成中文。
+2. **可扩展性**：`translation_map` 可逐步补充更多数据库和 Django 常见错误。
+3. **适配所有异常**：直接传入 `str(exception)` 即可。
+
+------
+
+以下是一个**通用异常处理函数**，既能捕获数据库相关异常，又支持将错误信息中涉及的模型名、字段名替换为中文描述。
+
+------
+
+## 1. 定义模型中文映射
+
+```python
+# 可在单独的 config 文件中维护
+MODEL_NAME_MAP = {
+    "User": "用户",
+    "Dataset": "数据集",
+    "DatasetVersion": "数据集版本",
+}
+
+FIELD_NAME_MAP = {
+    "username": "用户名",
+    "email": "邮箱",
+    "version": "版本号",
+}
+```
+
+------
+
+## 2. 通用异常处理函数
+
+```python
+from django.db import DatabaseError, IntegrityError, OperationalError
+import re
+import logging
+
+logger = logging.getLogger(__name__)
+
+def replace_with_chinese(message: str) -> str:
+    # 替换模型名
+    for eng, cn in MODEL_NAME_MAP.items():
+        message = re.sub(rf"\b{eng}\b", cn, message)
+    # 替换字段名
+    for eng, cn in FIELD_NAME_MAP.items():
+        message = re.sub(rf"\b{eng}\b", cn, message)
+    return message
+
+def handle_db_exception(func):
+    """
+    装饰器：捕获数据库异常并返回更友好的中文错误信息
+    """
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except (IntegrityError, OperationalError, DatabaseError) as e:
+            raw_msg = str(e)
+            user_msg = replace_with_chinese(raw_msg)
+            logger.error(f"数据库操作异常: {raw_msg}")
+            return {"success": False, "error": user_msg}
+        except Exception as e:
+            logger.error(f"未知异常: {str(e)}")
+            return {"success": False, "error": "系统发生未知错误，请联系管理员"}
+    return wrapper
+```
+
+------
+
+## 3. 使用示例
+
+```python
+@handle_db_exception
+def create_dataset():
+    # 示例数据库操作
+    from myapp.models import Dataset
+    Dataset.objects.create(name="test", version=1)
+    return {"success": True}
+```
+
+当数据库报错时（例如唯一性约束失败），英文信息会被替换为中文描述并返回。
+
+------
+
+以下是一个可拷贝、可直接运行的方案，分为两部分：
+
+------
+
+## 1. 基于 `verbose_name` 自动生成映射
+
+在 `utils/error_maps.py` 中：
+
+```python
+# utils/error_maps.py
+from django.apps import apps
+
+def generate_name_maps():
+    """
+    动态生成模型和字段的中文名映射
+    """
+    model_name_map = {}
+    field_name_map = {}
+
+    for model in apps.get_models():
+        # 获取模型的 Meta 信息
+        model_meta = model._meta
+        model_name_map[model.__name__] = model_meta.verbose_name
+
+        field_map = {}
+        for field in model_meta.fields:
+            field_map[field.name] = field.verbose_name
+        field_name_map[model.__name__] = field_map
+
+    return model_name_map, field_name_map
+
+# 在导入时即生成一次映射
+MODEL_NAME_MAP, FIELD_NAME_MAP = generate_name_maps()
+```
+
+------
+
+## 2. 错误信息中文化函数
+
+在 `utils/error_translator.py` 中：
+
+```python
+# utils/error_translator.py
+import re
+from .error_maps import MODEL_NAME_MAP, FIELD_NAME_MAP
+
+def translate_error_message(message: str) -> str:
+    """
+    将错误信息中的模型名和字段名翻译为中文
+    """
+    translated_message = message
+
+    # 替换模型名
+    for eng_name, cn_name in MODEL_NAME_MAP.items():
+        translated_message = re.sub(rf'\b{eng_name}\b', cn_name, translated_message)
+
+    # 替换字段名
+    for model_eng, fields_map in FIELD_NAME_MAP.items():
+        for field_eng, field_cn in fields_map.items():
+            translated_message = re.sub(rf'\b{field_eng}\b', field_cn, translated_message)
+
+    return translated_message
+```
+
+------
+
+## 3. 使用示例
+
+```python
+from utils.error_translator import translate_error_message
+
+try:
+    # 模拟一个错误
+    raise ValueError("Invalid value for field user_name in model UserProfile")
+except ValueError as e:
+    print(translate_error_message(str(e)))
+```
+
+如果模型 `UserProfile` 的 `verbose_name` 是 `用户资料`，字段 `user_name` 的 `verbose_name` 是 `用户名`，则输出：
+
+```
+Invalid value for field 用户名 in model 用户资料
+```
+
+------
+
+## 4. 注意点
+
+1. 需要在 Django 启动后（`apps.ready`）使用，否则 `apps.get_models()` 可能获取不到模型。
+2. 如果使用 **多语言**，需要确保 `verbose_name` 使用了 `gettext_lazy`。
+3. 可以在 **中间件** 或 **异常捕获器** 中统一调用 `translate_error_message`。
+
+------
+
+下面给出一个完整的、可直接使用的方案，支持以下功能：
+
+- 自动从 **Django 模型的 `verbose_name`** 和字段的 `verbose_name` 生成映射表；
+- 将 **Django 的原始英文错误信息** 转换为中文提示；
+- 显示为“模型中文名 + 字段中文名 + 错误信息中文描述”的格式。
+
+------
+
+## **1. 自动生成映射表**
+
+在 `utils/model_map.py` 中创建以下代码：
+
+```python
+from django.apps import apps
+
+def generate_model_field_maps():
+    """
+    自动生成模型名称和字段名称映射
+    MODEL_NAME_MAP: { 'App.ModelName': '模型中文名' }
+    FIELD_NAME_MAP: { 'App.ModelName.field_name': '字段中文名' }
+    """
+    MODEL_NAME_MAP = {}
+    FIELD_NAME_MAP = {}
+
+    for model in apps.get_models():
+        app_label = model._meta.app_label
+        model_name = model.__name__
+        verbose_model_name = model._meta.verbose_name
+        model_key = f"{app_label}.{model_name}"
+        MODEL_NAME_MAP[model_key] = str(verbose_model_name)
+
+        for field in model._meta.fields:
+            field_key = f"{model_key}.{field.name}"
+            FIELD_NAME_MAP[field_key] = str(field.verbose_name)
+
+    return MODEL_NAME_MAP, FIELD_NAME_MAP
+
+
+# 在应用启动时生成一次，避免每次都扫描
+MODEL_NAME_MAP, FIELD_NAME_MAP = generate_model_field_maps()
+```
+
+------
+
+## **2. 错误信息中文化处理**
+
+在 `utils/error_translator.py` 中：
+
+```python
+import re
+from .model_map import MODEL_NAME_MAP, FIELD_NAME_MAP
+
+# 常见错误的中文化模板
+ERROR_TRANSLATION = [
+    (re.compile(r"This field cannot be blank\."), "此字段不能为空"),
+    (re.compile(r"This field is required\."), "此字段是必填项"),
+    (re.compile(r"Ensure this value has at least (\d+) characters? \(it has (\d+)\)\."),
+     "确保此值至少有 {0} 个字符（当前为 {1} 个）"),
+    (re.compile(r"Ensure this value has at most (\d+) characters? \(it has (\d+)\)\."),
+     "确保此值最多有 {0} 个字符（当前为 {1} 个）"),
+    (re.compile(r"Enter a valid email address\."), "请输入有效的电子邮件地址"),
+    # 可按需扩展更多匹配规则
+]
+
+def translate_error_message(message):
+    """将英文错误信息翻译为中文"""
+    for pattern, translation in ERROR_TRANSLATION:
+        match = pattern.match(message)
+        if match:
+            return translation.format(*match.groups())
+    return message  # 无匹配时返回原始信息
+
+def format_error(model, field, error_message):
+    """
+    组合中文化的完整错误提示：
+    - 通过 model.__class__ 获取模型信息
+    - 通过 field 获取字段中文名
+    """
+    app_label = model._meta.app_label
+    model_name = model.__class__.__name__
+    model_key = f"{app_label}.{model_name}"
+    field_key = f"{model_key}.{field}"
+
+    model_cn = MODEL_NAME_MAP.get(model_key, model_name)
+    field_cn = FIELD_NAME_MAP.get(field_key, field)
+
+    error_cn = translate_error_message(error_message)
+    return f"{model_cn} 的 {field_cn}：{error_cn}"
+```
+
+------
+
+## **3. 使用示例**
+
+```python
+from django.core.exceptions import ValidationError
+from utils.error_translator import format_error
+
+def create_user(data):
+    from myapp.models import User
+
+    user = User(**data)
+    try:
+        user.full_clean()
+        user.save()
+    except ValidationError as e:
+        # e.message_dict 形如 {'username': ['This field cannot be blank.']}
+        for field, errors in e.message_dict.items():
+            for err in errors:
+                print(format_error(user, field, err))
+```
+
+输出示例：
+
+```
+用户 的 用户名：此字段不能为空
+```
+
+------
+
+## **4. 优化说明**
+
+- **一次生成映射**：`generate_model_field_maps()` 在 Django 启动时执行，避免重复扫描；
+- **可扩展错误模板**：`ERROR_TRANSLATION` 可根据需求逐步完善；
+- **可直接拷贝使用**：分为两个文件 `model_map.py` 和 `error_translator.py`，无需修改其他部分。
+
+------
+
+可以基于 **错误码分类 + 中文提示模板库 + 正则动态匹配** 的方式构建一个通用异常处理器，能够自动识别不同数据库和第三方库的异常，并输出对应的中文错误信息。以下是一个可扩展方案：
+
+------
+
+### **1. 错误码与提示模板设计**
+
+```python
+# error_messages.py
+ERROR_MESSAGES = {
+    "IntegrityError": {
+        r"unique constraint.*violated": {
+            "code": "DB1001",
+            "message": "唯一约束冲突：字段或组合值已存在，无法重复。"
+        },
+        r"null value in column .* violates not-null constraint": {
+            "code": "DB1002",
+            "message": "字段不能为空，请检查必填项。"
+        },
+        r"foreign key constraint .*": {
+            "code": "DB1003",
+            "message": "外键约束错误：关联对象不存在或已删除。"
+        }
+    },
+    "OperationalError": {
+        r"could not connect to server": {
+            "code": "DB2001",
+            "message": "无法连接数据库，请检查服务是否启动。"
+        },
+        r"timeout expired": {
+            "code": "DB2002",
+            "message": "数据库连接超时，请重试或检查网络。"
+        }
+    },
+    "ProgrammingError": {
+        r"column .* does not exist": {
+            "code": "DB3001",
+            "message": "SQL 错误：引用了不存在的字段。"
+        },
+        r"syntax error at or near": {
+            "code": "DB3002",
+            "message": "SQL 语法错误，请检查语句。"
+        }
+    }
+}
+```
+
+------
+
+### **2. 动态异常解析器**
+
+```python
+import re
+from psycopg2 import IntegrityError, OperationalError, ProgrammingError
+from error_messages import ERROR_MESSAGES
+
+class DBErrorTranslator:
+    def __init__(self):
+        self.error_map = ERROR_MESSAGES
+
+    def translate(self, exc: Exception):
+        exc_type = type(exc).__name__
+        exc_msg = str(exc)
+
+        # 动态匹配错误码
+        if exc_type in self.error_map:
+            for pattern, info in self.error_map[exc_type].items():
+                if re.search(pattern, exc_msg, re.IGNORECASE):
+                    return {
+                        "error_code": info["code"],
+                        "error_message": info["message"],
+                        "raw_message": exc_msg  # 可选保留
+                    }
+        # 未匹配到的情况
+        return {
+            "error_code": "DB9999",
+            "error_message": "未知数据库错误，请联系管理员。",
+            "raw_message": exc_msg
+        }
+```
+
+------
+
+### **3. 使用示例（Django 或任意数据库操作场景）**
+
+```python
+translator = DBErrorTranslator()
+
+try:
+    # 执行数据库操作
+    obj.save()
+except (IntegrityError, OperationalError, ProgrammingError) as e:
+    error_info = translator.translate(e)
+    print(error_info)  # 生产环境可返回给前端 JSON
+```
+
+------
+
+### **4. 支持第三方库模型的扫描**
+
+如果需要根据模型动态提示：
+
+- 结合 **Django 的 apps.get_models()** 或 **SQLAlchemy 的 Base.metadata.tables** 自动扫描模型字段及元信息。
+
+- 结合异常类型及模型字段生成更具体提示，例如：
+
+  > `唯一约束冲突：字段 [username] 的值已存在。`
+
+可通过在 `translate` 中增加一个模型解析器，提取出错误信息中的字段名，再匹配模型定义，生成提示。
+
+------
+
+下面是一个可扩展的 **数据库异常处理模板库**，支持：
+
+1. **错误码分类**（唯一约束、外键约束、检查约束、字段类型错误等）。
+2. **中文提示模板**，可自动替换字段的 `verbose_name`（或 `help_text`）。
+3. **动态正则匹配**，兼容不同数据库（PostgreSQL、MySQL、SQLite）。
+4. **扫描 Django 项目中所有模型（含第三方库）**，以获取字段中文别名。
+
+------
+
+### 1. 异常处理核心逻辑
+
+```python
+# db_error_handler.py
+import re
+from django.apps import apps
+from django.db import IntegrityError, DataError
+from psycopg2.errors import UniqueViolation, ForeignKeyViolation, CheckViolation
+
+class DBErrorTranslator:
+    def __init__(self):
+        self.field_alias_map = self._build_field_alias_map()
+        self.error_patterns = self._load_error_patterns()
+
+    def _build_field_alias_map(self):
+        """
+        扫描所有模型，构建 {table_name: {column_name: verbose_name}} 映射
+        """
+        field_map = {}
+        for model in apps.get_models():
+            table = model._meta.db_table
+            field_map[table] = {}
+            for field in model._meta.get_fields():
+                if hasattr(field, 'verbose_name'):
+                    field_map[table][field.column] = field.verbose_name
+        return field_map
+
+    def _load_error_patterns(self):
+        """
+        定义多数据库兼容的错误匹配模板，支持动态字段替换
+        """
+        return {
+            "unique_violation": {
+                "regex": [
+                    re.compile(r'duplicate key value violates unique constraint "(?P<constraint>.+)"'),
+                    re.compile(r'UNIQUE constraint failed: (?P<table>[\w_]+)\.(?P<field>[\w_]+)')
+                ],
+                "message": "字段 {field_name} 的值已存在，不能重复。"
+            },
+            "foreign_key_violation": {
+                "regex": [
+                    re.compile(r'violates foreign key constraint "(?P<constraint>.+)"')
+                ],
+                "message": "字段 {field_name} 引用的数据不存在。"
+            },
+            "check_violation": {
+                "regex": [
+                    re.compile(r'new row for relation ".+" violates check constraint')
+                ],
+                "message": "字段 {field_name} 的值不符合约束条件。"
+            },
+            "data_error": {
+                "regex": [
+                    re.compile(r'value too long for type character varying\((?P<max_length>\d+)\)')
+                ],
+                "message": "字段 {field_name} 的值超出最大长度 {max_length}。"
+            }
+        }
+
+    def translate(self, exc: Exception) -> str:
+        """
+        将数据库异常翻译为中文提示
+        """
+        error_message = str(exc)
+
+        for category, cfg in self.error_patterns.items():
+            for pattern in cfg["regex"]:
+                match = pattern.search(error_message)
+                if match:
+                    info = match.groupdict()
+                    field_name = self._resolve_field_name(info)
+                    return cfg["message"].format(field_name=field_name, **info)
+
+        return "发生数据库错误，请检查输入数据。"
+
+    def _resolve_field_name(self, info: dict):
+        """
+        根据表名、字段名查找 verbose_name
+        """
+        table = info.get("table")
+        field = info.get("field")
+
+        if table and field:
+            alias = self.field_alias_map.get(table, {}).get(field)
+            return alias or field
+        return "未知字段"
+```
+
+------
+
+### 2. 在 Django 中使用
+
+```python
+# views.py
+from django.db import IntegrityError, DataError
+from django.http import JsonResponse
+from .db_error_handler import DBErrorTranslator
+
+translator = DBErrorTranslator()
+
+def create_object(request):
+    try:
+        # 保存逻辑
+        obj.save()
+        return JsonResponse({"success": True})
+    except (IntegrityError, DataError) as e:
+        msg = translator.translate(e)
+        return JsonResponse({"success": False, "error": msg})
+```
+
+------
+
+### 3. 支持第三方库模型
+
+`apps.get_models()` 会扫描 **所有已注册的 Django 应用模型**，包括第三方库（只要它们在 `INSTALLED_APPS` 中）。
+
+------
+
+### 4. 优点
+
+- 错误码分类清晰，可扩展不同数据库。
+- 自动中文化字段名，提升用户体验。
+- 正则匹配动态提取字段信息，减少硬编码。
+
+------
+
