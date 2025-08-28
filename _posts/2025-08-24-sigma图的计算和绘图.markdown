@@ -2281,3 +2281,116 @@ Cannot read properties of undefined (reading 'queryComponents')
 
 ------
 
+明白了，你希望 **在每个 sigma 区间上方显示横向标注线（水平线）来表示区间范围**，并且在中间标注概率，这就不是单纯用 `markLine` 竖线能做到的，而是需要用 **额外的 series + line 或 markLine 配置** 来画 **横向的标注线**。
+
+下面我给你一个完整示例，实现：
+
+1. ±1σ、±2σ、±3σ **竖线**
+2. ±σ 区间上方 **横向标注线**
+3. 区间 **中间标注概率**
+4. 标注不会叠加
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Sigma Chart with Horizontal Markers</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+</head>
+<body>
+<div id="sigmaChart" style="width: 900px; height: 450px;"></div>
+<script>
+const mean = 0;
+const std = 1;
+const data = [];
+const step = 0.1;
+
+// 生成正态分布数据
+for (let x = mean - 4*std; x <= mean + 4*std; x += step) {
+    const y = (1 / (std * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - mean)/std)**2);
+    data.push([x, y]);
+}
+
+const sigmaChart = echarts.init(document.getElementById('sigmaChart'));
+
+// Sigma区间
+const sigmaIntervals = [
+    { start: mean - 1*std, end: mean + 1*std, prob: '68.27%' },
+    { start: mean - 2*std, end: mean + 2*std, prob: '95.45%' },
+    { start: mean - 3*std, end: mean + 3*std, prob: '99.73%' }
+];
+
+// 生成横向标注线 series
+const horizontalLines = sigmaIntervals.map((interval, index) => {
+    const y = 0.25 - index*0.05; // 调整横线 y 位置
+    return {
+        type: 'line',
+        data: [
+            [interval.start, y],
+            [interval.end, y]
+        ],
+        lineStyle: { color: 'green', width: 2 },
+        markLine: { show: false },
+        label: { show: false }
+    };
+});
+
+// 横向标注文字 series
+const horizontalLabels = sigmaIntervals.map((interval, index) => {
+    const y = 0.25 - index*0.05;
+    return {
+        type: 'scatter',
+        data: [{
+            value: [(interval.start + interval.end)/2, y],
+            label: { show: true, formatter: interval.prob, position: 'top', fontWeight: 'bold' }
+        }],
+        symbolSize: 0
+    };
+});
+
+const option = {
+    title: { text: 'Sigma Chart with Horizontal Markers' },
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'value', name: 'x' },
+    yAxis: { type: 'value', name: 'Probability Density' },
+    series: [
+        {
+            type: 'line',
+            smooth: true,
+            data: data,
+            name: 'Normal Distribution',
+            lineStyle: { color: '#5470c6' },
+            markLine: {
+                symbol: 'none',
+                lineStyle: { type: 'dashed', color: 'red' },
+                data: [
+                    { xAxis: mean - 1*std },
+                    { xAxis: mean + 1*std },
+                    { xAxis: mean - 2*std },
+                    { xAxis: mean + 2*std },
+                    { xAxis: mean - 3*std },
+                    { xAxis: mean + 3*std }
+                ]
+            }
+        },
+        ...horizontalLines,
+        ...horizontalLabels
+    ]
+};
+
+sigmaChart.setOption(option);
+</script>
+</body>
+</html>
+```
+
+### ✅ 特点：
+
+1. **竖线**：通过 `markLine` 绘制 ±1σ、±2σ、±3σ。
+2. **横向标注线**：绿色实线，覆盖每个 sigma 区间。
+3. **概率文字**：横向标注线中间显示，避免叠加，可自适应调整 y 值。
+4. **折线图平滑显示**，清楚展示概率密度。
+
+------
+
