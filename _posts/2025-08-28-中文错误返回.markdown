@@ -2177,3 +2177,236 @@ def create_object(request):
 
 ------
 
+以下是一个扩展后的 **PostgreSQL 异常类与错误码对照表**（50+条），结合 **Django + psycopg2** 场景，支持分类、详细注释，并提供如何在异常处理中提取表和字段信息并映射到 `verbose_name`。
+
+------
+
+## **1. 错误码分类表（50+ 条）**
+
+### **完整表格（分类 + 注释）**
+
+| 分类                         | 错误码           | 异常类                                                       | 说明 |
+| ---------------------------- | ---------------- | ------------------------------------------------------------ | ---- |
+| **唯一约束与主键冲突**       |                  |                                                              |      |
+| 23505                        | IntegrityError   | 唯一约束冲突 (Unique Violation) – 插入或更新数据时违反唯一性约束 |      |
+| 23502                        | IntegrityError   | 非空约束冲突 (Not Null Violation) – 向 `NOT NULL` 字段插入 `NULL` |      |
+| 23P01                        | IntegrityError   | 排序约束冲突 (Exclusion Violation) – 违反排除约束（如空间数据唯一性） |      |
+| **外键与引用完整性错误**     |                  |                                                              |      |
+| 23503                        | IntegrityError   | 外键约束冲突 (Foreign Key Violation) – 试图插入不存在的外键值或删除被引用的数据 |      |
+| 23514                        | IntegrityError   | 检查约束冲突 (Check Violation) – 数据不满足 CHECK 约束条件   |      |
+| **数据类型与转换错误**       |                  |                                                              |      |
+| 22P02                        | DataError        | 无效文本表示 (Invalid Text Representation) – 类型转换失败，例如字符串转整数失败 |      |
+| 22007                        | DataError        | 无效日期时间格式 (Invalid Datetime Format)                   |      |
+| 22008                        | DataError        | 日期时间超出范围 (Datetime Field Overflow)                   |      |
+| 22003                        | DataError        | 数值超出范围 (Numeric Value Out of Range)                    |      |
+| 22018                        | DataError        | 无效字符值 (Invalid Character Value for Cast)                |      |
+| **算术与数值运算错误**       |                  |                                                              |      |
+| 22012                        | DataError        | 除以零 (Division by Zero)                                    |      |
+| 2200E                        | DataError        | 数值精度丢失 (Invalid Escape Character)                      |      |
+| **语法与查询相关错误**       |                  |                                                              |      |
+| 42601                        | ProgrammingError | SQL 语法错误                                                 |      |
+| 42501                        | PermissionError  | 权限不足 (Insufficient Privilege)                            |      |
+| 42P01                        | ProgrammingError | 表不存在 (Undefined Table)                                   |      |
+| 42703                        | ProgrammingError | 列不存在 (Undefined Column)                                  |      |
+| 42602                        | ProgrammingError | 无效名称 (Invalid Name)                                      |      |
+| **事务与锁错误**             |                  |                                                              |      |
+| 40001                        | OperationalError | 序列化失败 (Serialization Failure) – 高并发下事务冲突        |      |
+| 40P01                        | OperationalError | 死锁检测 (Deadlock Detected)                                 |      |
+| 55P03                        | OperationalError | 无法获取锁 (Lock Not Available)                              |      |
+| **对象定义错误**             |                  |                                                              |      |
+| 42701                        | ProgrammingError | 重复列 (Duplicate Column)                                    |      |
+| 42P07                        | ProgrammingError | 重复表 (Duplicate Table)                                     |      |
+| 42P16                        | ProgrammingError | 无效表定义 (Invalid Table Definition)                        |      |
+| **字符串与编码错误**         |                  |                                                              |      |
+| 22021                        | DataError        | 无效字符 (Character Not In Repertoire)                       |      |
+| 22023                        | DataError        | 无效参数值 (Invalid Parameter Value)                         |      |
+| 2201X                        | DataError        | 字符串长度超出限制 (String Data Right Truncation)            |      |
+| **触发器与函数错误**         |                  |                                                              |      |
+| 2F005                        | InternalError    | 触发器协议违规 (Trigger Protocol Violated)                   |      |
+| 2F002                        | InternalError    | 触发器函数返回不正确 (Trigger Function Returned Invalid Value) |      |
+| **系统与资源错误**           |                  |                                                              |      |
+| 53100                        | OperationalError | 磁盘空间不足 (Disk Full)                                     |      |
+| 53200                        | OperationalError | 内存不足 (Out of Memory)                                     |      |
+| 53300                        | OperationalError | 过多连接 (Too Many Connections)                              |      |
+| 53400                        | OperationalError | 配置错误 (Configuration Limit Exceeded)                      |      |
+| **其他约束与数据完整性错误** |                  |                                                              |      |
+| 2201E                        | DataError        | 数组下标超出范围 (Array Subscript Error)                     |      |
+| 2200G                        | DataError        | 最小值大于最大值 (Invalid Interval)                          |      |
+| 22019                        | DataError        | 无效转义字符 (Invalid Escape Character)                      |      |
+| 2200L                        | DataError        | 不允许不确定 (Not Allowed Null)                              |      |
+| **动态 SQL 错误**            |                  |                                                              |      |
+| 07003                        | ProgrammingError | 参数数量不匹配 (Parameter Number Mismatch)                   |      |
+| 07006                        | ProgrammingError | 无效参数类型 (Invalid Parameter Type)                        |      |
+| **认证与安全错误**           |                  |                                                              |      |
+| 28P01                        | OperationalError | 用户认证失败 (Invalid Password)                              |      |
+| 28000                        | OperationalError | 用户账户未授权 (Invalid Authorization Specification)         |      |
+| **I/O 错误**                 |                  |                                                              |      |
+| 58030                        | OperationalError | 文件读取错误 (I/O Error)                                     |      |
+| 58P01                        | OperationalError | 文件不存在 (Undefined File)                                  |      |
+| 58P02                        | OperationalError | 无法访问文件 (Cannot Access File)                            |      |
+
+------
+
+## **2. 异常处理与表/字段 verbose_name 映射**
+
+### **捕获异常并提取表和字段**
+
+```python
+from django.db import IntegrityError, DataError, ProgrammingError
+from psycopg2 import errorcodes
+from psycopg2.errors import UniqueViolation, ForeignKeyViolation, NotNullViolation
+
+def handle_db_exception(exc):
+    if isinstance(exc, IntegrityError):
+        sqlstate = exc.__cause__.pgcode  # PostgreSQL 错误码
+        message = exc.__cause__.diag.message_detail  # 详细信息
+        table = exc.__cause__.diag.table_name
+        column = exc.__cause__.diag.column_name
+
+        # 通过 Django Model 元数据获取 verbose_name
+        verbose_table = verbose_column = None
+        try:
+            from django.apps import apps
+            for model in apps.get_models():
+                if model._meta.db_table == table:
+                    verbose_table = model._meta.verbose_name
+                    for f in model._meta.fields:
+                        if f.column == column:
+                            verbose_column = f.verbose_name
+                            break
+                    break
+        except Exception:
+            pass
+
+        return {
+            "error_code": sqlstate,
+            "table": verbose_table or table,
+            "column": verbose_column or column,
+            "message": message,
+        }
+    else:
+        return {"error": str(exc)}
+```
+
+### **异常处理示例**
+
+```python
+try:
+    obj.save()
+except IntegrityError as e:
+    info = handle_db_exception(e)
+    print(f"错误码: {info['error_code']}, 表: {info['table']}, 字段: {info['column']}, 信息: {info['message']}")
+```
+
+------
+
+## **3. 建议的维护方案**
+
+- 将错误码表放入单独的 `error_codes.py` 文件。
+- 提供 `get_error_description(pgcode)` 方法，快速返回错误类型与建议处理方式。
+- 定期更新 PostgreSQL 官方文档中的新错误码。
+
+------
+
+以下是 **PostgreSQL 常见异常类**（基于 `Django` 和 `psycopg2` 驱动）及其 **SQLSTATE 错误码** 对照表，并说明如何在异常处理中区分它们。
+
+------
+
+### 1. Django 异常类（封装了 psycopg2）
+
+Django 在 `django.db` 下提供了自己的数据库异常层次结构，所有数据库异常均继承自 `django.db.Error`。
+
+#### 常见异常类及含义
+
+| Django 异常类       | 对应 psycopg2 异常           | 说明                                         |
+| ------------------- | ---------------------------- | -------------------------------------------- |
+| `DatabaseError`     | `psycopg2.DatabaseError`     | 所有数据库相关错误的基类                     |
+| `DataError`         | `psycopg2.DataError`         | 数据处理错误，如数值超出范围、字符串长度超限 |
+| `OperationalError`  | `psycopg2.OperationalError`  | 连接失败、事务状态异常等                     |
+| `IntegrityError`    | `psycopg2.IntegrityError`    | 违反完整性约束，如主键、外键、唯一约束       |
+| `InternalError`     | `psycopg2.InternalError`     | 数据库内部错误                               |
+| `ProgrammingError`  | `psycopg2.ProgrammingError`  | SQL 语法错误、表不存在、列不存在等           |
+| `NotSupportedError` | `psycopg2.NotSupportedError` | 执行数据库不支持的功能                       |
+
+------
+
+### 2. PostgreSQL SQLSTATE 错误码分类
+
+PostgreSQL 提供 5 个字符的 SQLSTATE 错误码，可用于更细粒度的异常区分。
+ 示例：`psycopg2` 的异常对象包含 `pgcode` 和 `pgerror` 属性。
+
+#### 常见错误码对照表
+
+| SQLSTATE | 错误类别                         | 典型场景                         |
+| -------- | -------------------------------- | -------------------------------- |
+| `23505`  | **unique_violation**             | 唯一约束冲突（如重复插入唯一值） |
+| `23503`  | **foreign_key_violation**        | 外键约束冲突                     |
+| `23502`  | **not_null_violation**           | 非空约束被违反                   |
+| `23514`  | **check_violation**              | CHECK 约束条件不满足             |
+| `40001`  | **serialization_failure**        | 并发事务序列化失败               |
+| `40003`  | **statement_completion_unknown** | 事务状态不确定                   |
+| `08003`  | **connection_does_not_exist**    | 连接丢失                         |
+| `08006`  | **connection_failure**           | 连接失败                         |
+| `42P01`  | **undefined_table**              | 访问不存在的表                   |
+| `42703`  | **undefined_column**             | 访问不存在的列                   |
+| `42601`  | **syntax_error**                 | SQL 语法错误                     |
+
+------
+
+### 3. 异常处理中区分方式
+
+```python
+from django.db import DatabaseError, IntegrityError, DataError, OperationalError
+
+try:
+    # 数据库操作
+    MyModel.objects.create(name='test', unique_field='duplicate')
+except IntegrityError as e:
+    # 通过 SQLSTATE 错误码区分具体原因
+    if hasattr(e, 'pgcode'):
+        if e.pgcode == '23505':
+            print("唯一约束冲突")
+        elif e.pgcode == '23503':
+            print("外键约束冲突")
+    else:
+        print("其他完整性错误：", e)
+except DataError as e:
+    print("数据错误：", e.pgerror)
+except OperationalError as e:
+    print("操作错误：", e.pgerror)
+except DatabaseError as e:
+    print("通用数据库错误：", e.pgerror)
+```
+
+------
+
+### 4. 在 Django REST Framework (DRF) 中全局异常处理
+
+在 `settings.py` 中配置：
+
+```python
+REST_FRAMEWORK = {
+    'EXCEPTION_HANDLER': 'path.to.custom_exception_handler'
+}
+```
+
+实现 `custom_exception_handler`：
+
+```python
+from rest_framework.views import exception_handler
+from django.db import IntegrityError
+
+def custom_exception_handler(exc, context):
+    response = exception_handler(exc, context)
+
+    # 处理数据库异常
+    if isinstance(exc, IntegrityError):
+        if hasattr(exc, 'pgcode') and exc.pgcode == '23505':
+            return Response({'detail': '唯一约束冲突'}, status=400)
+        return Response({'detail': '数据库完整性错误'}, status=400)
+
+    return response
+```
+
+------
+
