@@ -1,0 +1,653 @@
+---
+layout:     post
+title:      "正态分布测试"
+subtitle:   ""
+date:       2025-09-07
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - 学习模型
+---
+
+# 如何验证一组数据是否符合“σ（sigma）正态分布”规则（实用指南）
+
+下面给出一套清晰的、可复用的步骤——既有直观可视化，也有定量检验，并附带 Python 实用函数。主要思路是同时检查**经验规则（68–95–99.7%）\**与\**统计检验/图形诊断**，因为单一方法容易误导。
+
+------
+
+## 1) 快速数值检查（均值 / 标准差 / z-score /经验比例）
+
+计算样本均值 `μ` 和标准差 `σ`，然后统计数据落在区间 `μ±1σ`、`μ±2σ`、`μ±3σ` 的比例，和理论比例对比：
+
+- 理论（正态分布）：
+  - ±1σ ≈ 68.27%
+  - ±2σ ≈ 95.45%
+  - ±3σ ≈ 99.73%
+
+**判断参考（经验）**：若实测比例接近理论值（例如在 ±3% 或 ±5% 的容差内），说明与正态相符；若差异很大，则可能不是正态。
+
+------
+
+## 2) 可视化诊断（必做）
+
+- **直方图 + 拟合正态曲线**：观察形状（对称性、尾部）。
+- **Q–Q 图（Quantile-Quantile plot）**：若点接近对角线，说明接近正态；系统性偏离表明偏斜或厚/薄尾。
+- **箱线图** 可以帮助查看异常值。
+
+可视化通常比单个 p 值更有信息量。
+
+------
+
+## 3) 统计检验（定量）
+
+- **Shapiro–Wilk 检验**（`scipy.stats.shapiro`）：对小/中样本（例如 n < 5000）很常用。`p > 0.05` 通常表示不能拒绝正态性（即“看起来像正态”）。
+- **Anderson–Darling 检验**（`scipy.stats.anderson`）：给出更敏感的偏差检测，返回统计量并有显著性表格。
+- **Kolmogorov–Smirnov 检验（对比正态）**：在用于比较总体和指定分布时要谨慎（参数需用样本估计时临界值改变）。
+- 注意：当样本量很大时（例如 n 很大），微小偏差会导致检验显著（拒绝正态性），因此需结合可视化与实际应用场景判断。
+
+------
+
+## 4) 其他指标
+
+- **偏度（skewness）** 和 **峰度（kurtosis）**：正态分布的偏度≈0，峰度≈3（常用 excess kurtosis = kurtosis-3）。显著偏离表明不是正态。
+- **离群点检测**：若少数极端值影响整体分布，考虑先处理或报告。
+
+------
+
+## 5) 实用 Python 函数（可直接运行）
+
+```python
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy import stats
+
+def check_sigma_distribution(arr, plot=True, tolerance_pct=5.0):
+    """
+    输入: 一维数组或 pandas Series
+    输出: 一个字典报告 + 可选图形
+    tolerance_pct: 用于经验规则比较的容差（百分比，例如5%）
+    """
+    x = np.asarray(arr).astype(float)
+    x = x[~np.isnan(x)]
+    n = x.size
+    mu = x.mean()
+    sigma = x.std(ddof=1)  # 样本标准差
+
+    # empirical proportions
+    within_1 = np.mean((x >= mu - sigma) & (x <= mu + sigma)) * 100
+    within_2 = np.mean((x >= mu - 2*sigma) & (x <= mu + 2*sigma)) * 100
+    within_3 = np.mean((x >= mu - 3*sigma) & (x <= mu + 3*sigma)) * 100
+
+    empirical = {'±1σ': within_1, '±2σ': within_2, '±3σ': within_3}
+    theoretical = {'±1σ': 68.27, '±2σ': 95.45, '±3σ': 99.73}
+    diffs = {k: empirical[k] - theoretical[k] for k in empirical}
+
+    # statistical tests
+    sw_stat, sw_p = (None, None)
+    if n >= 3 and n <= 5000:
+        sw_stat, sw_p = stats.shapiro(x)
+    ad_result = stats.anderson(x, dist='norm')  # returns statistic + critical values
+
+    skew = stats.skew(x)
+    kurt = stats.kurtosis(x, fisher=False)  # Pearson's definition (≈3 for normal)
+    excess_kurtosis = kurt - 3.0
+
+    report = {
+        'n': n, 'mean': mu, 'std_sample': sigma,
+        'empirical_pct': empirical, 'theoretical_pct': theoretical, 'diffs_pct': diffs,
+        'skewness': skew, 'kurtosis': kurt, 'excess_kurtosis': excess_kurtosis,
+        'shapiro': {'stat': sw_stat, 'p': sw_p} if sw_stat is not None else 'skipped (n out of range)',
+        'anderson': {'stat': ad_result.statistic, 'critical_values': ad_result.critical_values, 'significance_level': ad_result.significance_level}
+    }
+
+    # simple rule of thumb decision (heuristic)
+    within_tolerance = all(abs(diffs[k]) <= tolerance_pct for k in diffs)
+    normality_hint = {
+        'empirical_rule_ok': within_tolerance,
+        'shapiro_pass': (sw_p is not None and sw_p > 0.05),
+        'anderson_stat': ad_result.statistic  # lower is better
+    }
+    report['hint'] = normality_hint
+
+    if plot:
+        # histogram + normal pdf
+        plt.figure(figsize=(10,4))
+        plt.subplot(1,2,1)
+        count, bins, _ = plt.hist(x, bins='auto', density=True, alpha=0.6)
+        # plot normal pdf
+        xs = np.linspace(x.min(), x.max(), 200)
+        plt.plot(xs, stats.norm.pdf(xs, mu, sigma), linewidth=2)
+        plt.title('Histogram & fitted normal')
+
+        # Q-Q plot
+        plt.subplot(1,2,2)
+        stats.probplot(x, dist="norm", sparams=(mu, sigma), plot=plt)
+        plt.title('Q-Q plot')
+        plt.tight_layout()
+        plt.show()
+
+    return report
+
+# 使用示例:
+# data = pd.Series(...) 或 numpy array
+# r = check_sigma_distribution(data)
+# print(r)
+```
+
+------
+
+## 6) 实用建议 / 决策流程
+
+1. 先用直方图与 Q–Q 图观察总体形状。
+2. 计算 ±1/2/3σ 的经验比例，看是否偏离太多。
+3. 根据样本大小用 Shapiro 或 AD 检验（并解读 p 值和统计量）。
+4. 如果轻微偏差但业务不敏感 —— 可以当作“近似正态”；若精确分布很关键（例如统计推断假设），则不要将其视为正态，考虑非参数方法或变换（对数、Box–Cox）。
+5. 对于明显偏斜或厚尾：考虑去极值、对数/根号变换或使用更稳健的分布建模（如 t 分布、对数正态等）。
+
+------
+
+## 7) 注意事项
+
+- **样本量影响检验**：小样本检验力低（难以发现偏差）；大样本会把微小偏差检测为显著。始终结合图形判断。
+- **独立同分布假设**：σ 规则基于独立样本，若数据有时间序列相关性（自相关）或分组差异，需先处理依赖性/分层。
+- **缺失值/极端值**：先审视并决定是否清洗或特别标注。
+
+------
+
+明白✅
+
+如果你想**用一个核心指标来判断数据是否近似正态分布**，最常见的做法是使用 **Shapiro–Wilk 检验的 p 值**，因为它专门针对正态性。
+
+规则很简单：
+
+- **p > 0.05** → 不能拒绝正态性（数据看起来符合正态分布）
+- **p ≤ 0.05** → 拒绝正态性（数据显著偏离正态分布）
+
+------
+
+### Python 代码示例
+
+```python
+import numpy as np
+from scipy import stats
+
+def is_normal(data, alpha=0.05):
+    """
+    使用 Shapiro-Wilk 检验判断数据是否符合正态分布
+    :param data: list 或 numpy array
+    :param alpha: 显著性水平，默认0.05
+    :return: (是否正态, p值)
+    """
+    data = np.asarray(data).astype(float)
+    data = data[~np.isnan(data)]  # 去掉 NaN
+    
+    stat, p = stats.shapiro(data)
+    return (p > alpha, p)
+
+# 示例
+data1 = np.random.normal(0, 1, 500)  # 正态分布
+data2 = np.random.exponential(1, 500)  # 非正态分布
+
+print("data1:", is_normal(data1))
+print("data2:", is_normal(data2))
+```
+
+------
+
+### 输出示例
+
+```
+data1: (True, 0.31)   # p=0.31 > 0.05 → 符合正态分布
+data2: (False, 1.2e-12)  # p≈0 → 显著不符合正态分布
+```
+
+------
+
+好的✅
+ 我给你写一个**通用函数**，可以通过参数选择不同的判断指标，返回 **True/False** 是否为正态分布，并附带 p 值或统计量，方便参考。
+
+------
+
+## 代码示例
+
+```python
+import numpy as np
+from scipy import stats
+
+def is_normal(data, method="shapiro", alpha=0.05):
+    """
+    判断数据是否符合正态分布
+    
+    :param data: list 或 numpy array
+    :param method: 检验方法，可选：
+                   - "shapiro" (Shapiro-Wilk)
+                   - "anderson" (Anderson-Darling)
+                   - "kstest" (Kolmogorov-Smirnov, 与拟合的正态分布比较)
+                   - "skewkurtosis" (基于偏度+峰度的Z检验)
+    :param alpha: 显著性水平，默认 0.05
+    :return: (是否正态, 统计信息)
+    """
+    data = np.asarray(data).astype(float)
+    data = data[~np.isnan(data)]  # 去掉 NaN
+    n = len(data)
+
+    if method == "shapiro":
+        stat, p = stats.shapiro(data)
+        return (p > alpha, {"method": "Shapiro-Wilk", "stat": stat, "p": p})
+
+    elif method == "anderson":
+        result = stats.anderson(data, dist="norm")
+        # 如果统计量 < 临界值，则认为近似正态
+        is_norm = result.statistic < result.critical_values[list(result.significance_level).index(int(alpha*100))]
+        return (is_norm, {"method": "Anderson-Darling", "stat": result.statistic,
+                          "critical_values": result.critical_values,
+                          "significance_level": result.significance_level})
+
+    elif method == "kstest":
+        mu, sigma = np.mean(data), np.std(data, ddof=1)
+        stat, p = stats.kstest(data, "norm", args=(mu, sigma))
+        return (p > alpha, {"method": "Kolmogorov-Smirnov", "stat": stat, "p": p})
+
+    elif method == "skewkurtosis":
+        # 偏度与峰度的Z检验
+        skew, skew_p = stats.skewtest(data)
+        kurt, kurt_p = stats.kurtosistest(data)
+        is_norm = (skew_p > alpha) and (kurt_p > alpha)
+        return (is_norm, {"method": "Skewness-Kurtosis",
+                          "skew_stat": skew, "skew_p": skew_p,
+                          "kurt_stat": kurt, "kurt_p": kurt_p})
+
+    else:
+        raise ValueError("method 参数必须是 'shapiro'、'anderson'、'kstest' 或 'skewkurtosis'")
+
+# ---------------- 示例 ----------------
+if __name__ == "__main__":
+    np.random.seed(0)
+    data_norm = np.random.normal(0, 1, 500)
+    data_non_norm = np.random.exponential(1, 500)
+
+    for method in ["shapiro", "anderson", "kstest", "skewkurtosis"]:
+        print(f"方法: {method}")
+        print("正态数据:", is_normal(data_norm, method))
+        print("非正态数据:", is_normal(data_non_norm, method))
+        print("------")
+```
+
+------
+
+## 说明
+
+- `shapiro`：适合小中样本，常用默认方法。
+- `anderson`：返回多个显著性水平下的判断，更严格。
+- `kstest`：基于样本均值和方差拟合正态分布，再做 K-S 检验。
+- `skewkurtosis`：偏度+峰度联合检验，快速直观。
+
+------
+
+好的✅ 我帮你封装一个 **综合判断函数**，它会自动跑 **Shapiro-Wilk、Anderson-Darling、K-S 检验、偏度-峰度检验** 四种方法，然后给出每个方法的结果，并汇总一个“多数投票”的综合结论。
+
+------
+
+## 代码示例
+
+```python
+import numpy as np
+from scipy import stats
+
+def check_normality(data, alpha=0.05):
+    """
+    综合判断数据是否符合正态分布
+    
+    :param data: list 或 numpy array
+    :param alpha: 显著性水平，默认 0.05
+    :return: dict，包含各方法结果 + 综合结论
+    """
+    data = np.asarray(data).astype(float)
+    data = data[~np.isnan(data)]  # 去掉 NaN
+    n = len(data)
+    
+    results = {}
+
+    # 1. Shapiro-Wilk
+    if 3 <= n <= 5000:  # 超过5000会报错
+        stat, p = stats.shapiro(data)
+        results["shapiro"] = {"is_normal": p > alpha, "stat": stat, "p": p}
+    else:
+        results["shapiro"] = {"is_normal": None, "stat": None, "p": None, "note": "样本量超出Shapiro适用范围"}
+
+    # 2. Anderson-Darling
+    ad_result = stats.anderson(data, dist="norm")
+    crit_dict = dict(zip(ad_result.significance_level, ad_result.critical_values))
+    crit_value = crit_dict.get(int(alpha * 100), ad_result.critical_values[2])  # 找最近的水平
+    is_norm_ad = ad_result.statistic < crit_value
+    results["anderson"] = {
+        "is_normal": is_norm_ad,
+        "stat": ad_result.statistic,
+        "critical_value": crit_value
+    }
+
+    # 3. Kolmogorov-Smirnov
+    mu, sigma = np.mean(data), np.std(data, ddof=1)
+    stat, p = stats.kstest(data, "norm", args=(mu, sigma))
+    results["kstest"] = {"is_normal": p > alpha, "stat": stat, "p": p}
+
+    # 4. Skewness & Kurtosis 检验
+    skew_stat, skew_p = stats.skewtest(data)
+    kurt_stat, kurt_p = stats.kurtosistest(data)
+    is_norm_sk = (skew_p > alpha) and (kurt_p > alpha)
+    results["skewkurtosis"] = {
+        "is_normal": is_norm_sk,
+        "skew_stat": skew_stat, "skew_p": skew_p,
+        "kurt_stat": kurt_stat, "kurt_p": kurt_p
+    }
+
+    # 综合结论（投票法，排除 None）
+    votes = [res["is_normal"] for res in results.values() if res["is_normal"] is not None]
+    if len(votes) > 0:
+        final_decision = votes.count(True) >= votes.count(False)
+    else:
+        final_decision = None
+
+    return {
+        "methods": results,
+        "final_decision": final_decision
+    }
+
+
+# ---------------- 示例 ----------------
+if __name__ == "__main__":
+    np.random.seed(0)
+    data_norm = np.random.normal(0, 1, 500)
+    data_non_norm = np.random.exponential(1, 500)
+
+    print("正态数据结果:")
+    print(check_normality(data_norm))
+
+    print("\n非正态数据结果:")
+    print(check_normality(data_non_norm))
+```
+
+------
+
+## 输出示例（简化）
+
+```python
+正态数据结果:
+{
+  'methods': {
+    'shapiro': {'is_normal': True, 'stat': 0.998, 'p': 0.64},
+    'anderson': {'is_normal': True, 'stat': 0.29, 'critical_value': 0.74},
+    'kstest': {'is_normal': True, 'stat': 0.03, 'p': 0.56},
+    'skewkurtosis': {'is_normal': True, 'skew_stat': 0.12, 'skew_p': 0.90, 'kurt_stat': 0.33, 'kurt_p': 0.74}
+  },
+  'final_decision': True
+}
+
+非正态数据结果:
+{
+  'methods': {
+    'shapiro': {'is_normal': False, 'stat': 0.81, 'p': 1.2e-12},
+    'anderson': {'is_normal': False, 'stat': 7.25, 'critical_value': 0.74},
+    'kstest': {'is_normal': False, 'stat': 0.28, 'p': 1.3e-15},
+    'skewkurtosis': {'is_normal': False, 'skew_stat': 12.1, 'skew_p': 0.0, 'kurt_stat': 8.3, 'kurt_p': 0.0}
+  },
+  'final_decision': False
+}
+```
+
+------
+
+这样你就能一行调用，自动跑 4 种方法，最后看 `final_decision` 就行。
+
+👌 那我帮你把**可视化**整合进去：在综合检验时，可以画出
+
+1. **直方图 + 拟合正态曲线**
+2. **Q–Q 图**（分位数-分位数图）
+
+这样你既有数值判断（四种方法 + 投票结论），又有图形直观验证。
+
+------
+
+## 完整代码（带可视化）
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import stats
+
+def check_normality(data, alpha=0.05, plot=True):
+    """
+    综合判断数据是否符合正态分布，并可视化
+    
+    :param data: list 或 numpy array
+    :param alpha: 显著性水平
+    :param plot: 是否绘制图形
+    :return: dict，包含各方法结果 + 综合结论
+    """
+    data = np.asarray(data).astype(float)
+    data = data[~np.isnan(data)]  # 去掉 NaN
+    n = len(data)
+    
+    results = {}
+
+    # 1. Shapiro-Wilk
+    if 3 <= n <= 5000:  # 超过5000会报错
+        stat, p = stats.shapiro(data)
+        results["shapiro"] = {"is_normal": p > alpha, "stat": stat, "p": p}
+    else:
+        results["shapiro"] = {"is_normal": None, "note": "样本量超出Shapiro适用范围"}
+
+    # 2. Anderson-Darling
+    ad_result = stats.anderson(data, dist="norm")
+    crit_dict = dict(zip(ad_result.significance_level, ad_result.critical_values))
+    crit_value = crit_dict.get(int(alpha * 100), ad_result.critical_values[2])  # 找最近水平
+    is_norm_ad = ad_result.statistic < crit_value
+    results["anderson"] = {
+        "is_normal": is_norm_ad,
+        "stat": ad_result.statistic,
+        "critical_value": crit_value
+    }
+
+    # 3. Kolmogorov-Smirnov
+    mu, sigma = np.mean(data), np.std(data, ddof=1)
+    stat, p = stats.kstest(data, "norm", args=(mu, sigma))
+    results["kstest"] = {"is_normal": p > alpha, "stat": stat, "p": p}
+
+    # 4. Skewness & Kurtosis
+    skew_stat, skew_p = stats.skewtest(data)
+    kurt_stat, kurt_p = stats.kurtosistest(data)
+    is_norm_sk = (skew_p > alpha) and (kurt_p > alpha)
+    results["skewkurtosis"] = {
+        "is_normal": is_norm_sk,
+        "skew_stat": skew_stat, "skew_p": skew_p,
+        "kurt_stat": kurt_stat, "kurt_p": kurt_p
+    }
+
+    # 综合结论（投票法，排除 None）
+    votes = [res["is_normal"] for res in results.values() if res["is_normal"] is not None]
+    if len(votes) > 0:
+        final_decision = votes.count(True) >= votes.count(False)
+    else:
+        final_decision = None
+
+    report = {"methods": results, "final_decision": final_decision}
+
+    # ---------- 可视化 ----------
+    if plot:
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+        # 直方图 + 正态拟合曲线
+        axes[0].hist(data, bins="auto", density=True, alpha=0.6, color="skyblue", edgecolor="black")
+        xs = np.linspace(data.min(), data.max(), 200)
+        axes[0].plot(xs, stats.norm.pdf(xs, mu, sigma), 'r-', lw=2)
+        axes[0].set_title("直方图 + 正态拟合曲线")
+
+        # Q-Q 图
+        stats.probplot(data, dist="norm", plot=axes[1])
+        axes[1].set_title("Q-Q 图")
+
+        plt.tight_layout()
+        plt.show()
+
+    return report
+
+
+# ---------------- 示例 ----------------
+if __name__ == "__main__":
+    np.random.seed(0)
+    data_norm = np.random.normal(0, 1, 500)   # 正态数据
+    data_non_norm = np.random.exponential(1, 500)  # 非正态数据
+
+    print("正态数据结果:")
+    print(check_normality(data_norm, plot=True))
+
+    print("\n非正态数据结果:")
+    print(check_normality(data_non_norm, plot=True))
+```
+
+------
+
+## 使用效果
+
+- **打印输出**：每个方法的结果（是否正态、统计量、p 值等）+ 综合结论 `final_decision`。
+- **绘图**：
+  - 左边：数据直方图 + 拟合的正态曲线
+  - 右边：Q-Q 图（点越贴近对角线，越符合正态）
+
+------
+
+👌 那我在上面的综合函数里加上 **经验 68–95–99.7% 检查**，也就是统计数据落在 `μ±1σ、μ±2σ、μ±3σ` 区间的比例，并和理论值做对比。
+
+这样你就能同时看到：
+
+- 四种统计检验结果
+- 综合结论（投票）
+- Sigma Rule（经验法则）的比例情况
+- 可视化结果
+
+------
+
+## 完整代码（带 Sigma Rule 检查）
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import stats
+
+def check_normality(data, alpha=0.05, plot=True):
+    """
+    综合判断数据是否符合正态分布（多种方法 + Sigma Rule + 可视化）
+    
+    :param data: list 或 numpy array
+    :param alpha: 显著性水平
+    :param plot: 是否绘制图形
+    :return: dict，包含各方法结果 + Sigma Rule + 综合结论
+    """
+    data = np.asarray(data).astype(float)
+    data = data[~np.isnan(data)]  # 去掉 NaN
+    n = len(data)
+    
+    results = {}
+
+    # 1. Shapiro-Wilk
+    if 3 <= n <= 5000:  # 超过5000会报错
+        stat, p = stats.shapiro(data)
+        results["shapiro"] = {"is_normal": p > alpha, "stat": stat, "p": p}
+    else:
+        results["shapiro"] = {"is_normal": None, "note": "样本量超出Shapiro适用范围"}
+
+    # 2. Anderson-Darling
+    ad_result = stats.anderson(data, dist="norm")
+    crit_dict = dict(zip(ad_result.significance_level, ad_result.critical_values))
+    crit_value = crit_dict.get(int(alpha * 100), ad_result.critical_values[2])  # 找最近水平
+    is_norm_ad = ad_result.statistic < crit_value
+    results["anderson"] = {
+        "is_normal": is_norm_ad,
+        "stat": ad_result.statistic,
+        "critical_value": crit_value
+    }
+
+    # 3. Kolmogorov-Smirnov
+    mu, sigma = np.mean(data), np.std(data, ddof=1)
+    stat, p = stats.kstest(data, "norm", args=(mu, sigma))
+    results["kstest"] = {"is_normal": p > alpha, "stat": stat, "p": p}
+
+    # 4. Skewness & Kurtosis
+    skew_stat, skew_p = stats.skewtest(data)
+    kurt_stat, kurt_p = stats.kurtosistest(data)
+    is_norm_sk = (skew_p > alpha) and (kurt_p > alpha)
+    results["skewkurtosis"] = {
+        "is_normal": is_norm_sk,
+        "skew_stat": skew_stat, "skew_p": skew_p,
+        "kurt_stat": kurt_stat, "kurt_p": kurt_p
+    }
+
+    # 5. Sigma Rule 检查
+    within_1 = np.mean((data >= mu - sigma) & (data <= mu + sigma)) * 100
+    within_2 = np.mean((data >= mu - 2*sigma) & (data <= mu + 2*sigma)) * 100
+    within_3 = np.mean((data >= mu - 3*sigma) & (data <= mu + 3*sigma)) * 100
+
+    sigma_rule = {
+        "empirical": {"±1σ": within_1, "±2σ": within_2, "±3σ": within_3},
+        "theoretical": {"±1σ": 68.27, "±2σ": 95.45, "±3σ": 99.73}
+    }
+
+    # 综合结论（投票法，排除 None）
+    votes = [res["is_normal"] for res in results.values() if res["is_normal"] is not None]
+    if len(votes) > 0:
+        final_decision = votes.count(True) >= votes.count(False)
+    else:
+        final_decision = None
+
+    report = {"methods": results, "sigma_rule": sigma_rule, "final_decision": final_decision}
+
+    # ---------- 可视化 ----------
+    if plot:
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+        # 直方图 + 正态拟合曲线
+        axes[0].hist(data, bins="auto", density=True, alpha=0.6, color="skyblue", edgecolor="black")
+        xs = np.linspace(data.min(), data.max(), 200)
+        axes[0].plot(xs, stats.norm.pdf(xs, mu, sigma), 'r-', lw=2)
+        axes[0].set_title("直方图 + 正态拟合曲线")
+
+        # Q-Q 图
+        stats.probplot(data, dist="norm", plot=axes[1])
+        axes[1].set_title("Q-Q 图")
+
+        plt.tight_layout()
+        plt.show()
+
+    return report
+
+
+# ---------------- 示例 ----------------
+if __name__ == "__main__":
+    np.random.seed(0)
+    data_norm = np.random.normal(0, 1, 500)   # 正态数据
+    data_non_norm = np.random.exponential(1, 500)  # 非正态数据
+
+    print("正态数据结果:")
+    print(check_normality(data_norm, plot=True))
+
+    print("\n非正态数据结果:")
+    print(check_normality(data_non_norm, plot=True))
+```
+
+------
+
+## 输出示例（部分）
+
+```python
+"final_decision": True,
+"sigma_rule": {
+  "empirical": {"±1σ": 67.8, "±2σ": 95.0, "±3σ": 99.4},
+  "theoretical": {"±1σ": 68.27, "±2σ": 95.45, "±3σ": 99.73}
+}
+```
+
+这样就能看到经验比例和理论值的对比。
+
+------
+
