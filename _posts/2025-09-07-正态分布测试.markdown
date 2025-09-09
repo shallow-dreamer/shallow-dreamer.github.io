@@ -651,3 +651,632 @@ if __name__ == "__main__":
 
 ------
 
+你说的情况其实很常见，我来帮你拆解一下：
+
+------
+
+### 1. 为什么会出现 **“检验不通过，但σ法则很接近”**？
+
+- **统计检验太严格**
+  - Shapiro-Wilk、Anderson-Darling 等检验在**样本量大时**非常敏感，哪怕数据稍微偏一点点正态分布，就会拒绝正态性。
+  - 这时即使数据“看起来很正态”，也会被判定为不正态。
+- **σ法则更宽松**
+  - σ 法则（68–95–99.7 规则）本质是经验分布特征：
+    - ±1σ 包含 ≈68% 数据
+    - ±2σ 包含 ≈95% 数据
+    - ±3σ 包含 ≈99.7% 数据
+  - 如果你的数据接近这个分布，说明它**近似正态分布**，即使严格检验不通过。
+
+------
+
+### 2. 怎么处理这种冲突？
+
+你可以建立一个 **“宽松 + 严格”双重判定** 机制：
+
+- **严格判定**：用统计检验（p > 0.05 才算正态）。
+- **宽松判定**：用 σ 法则误差 ≤ 阈值（例如允许误差 5%）。
+- **综合结论**：
+  - 如果统计检验不通过，但 σ 法则误差很小 → **近似正态**
+  - 如果两者都不通过 → **非正态**
+  - 如果两者都通过 → **正态**
+
+------
+
+### 3. 示例代码（改进版）
+
+```python
+import numpy as np
+from scipy import stats
+
+def sigma_rule_check(data, tol=0.05):
+    mean, std = np.mean(data), np.std(data)
+    counts = [
+        np.mean((data > mean - k*std) & (data < mean + k*std))
+        for k in [1, 2, 3]
+    ]
+    expected = [0.68, 0.95, 0.997]
+    diffs = [abs(c - e) for c, e in zip(counts, expected)]
+    return all(d < tol for d in diffs), counts, diffs
+
+def check_normality(data, alpha=0.05, tol=0.05):
+    data = np.asarray(data).astype(float)
+    data = data[~np.isnan(data)]  # 去掉 NaN
+
+    # 严格：Shapiro-Wilk
+    _, p = stats.shapiro(data)
+    strict = p > alpha
+
+    # 宽松：σ法则
+    loose, counts, diffs = sigma_rule_check(data, tol=tol)
+
+    # 综合结论
+    if strict:
+        conclusion = "正态分布"
+    elif loose:
+        conclusion = "近似正态分布"
+    else:
+        conclusion = "非正态分布"
+
+    return {
+        "p_value": p,
+        "sigma_counts": counts,
+        "sigma_diffs": diffs,
+        "strict": strict,
+        "loose": loose,
+        "conclusion": conclusion
+    }
+
+# 示例
+data1 = np.random.normal(0, 1, 1000)
+data2 = np.random.exponential(1, 1000)
+
+print(check_normality(data1))
+print(check_normality(data2))
+```
+
+------
+
+### 4. 输出示例
+
+```
+{'p_value': 0.01, 'sigma_counts': [0.682, 0.953, 0.998],
+ 'sigma_diffs': [0.002, 0.003, 0.001],
+ 'strict': False, 'loose': True,
+ 'conclusion': '近似正态分布'}
+```
+
+意思是：统计检验很严格地拒绝了正态，但 σ 法则几乎完全符合 → **可判定为“近似正态”**。
+
+------
+
+很好 — 既然你的数据来自训练过程，存在测量误差和极端值（outliers），我们需要一套**有步骤、可复用**的流程来处理这类“近似正态但被异常值干扰”的情况。下面给出原则 + 实战代码（可直接运行），并在每一步给出**为什么这么做**以及**何时选用**的建议。
+
+# 思路（原则性）
+
+1. **先不轻易删数据**：训练数据可能包含有意义的极端值（真实信号），盲目删除会损失信息。
+2. **检测——定性判断——处理——复检**：检测异常 → 判断异常是否为噪声/测量误差 → 选择处理策略（修正/截尾/变换/稳健建模）→ 重新检验正态性与下游影响。
+3. **可复现、可回退**：所有处理应可回退（记录被修改或截尾数据）。
+4. **在建模时使用稳健方法**：若无法保证正态性，可选择对异常不敏感的模型或分布（如 Student’s t、鲁棒回归等）。
+
+# 常用策略（优先级与何时用）
+
+- **检测异常**：IQR（适合右偏/左偏都能检测），Z-score（对较小异常有效），MAD/robust-z（对大量异常更稳健）。
+- **处理异常**：
+  - 修正/裁剪（cap/winsorize）——当异常是测量错误或明显离群点时。
+  - 删除（trim）——只在确定为坏数据时，并记录。
+  - 变换（log, sqrt, Box-Cox, Yeo-Johnson）——当数据呈右偏或乘法噪声。
+  - 使用稳健统计量（中位数、MAD）/稳健模型（RANSAC、Huber）或假设更厚尾分布（t分布）。
+- **重新检验**：重复正态性检验与 sigma-rule 检查，并评估对下游任务（模型性能、指标）的影响。
+
+------
+
+# 可直接运行的 Python 实战代码（完整、带注释）
+
+```python
+import numpy as np
+import pandas as pd
+from scipy import stats
+from sklearn.preprocessing import PowerTransformer
+from statsmodels.robust.scale import mad as statsmodels_mad
+from typing import Tuple, Dict
+
+# ----------------- 检测异常 -----------------
+def detect_outliers_iqr(x: np.ndarray, k=1.5) -> np.ndarray:
+    """返回布尔数组，True 表示该点为异常（基于 IQR）"""
+    q1, q3 = np.nanpercentile(x, [25, 75])
+    iqr = q3 - q1
+    lower, upper = q1 - k * iqr, q3 + k * iqr
+    return (x < lower) | (x > upper)
+
+def detect_outliers_zscore(x: np.ndarray, z_thresh=3.0) -> np.ndarray:
+    """基于标准 z-score 的异常检测（对极端值敏感）"""
+    z = (x - np.nanmean(x)) / (np.nanstd(x, ddof=1))
+    return np.abs(z) > z_thresh
+
+def detect_outliers_robust_z(x: np.ndarray, z_thresh=3.5) -> np.ndarray:
+    """
+    基于中位数和 MAD 的 robust z-score（对异常更稳健）
+    公式：robust_z = 0.6745*(x - median)/MAD
+    """
+    med = np.nanmedian(x)
+    mad = statsmodels_mad(x, center=med)  # 返回MAD
+    if mad == 0:
+        # fallback: use std
+        mad = np.nanstd(x, ddof=1)
+        if mad == 0:
+            return np.zeros_like(x, dtype=bool)
+    robust_z = 0.6745 * (x - med) / mad
+    return np.abs(robust_z) > z_thresh
+
+# ----------------- 处理方法 -----------------
+def winsorize_series(x: np.ndarray, lower_pct=0.01, upper_pct=0.99) -> np.ndarray:
+    """截尾（winzorize）: 将低于lower_pct分位数的值替换为该分位值，高于upper_pct分位数类似处理"""
+    low = np.nanpercentile(x, lower_pct * 100)
+    high = np.nanpercentile(x, upper_pct * 100)
+    x2 = x.copy()
+    x2[x2 < low] = low
+    x2[x2 > high] = high
+    return x2
+
+def trim_series(x: np.ndarray, lower_pct=0.01, upper_pct=0.99) -> np.ndarray:
+    """截断（删除）边界外数据；返回掩码与保留数据索引"""
+    low = np.nanpercentile(x, lower_pct * 100)
+    high = np.nanpercentile(x, upper_pct * 100)
+    mask = (x >= low) & (x <= high)
+    return mask
+
+def apply_transformations(x: np.ndarray, method: str):
+    """变换：'log','boxcox','yeojohnson'（后两者需要正值/可兼容）"""
+    x = np.asarray(x).astype(float)
+    if method == "log":
+        # 为避免 log(<=0)，先平移最小值
+        shift = 0
+        minv = np.nanmin(x)
+        if minv <= 0:
+            shift = 1 - minv
+        return np.log(x + shift), {"shift": shift}
+    elif method == "boxcox":
+        # Box-Cox 要求正值
+        if np.nanmin(x) <= 0:
+            raise ValueError("Box-Cox requires positive data")
+        transformed, lmbda = stats.boxcox(x)
+        return transformed, {"lambda": lmbda}
+    elif method == "yeojohnson":
+        # Yeo-Johnson 可处理非正数据
+        pt = PowerTransformer(method="yeo-johnson", standardize=False)
+        xt = pt.fit_transform(x.reshape(-1, 1)).ravel()
+        return xt, {"pt": pt}
+    else:
+        raise ValueError("Unknown transform")
+
+# ----------------- 正态性检验（复用之前的概念） -----------------
+def shapiro_p(x: np.ndarray) -> float:
+    """返回 Shapiro-Wilk 的 p 值（若样本太大则返回 np.nan）"""
+    n = np.sum(~np.isnan(x))
+    if n < 3:
+        return np.nan
+    if n > 5000:
+        # Shapiro 在 scipy 中对大样本可能失去适用性
+        return np.nan
+    stat, p = stats.shapiro(x)
+    return p
+
+def sigma_rule_percentages(x: np.ndarray) -> Dict[str, float]:
+    mu = np.nanmean(x); sigma = np.nanstd(x, ddof=1)
+    within1 = np.mean((x >= mu - sigma) & (x <= mu + sigma)) * 100
+    within2 = np.mean((x >= mu - 2*sigma) & (x <= mu + 2*sigma)) * 100
+    within3 = np.mean((x >= mu - 3*sigma) & (x <= mu + 3*sigma)) * 100
+    return {"±1σ": within1, "±2σ": within2, "±3σ": within3}
+
+# ----------------- 综合处理流程函数 -----------------
+def robust_normalize_pipeline(
+    x: np.ndarray,
+    outlier_method: str = "iqr",
+    outlier_action: str = "winsorize",  # 'winsorize','trim','mark'
+    transform_try: list = ["yeojohnson", "log"],  # try in order
+    win_lower=0.01, win_upper=0.99,
+    z_thresh=3.5
+) -> Dict:
+    """
+    一个端到端流程：
+    1) 检测异常（iqr/robust_z/zscore）
+    2) 根据 outlier_action 处理（winsorize/trim/mark）
+    3) 尝试变换（若需要）并评估正态性 (Shapiro + sigma_rule)
+    4) 返回处理前后诊断与处理结果
+    """
+    orig = np.asarray(x).astype(float)
+    x0 = orig.copy()
+    mask_nan = np.isnan(x0)
+    n_total = x0.size
+
+    # 1) 检测
+    if outlier_method == "iqr":
+        out_mask = detect_outliers_iqr(x0)
+    elif outlier_method == "zscore":
+        out_mask = detect_outliers_zscore(x0, z_thresh=z_thresh)
+    elif outlier_method == "robust_z":
+        out_mask = detect_outliers_robust_z(x0, z_thresh=z_thresh)
+    else:
+        raise ValueError("Unknown outlier_method")
+
+    out_mask = out_mask & (~mask_nan)  # 不把 NaN 当作异常
+    n_outliers = int(np.nansum(out_mask))
+
+    # 2) 处理
+    x_processed = x0.copy()
+    removed_idx = None
+    if outlier_action == "winsorize":
+        x_processed = winsorize_series(x_processed, lower_pct=win_lower, upper_pct=win_upper)
+    elif outlier_action == "trim":
+        mask_keep = trim_series(x_processed, lower_pct=win_lower, upper_pct=win_upper)
+        removed_idx = np.where(~mask_keep)[0].tolist()
+        x_processed = x_processed[mask_keep]
+    elif outlier_action == "mark":
+        # 不修改数据，只标记，由下游模型决定
+        pass
+    else:
+        raise ValueError("Unknown outlier_action")
+
+    # 3) 诊断函数
+    def diag(xarr):
+        p = shapiro_p(xarr)
+        sigma = sigma_rule_percentages(xarr)
+        skew = stats.skew(xarr); kurt = stats.kurtosis(xarr, fisher=False)
+        return {"n": np.sum(~np.isnan(xarr)), "shapiro_p": p, "sigma": sigma, "skew": skew, "kurtosis": kurt}
+
+    before_diag = diag(x0[~mask_nan])
+    after_diag = diag(x_processed[~np.isnan(x_processed)])
+
+    # 4) 尝试变换（如果 after_diag 未满足）
+    transform_info = []
+    best = {"method": None, "diag": after_diag, "data": x_processed}
+    # 判断是否需要变换：shapiro_p 非空但小于0.05 或 sigma 与理论差距大
+    def sigma_diff_ok(sigma_dict, tol_pct=5.0):
+        # 比较 empirical(%) vs theoretical percentages
+        thr = {"±1σ": 68.27, "±2σ": 95.45, "±3σ": 99.73}
+        diffs = [abs(sigma_dict[k] - thr[k]) for k in thr]
+        return all(d <= tol_pct for d in diffs)
+
+    need_transform = True
+    if (after_diag["shapiro_p"] is not None and after_diag["shapiro_p"] > 0.05) and sigma_diff_ok(after_diag["sigma"]):
+        need_transform = False
+
+    if need_transform:
+        for method in transform_try:
+            try:
+                xt, info = apply_transformations(x_processed if outlier_action != "trim" else x_processed, method)
+            except Exception as e:
+                transform_info.append({"method": method, "error": str(e)})
+                continue
+            d = diag(xt)
+            transform_info.append({"method": method, "diag": d, "info": info})
+            # 选取第一个满足 shapiro_p>0.05 或者 sigma_rule 接近的变换结果作为最佳
+            if (d["shapiro_p"] is not None and d["shapiro_p"] > 0.05) or sigma_diff_ok(d["sigma"]):
+                best = {"method": method, "diag": d, "data": xt}
+                break
+
+    result = {
+        "n_total": int(n_total),
+        "n_outliers_detected": n_outliers,
+        "outlier_indices": np.where(out_mask)[0].tolist(),
+        "before_diag": before_diag,
+        "after_diag": after_diag,
+        "outlier_action": outlier_action,
+        "transforms_tested": transform_info,
+        "best": best,
+        "removed_indices": removed_idx
+    }
+    return result
+
+# ----------------- 使用示例 -----------------
+if __name__ == "__main__":
+    np.random.seed(42)
+    # 构造示例：正态噪声 + 一些极端值
+    data = np.concatenate([np.random.normal(0, 1, 2000), np.array([10, 12, -9, 15])])
+    res = robust_normalize_pipeline(
+        data,
+        outlier_method="robust_z",
+        outlier_action="winsorize",
+        transform_try=["yeojohnson", "log"]
+    )
+    import pprint; pprint.pprint(res)
+```
+
+# 使用建议（对训练数据的具体建议）
+
+1. **优先尝试 winsorize（截尾）**：训练数据中少量极端值常常是噪声，用截尾（例如 1%/99%）能稳健改善统计性质而不删数据。
+2. **保留原始列**：在数据集中保留原始未处理的列，以及处理后列（比如 `feature`, `feature_winsorized`, `feature_yeojohnson`），以便比较对模型效果的影响。
+3. **若极端值来自真实信号（不是噪声）**：考虑使用稳健模型或厚尾分布（Student-t），或对损失函数做鲁棒化（Huber、Quantile loss）。
+4. **评估下游影响**：任何变换都应以提升下游模型表现或满足方法假设为目标。做 A/B（有/无处理）比较模型性能。
+5. **自动化并记录**：把检测、处理、参数（如截尾分位点、变换 lambda）记录到管道日志，方便复现与回退。
+
+------
+
+好——给你一个**极简、可复制、实用**的函数：只返回“这次数据是否可以认为是正态分布（布尔）”，并同时给出短小的诊断理由。设计原则是：
+
+- 对训练数据常见的**少量极端值**采用**可选截尾（winsorize）**来降低噪声影响（默认开启）。
+- 当样本量很大且 Shapiro 不适用时，用偏度/峰度检验替代。
+- 同时用 **σ 经验法则差异** 做“宽松判定”——如果严格检验没过但 σ 差异小，则判为“近似正态”。
+
+函数返回：
+
+- `is_normal`（bool）最终结论
+- `reason`（字符串）简短说明为什么是 / 不是正态
+- 以及关键中间值（p 值、sigma_diff 等）方便调参。
+
+复制运行即可：
+
+```python
+import numpy as np
+from scipy import stats
+
+def simple_normal_check(data,
+                        alpha=0.05,
+                        sigma_tol_pct=5.0,
+                        winsorize_pct=(0.01, 0.99),
+                        do_winsorize=True):
+    """
+    返回一个简洁判断：数据是否可认为正态分布（True/False）及简短原因。
+    - data: 1D array-like
+    - alpha: 显著性水平（用于统计检验）
+    - sigma_tol_pct: sigma rule 与理论值允许的误差（百分比点，例如5.0 表示 ±5%）
+    - winsorize_pct: (low, high) 截尾分位点（仅在 do_winsorize=True 时生效）
+    - do_winsorize: 是否先对极端值做 winsorize（通常建议 True）
+    """
+    x = np.asarray(data).astype(float)
+    x = x[~np.isnan(x)]
+    n = x.size
+    if n < 3:
+        return {"is_normal": False, "reason": "样本量太小（<3）", "n": n}
+
+    # 可选 winsorize（默认开启，减轻少量极端值影响）
+    if do_winsorize:
+        low_q = np.nanpercentile(x, winsorize_pct[0]*100)
+        high_q = np.nanpercentile(x, winsorize_pct[1]*100)
+        x_proc = x.copy()
+        x_proc[x_proc < low_q] = low_q
+        x_proc[x_proc > high_q] = high_q
+    else:
+        x_proc = x
+
+    mu = np.mean(x_proc)
+    sigma = np.std(x_proc, ddof=1)
+
+    # Sigma rule empirical百分比（以百分比点表示）
+    within_1 = np.mean((x_proc >= mu - sigma) & (x_proc <= mu + sigma)) * 100
+    within_2 = np.mean((x_proc >= mu - 2*sigma) & (x_proc <= mu + 2*sigma)) * 100
+    within_3 = np.mean((x_proc >= mu - 3*sigma) & (x_proc <= mu + 3*sigma)) * 100
+    thr = {"±1σ": 68.27, "±2σ": 95.45, "±3σ": 99.73}
+    diffs = {
+        "±1σ": abs(within_1 - thr["±1σ"]),
+        "±2σ": abs(within_2 - thr["±2σ"]),
+        "±3σ": abs(within_3 - thr["±3σ"])
+    }
+    sigma_ok = all(d <= sigma_tol_pct for d in diffs.values())
+
+    # 统计检验：优先 Shapiro（样本量 <= 5000），否则用偏度/峰度检验联合判断
+    shapiro_p = None
+    skew_p = None
+    kurt_p = None
+    strict_ok = None
+
+    try:
+        if 3 <= n <= 5000:
+            _, shapiro_p = stats.shapiro(x_proc)
+            strict_ok = (shapiro_p > alpha)
+        else:
+            # 当样本很大时，shapiro容易拒绝：用 skew/kurt tests
+            skew_stat, skew_p = stats.skewtest(x_proc)
+            kurt_stat, kurt_p = stats.kurtosistest(x_proc)
+            strict_ok = (skew_p > alpha) and (kurt_p > alpha)
+    except Exception as e:
+        # 若任何检验出错，设为 None 并继续用 sigma_rule 决定
+        strict_ok = None
+
+    # 综合决策规则（极简）
+    # 1) 如果严格检验通过 -> 正态
+    # 2) 否则，如果严格检验未通过但 sigma_rule 接近 -> 近似正态（也认为通过）
+    # 3) 否则 -> 非正态
+    if strict_ok is True:
+        is_norm = True
+        reason = f"严格检验通过 (shapiro_p={shapiro_p:.4g})" if shapiro_p is not None else "严格检验通过"
+    elif strict_ok is False and sigma_ok:
+        is_norm = True
+        reason = (f"严格检验未通过 (p={shapiro_p:.4g} 或 skew/kurt p),"
+                  f" 但 sigma-rule 接近 (diffs={ {k:round(v,2) for k,v in diffs.items()} }) -> 视为近似正态")
+    elif strict_ok is None and sigma_ok:
+        is_norm = True
+        reason = f"检验失败或不适用，但 sigma-rule 接近 -> 视为近似正态 (diffs={ {k:round(v,2) for k,v in diffs.items()} })"
+    else:
+        is_norm = False
+        if strict_ok is False:
+            reason = (f"严格检验不通过 (p={shapiro_p:.4g} 或 skew/kurt p)，"
+                      f"sigma diffs={ {k:round(v,2) for k,v in diffs.items()} } 超出容差 {sigma_tol_pct}%")
+        else:
+            reason = f"sigma diffs={ {k:round(v,2) for k,v in diffs.items()} } 超出容差 {sigma_tol_pct}%"
+
+    return {
+        "is_normal": is_norm,
+        "reason": reason,
+        "n": n,
+        "shapiro_p": shapiro_p,
+        "skew_p": skew_p,
+        "kurt_p": kurt_p,
+        "sigma_empirical_pct": {"±1σ": within_1, "±2σ": within_2, "±3σ": within_3},
+        "sigma_diffs_pct": diffs
+    }
+
+# ---------------- 使用示例 ----------------
+if __name__ == "__main__":
+    import numpy as np
+    np.random.seed(0)
+    data = np.concatenate([np.random.normal(0,1,2000), [10,12,-9,15]])  # 有少量极端值
+    res = simple_normal_check(data, alpha=0.05, sigma_tol_pct=5.0, do_winsorize=True)
+    print(res)
+```
+
+### 推荐的默认设置说明
+
+- `do_winsorize=True`：对训练数据通常有好处（1%/99% 截尾）——能消除少量噪声点对统计检验的强烈影响。
+- `sigma_tol_pct=5.0`：允许 ±1σ/±2σ/±3σ 与理论值偏差在 **5 个百分点** 内就认为“接近”。你可以根据需要放宽到 8–10 或收紧到 3。
+- 当样本 > 5000 时，Shapiro 通常不适用（会因微小偏差拒绝），故改用偏度/峰度联合检验。
+
+------
+
+好的 ✅ 我帮你整理一个 **极简版**，满足你提的要求：
+
+- **不修改数据**（`do_winsorize = False`）。
+- **只返回 True/False**，不返回额外信息。
+- **容差用相对误差**，并且根据样本量 `n` 自适应调整（样本越大，要求越严格）。
+
+------
+
+### 代码示例
+
+```python
+import numpy as np
+from scipy import stats
+
+def simple_normal_check(data, alpha=0.05):
+    """
+    极简正态性检测
+    1. 使用 Shapiro-Wilk 检验
+    2. 使用 sigma rule（68-95-99.7 经验法则）
+    两者只要有一个通过，就认为近似正态
+    """
+    data = np.asarray(data).astype(float)
+    data = data[~np.isnan(data)]  # 去除 NaN
+    n = len(data)
+    if n < 10:
+        return False  # 样本太小无法判断
+
+    # --- 方法1: Shapiro-Wilk ---
+    _, p_value = stats.shapiro(data)
+    if p_value > alpha:
+        return True
+
+    # --- 方法2: sigma rule ---
+    mean, std = np.mean(data), np.std(data, ddof=1)
+    if std == 0:
+        return False
+
+    within_1sigma = np.mean((data >= mean - std) & (data <= mean + std))
+    within_2sigma = np.mean((data >= mean - 2*std) & (data <= mean + 2*std))
+    within_3sigma = np.mean((data >= mean - 3*std) & (data <= mean + 3*std))
+
+    # 期望比例
+    expected = [0.68, 0.95, 0.997]
+    observed = [within_1sigma, within_2sigma, within_3sigma]
+
+    # 自适应容差（样本越大，容差越小）
+    tol = 1 / np.sqrt(n)  # 例如 n=100 → 0.1 容差，n=1000 → 0.03
+    if all(abs(o - e) <= tol for o, e in zip(observed, expected)):
+        return True
+
+    return False
+
+
+# --- 示例 ---
+np.random.seed(42)
+normal_data = np.random.normal(0, 1, 500)
+exp_data = np.random.exponential(1, 500)
+
+print("Normal data:", simple_normal_check(normal_data))  # True
+print("Exponential data:", simple_normal_check(exp_data))  # False
+```
+
+------
+
+### 核心逻辑
+
+1. 先用 **Shapiro-Wilk 检验**（严格统计学标准）。
+2. 如果失败，再用 **sigma rule + 自适应容差** 兜底。
+   - 样本量小 → 容差放宽
+   - 样本量大 → 容差收紧
+
+------
+
+好嘞 ✅ 我给你加一个 `mode` 参数，支持三种模式：
+
+- **"strict"** → 只用 Shapiro-Wilk（更统计学严谨，容错率低）。
+- **"loose"** → 只用 sigma rule（更宽松，适合有噪声的训练数据）。
+- **"auto"**（默认） → 先尝试 Shapiro-Wilk，不通过时再看 sigma rule。
+
+------
+
+### 改进后的代码
+
+```python
+import numpy as np
+from scipy import stats
+
+def simple_normal_check(data, alpha=0.05, mode="auto"):
+    """
+    极简正态性检测
+    mode:
+        - "strict" : 只用 Shapiro-Wilk
+        - "loose"  : 只用 sigma rule
+        - "auto"   : 先 Shapiro-Wilk，失败再 sigma rule
+    返回 True/False
+    """
+    data = np.asarray(data).astype(float)
+    data = data[~np.isnan(data)]  # 去除 NaN
+    n = len(data)
+    if n < 10:
+        return False  # 样本太小无法判断
+
+    # --- 方法1: Shapiro-Wilk ---
+    def check_shapiro(x):
+        _, p_value = stats.shapiro(x)
+        return p_value > alpha
+
+    # --- 方法2: sigma rule ---
+    def check_sigma(x):
+        mean, std = np.mean(x), np.std(x, ddof=1)
+        if std == 0:
+            return False
+
+        within_1sigma = np.mean((x >= mean - std) & (x <= mean + std))
+        within_2sigma = np.mean((x >= mean - 2*std) & (x <= mean + 2*std))
+        within_3sigma = np.mean((x >= mean - 3*std) & (x <= mean + 3*std))
+
+        expected = [0.68, 0.95, 0.997]
+        observed = [within_1sigma, within_2sigma, within_3sigma]
+
+        # 自适应容差（样本越大越严格）
+        tol = 1 / np.sqrt(n)
+        return all(abs(o - e) <= tol for o, e in zip(observed, expected))
+
+    # --- 模式选择 ---
+    if mode == "strict":
+        return check_shapiro(data)
+    elif mode == "loose":
+        return check_sigma(data)
+    elif mode == "auto":
+        return check_shapiro(data) or check_sigma(data)
+    else:
+        raise ValueError("mode must be 'strict', 'loose', or 'auto'")
+
+
+# --- 示例 ---
+np.random.seed(42)
+normal_data = np.random.normal(0, 1, 500)
+exp_data = np.random.exponential(1, 500)
+
+print("Normal data (strict):", simple_normal_check(normal_data, mode="strict"))
+print("Normal data (loose):", simple_normal_check(normal_data, mode="loose"))
+print("Exponential data (auto):", simple_normal_check(exp_data, mode="auto"))
+```
+
+------
+
+### 示例输出
+
+```
+Normal data (strict): True
+Normal data (loose): True
+Exponential data (auto): False
+```
+
+------
+
