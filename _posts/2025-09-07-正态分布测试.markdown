@@ -1280,3 +1280,165 @@ Exponential data (auto): False
 
 ------
 
+👌我理解了，你需要一个**更稳健的自适应容差**，避免以下两个问题：
+
+1. **数据量太少** → 容差太大，导致几乎任何分布都“通过”。
+2. **数据量很大但带有异常值** → 容差太小，导致明明近似正态却判定失败。
+
+------
+
+### 改进方案
+
+我建议综合以下因素来设定容差：
+
+1. **基础误差**（`base_tol`）：保证即便数据量很小，也有一个最小容差（避免“过严”）。
+2. **样本量影响**（`1/√n`）：样本量越大，容差越小（标准统计学依据）。
+3. **数据分布稳定性**（用偏度 `skew` 和峰度 `kurtosis`）：
+   - 如果 `|skew| < 1` 且 `|kurtosis| < 3`，说明数据没有明显偏态/厚尾 → 放宽容差。
+   - 如果严重偏态或厚尾 → 收紧容差。
+
+最终容差公式：
+
+tol=base_tol+cn×adjtol = base\_tol + \frac{c}{\sqrt{n}} \times adj
+
+- `base_tol` = 0.03 （保证小样本也能判断）
+- `c` = 1.0（缩放因子，可调）
+- `adj` = 0.5~2.0（根据偏度/峰度调整）
+
+------
+
+### 改进后的代码
+
+```python
+import numpy as np
+from scipy import stats
+
+def simple_normal_check(data, alpha=0.05, mode="auto"):
+    """
+    极简正态性检测（增强自适应容差版）
+    mode:
+        - "strict" : 只用 Shapiro-Wilk
+        - "loose"  : 只用 sigma rule
+        - "auto"   : 先 Shapiro-Wilk，失败再 sigma rule
+    """
+    data = np.asarray(data).astype(float)
+    data = data[~np.isnan(data)]
+    n = len(data)
+    if n < 10:
+        return False  # 样本太小无法判断
+
+    # --- 方法1: Shapiro-Wilk ---
+    def check_shapiro(x):
+        _, p_value = stats.shapiro(x)
+        return p_value > alpha
+
+    # --- 方法2: sigma rule ---
+    def check_sigma(x):
+        mean, std = np.mean(x), np.std(x, ddof=1)
+        if std == 0:
+            return False
+
+        within_1sigma = np.mean((x >= mean - std) & (x <= mean + std))
+        within_2sigma = np.mean((x >= mean - 2*std) & (x <= mean + 2*std))
+        within_3sigma = np.mean((x >= mean - 3*std) & (x <= mean + 3*std))
+
+        expected = [0.68, 0.95, 0.997]
+        observed = [within_1sigma, within_2sigma, within_3sigma]
+
+        # --- 自适应容差 ---
+        skew = stats.skew(x)
+        kurt = stats.kurtosis(x)
+        adj = 1.0
+        if abs(skew) < 1 and abs(kurt) < 3:
+            adj = 1.5  # 数据较稳定 → 放宽
+        elif abs(skew) > 2 or abs(kurt) > 7:
+            adj = 0.7  # 明显偏态/厚尾 → 收紧
+
+        base_tol = 0.03
+        tol = base_tol + (1.0 / np.sqrt(n)) * adj
+
+        return all(abs(o - e) <= tol for o, e in zip(observed, expected))
+
+    # --- 模式选择 ---
+    if mode == "strict":
+        return check_shapiro(data)
+    elif mode == "loose":
+        return check_sigma(data)
+    elif mode == "auto":
+        return check_shapiro(data) or check_sigma(data)
+    else:
+        raise ValueError("mode must be 'strict', 'loose', or 'auto'")
+```
+
+------
+
+### 改进点
+
+1. **小样本时**，至少保留 `±3%` 容差，避免过于严格。
+2. **大样本时**，容差仍然收紧，但不会无限接近 0。
+3. **数据偏态/厚尾时**，容差自动调整（偏离越严重，要求越严格）。
+
+------
+
+👌 那我帮你写一个完整的 **测试脚本**，分别用不同分布的数据来跑你现在的 `simple_normal_check`，看看在 **strict / loose / auto** 三种模式下的表现。
+
+------
+
+### 测试脚本
+
+```python
+import numpy as np
+from scipy import stats
+
+# 假设 simple_normal_check 已经定义在这里（直接用你上一个版本的函数）
+
+def test_normality_checker():
+    np.random.seed(42)
+
+    datasets = {
+        "正态分布 (N(0,1))": np.random.normal(0, 1, 500),
+        "轻微偏态 (对数正态)": np.random.lognormal(0, 0.2, 500),  # 偏态轻
+        "强偏态 (指数分布)": np.random.exponential(1, 500),       # 偏态重
+        "厚尾分布 (t df=2)": stats.t(df=2).rvs(500),             # heavy tail
+        "均匀分布 (U[0,1])": np.random.uniform(0, 1, 500)        # 非正态
+    }
+
+    modes = ["strict", "loose", "auto"]
+
+    for name, data in datasets.items():
+        print(f"\n{name}:")
+        for mode in modes:
+            result = simple_normal_check(data, mode=mode)
+            print(f"  {mode:<6} → {result}")
+
+if __name__ == "__main__":
+    test_normality_checker()
+```
+
+------
+
+### 预期结果解释
+
+- **正态分布 (N(0,1))**
+  - strict → True（Shapiro 检验通过）
+  - loose → True（sigma rule 通过）
+  - auto → True
+- **轻微偏态 (对数正态)**
+  - strict → False（Shapiro 很敏感）
+  - loose → True（sigma rule 容忍度高）
+  - auto → True（兜底成功）
+- **强偏态 (指数分布)**
+  - strict → False
+  - loose → False（sigma rule 也偏差大）
+  - auto → False
+- **厚尾分布 (t 分布，自由度2)**
+  - strict → False
+  - loose → False（容差收紧，判定失败）
+  - auto → False
+- **均匀分布**
+  - strict → False
+  - loose → False
+  - auto → False
+
+------
+
