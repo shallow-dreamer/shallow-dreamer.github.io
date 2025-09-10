@@ -1,0 +1,504 @@
+---
+layout:     post
+title:      "懒加载"
+subtitle:   ""
+date:       2025-09-10
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+👌 明白了，你现在的情况是：
+
+- 在 `permission_class` 里，你需要调用 `get_data(model, only=..., defer=...)`，这些参数是动态的（函数传参）。
+- 但你的类里本身也有属性 `only`（或者其他参数名），它是给别的地方用的，不是给 `get_data` 的。
+- 你担心名字冲突，或者想区分清楚：**类属性里的 only ≠ get_data 里的 only**。
+
+------
+
+### ✅ 核心思路
+
+把 **权限类配置用的参数** 和 **业务逻辑用的参数** 分开存储，不要混淆。
+ 常见方式有几种：
+
+------
+
+### 方案 1：明确区分「数据加载参数」与「其他属性」
+
+给 `get_data` 用的参数统一放在一个 dict 里，比如 `data_options`：
+
+```python
+class LazyPermission(BasePermission):
+    model = None
+    data_options = {}   # 专门给 get_data 用
+    _a = None
+
+    @classmethod
+    def get_a(cls):
+        if cls._a is None:
+            cls._a = get_data(cls.model, **cls.data_options)
+        return cls._a
+
+    def has_permission(self, request, view):
+        data = self.get_a()
+        return True
+```
+
+然后子类这样写：
+
+```python
+class PermissionA(LazyPermission):
+    model = "modelA"
+    data_options = {"only": ["field1", "field2"], "defer": ["big_field"]}
+
+    # 这个 only 就不会影响 get_data
+    only = "这是给别的地方用的"
+```
+
+这样，`data_options["only"]` 只作用在 `get_data`，不会和类属性的 `only` 混淆。
+
+------
+
+### 方案 2：用 `get_data_params()` 方法（更灵活）
+
+让子类通过方法来决定如何给 `get_data` 传参：
+
+```python
+class LazyPermission(BasePermission):
+    model = None
+    _a = None
+
+    @classmethod
+    def get_data_params(cls):
+        """子类可重写，返回传给 get_data 的参数"""
+        return {}
+
+    @classmethod
+    def get_a(cls):
+        if cls._a is None:
+            cls._a = get_data(cls.model, **cls.get_data_params())
+        return cls._a
+
+    def has_permission(self, request, view):
+        data = self.get_a()
+        return True
+```
+
+子类就能灵活控制：
+
+```python
+class PermissionA(LazyPermission):
+    model = "modelA"
+    only = "别的地方用"
+
+    @classmethod
+    def get_data_params(cls):
+        return {"only": ["field1"], "defer": ["big_field"]}
+```
+
+------
+
+### 方案 3：避免名字冲突（命名空间）
+
+如果你非要直接在类属性里写 `only` 和 `defer`，那就用前缀区分，比如：
+
+```python
+class PermissionA(LazyPermission):
+    model = "modelA"
+    data_only = ["field1"]
+    data_defer = ["big_field"]
+    only = "别的地方用"
+
+    @classmethod
+    def get_data_params(cls):
+        return {"only": cls.data_only, "defer": cls.data_defer}
+```
+
+------
+
+📌 总结：
+ 如果你要支持很多参数，**方案 1（dict 参数）**最简单，
+ 如果参数是动态逻辑，**方案 2（get_data_params 方法）**最清晰，
+ 如果你不想改太多代码，**方案 3（前缀区分）**最直接。
+
+------
+
+好嘞 ✅，我帮你整理一个 **最终版 `LazyPermission` 基类**，专门为 DRF 的 `permission_classes` 使用，支持：
+
+1. **懒加载**：只有第一次真正校验权限时才会加载数据。
+2. **参数隔离**：子类里可以同时有 `only` / `defer` 等普通属性，不会和 `get_data` 的参数冲突。
+3. **通用性**：子类只需设置 `model` 和 `data_options`，就能使用。
+
+------
+
+### 🔑 基类实现
+
+```python
+from rest_framework.permissions import BasePermission
+
+def get_data(model, only=None, defer=None):
+    """模拟数据库取数"""
+    print(f"加载 {model} 数据, only={only}, defer={defer}")
+    return {"model": model, "only": only, "defer": defer}
+
+
+class LazyPermission(BasePermission):
+    """
+    通用懒加载 Permission 基类
+    - 子类设置 model (必填)
+    - 子类设置 data_options (可选, dict，传给 get_data)
+    - 类级别缓存数据 (只加载一次)
+    """
+    model = None
+    data_options = {}   # 给 get_data 用的参数
+    _data_cache = None  # 缓存，避免重复加载
+
+    @classmethod
+    def get_data(cls):
+        """懒加载数据（只加载一次）"""
+        if cls._data_cache is None:
+            cls._data_cache = get_data(cls.model, **cls.data_options)
+        return cls._data_cache
+
+    def has_permission(self, request, view):
+        """
+        DRF 的权限检查接口
+        - 默认返回 True，可在子类里重写逻辑
+        """
+        data = self.get_data()
+        # TODO: 根据 data 校验 request / view
+        return True
+```
+
+------
+
+### 🔑 子类使用示例
+
+```python
+class PermissionA(LazyPermission):
+    model = "ModelA"
+    data_options = {"only": ["id", "name"], "defer": ["big_field"]}
+
+    # 业务用的其他属性，不会干扰 get_data
+    only = "这是给别的地方用的"
+
+    def has_permission(self, request, view):
+        data = self.get_data()
+        print("PermissionA 正在使用数据:", data)
+        return True
+
+
+class PermissionB(LazyPermission):
+    model = "ModelB"
+    data_options = {"only": ["email"], "defer": []}
+
+    # 其他逻辑
+    custom_flag = True
+```
+
+------
+
+### 🔑 用法
+
+```python
+# 在 View 里用
+from rest_framework.views import APIView
+
+class MyView(APIView):
+    permission_classes = [PermissionA, PermissionB]
+
+    def get(self, request):
+        return Response({"msg": "ok"})
+```
+
+- 项目启动时不会加载 `get_data`。
+- 第一次请求时，才会打印 `加载 ModelX 数据...`。
+- 后续请求直接用缓存，不会重复加载。
+- 子类可以同时定义 `only`、`custom_flag` 等普通属性，不影响 `data_options`。
+
+------
+
+👌 明白了，你已经有一个基础的权限类（假设叫 `BasePermissionX`），现在新需求是：
+
+- 只在子类里添加 **懒加载 `get_data`** 的能力；
+- 不要修改已有的基类；
+- 保证原有子类不受影响，只有新的子类需要时才用。
+
+------
+
+### ✅ 解决方案
+
+你可以新建一个 **Mixin 类**，专门处理懒加载逻辑，然后在新的权限类里 **多重继承**，这样不会破坏已有的基类。
+
+------
+
+### 🔑 懒加载 Mixin
+
+```python
+def get_data(model, only=None, defer=None):
+    """模拟数据库取数"""
+    print(f"加载 {model} 数据, only={only}, defer={defer}")
+    return {"model": model, "only": only, "defer": defer}
+
+
+class LazyPermissionMixin:
+    """
+    给权限类增加懒加载能力
+    - 需要子类定义 model 和 data_options
+    - 默认启用类级缓存（只加载一次）
+    """
+    model = None
+    data_options = {}
+    _data_cache = None
+
+    @classmethod
+    def get_lazy_data(cls):
+        if cls._data_cache is None:
+            cls._data_cache = get_data(cls.model, **cls.data_options)
+        return cls._data_cache
+```
+
+------
+
+### 🔑 继承已有基类 + Mixin
+
+假设你原来有一个基类：
+
+```python
+from rest_framework.permissions import BasePermission
+
+class MyBasePermission(BasePermission):
+    def has_permission(self, request, view):
+        # 原有逻辑
+        return True
+```
+
+现在你只需要在新权限类里用 Mixin：
+
+```python
+class PermissionA(LazyPermissionMixin, MyBasePermission):
+    model = "ModelA"
+    data_options = {"only": ["id", "name"], "defer": ["big_field"]}
+
+    def has_permission(self, request, view):
+        data = self.get_lazy_data()  # 懒加载数据
+        print("PermissionA 使用数据:", data)
+        return super().has_permission(request, view)
+```
+
+------
+
+### 🔑 用法
+
+```python
+class MyView(APIView):
+    permission_classes = [PermissionA]  # 懒加载版本
+```
+
+- 旧的 `MyBasePermission` 和它的子类完全不需要修改。
+- 新的权限类只要多继承 `LazyPermissionMixin` 就自动有懒加载功能。
+- 缓存逻辑只影响用了 `Mixin` 的子类，不会污染全局。
+
+------
+
+好 ✅，我帮你把 `LazyPermissionMixin` 扩展一下，支持 **缓存开关**：
+
+- `use_cache = True` → 默认懒加载并缓存（第一次加载后复用）。
+- `use_cache = False` → 每次调用 `get_lazy_data` 都重新加载。
+
+这样你在不同的权限类里可以灵活选择。
+
+------
+
+### 🔑 改造后的 `LazyPermissionMixin`
+
+```python
+def get_data(model, only=None, defer=None):
+    """模拟数据库取数"""
+    print(f"加载 {model} 数据, only={only}, defer={defer}")
+    return {"model": model, "only": only, "defer": defer}
+
+
+class LazyPermissionMixin:
+    """
+    给权限类增加懒加载能力
+    - 子类需要定义 model 和 data_options
+    - use_cache 控制是否启用缓存
+    """
+    model = None
+    data_options = {}
+    use_cache = True
+    _data_cache = None
+
+    @classmethod
+    def get_lazy_data(cls):
+        if cls.use_cache:
+            if cls._data_cache is None:
+                cls._data_cache = get_data(cls.model, **cls.data_options)
+            return cls._data_cache
+        else:
+            # 每次都重新加载
+            return get_data(cls.model, **cls.data_options)
+```
+
+------
+
+### 🔑 示例：继承已有的基类
+
+假设你原来的基类：
+
+```python
+from rest_framework.permissions import BasePermission
+
+class MyBasePermission(BasePermission):
+    def has_permission(self, request, view):
+        # 原有逻辑
+        return True
+```
+
+------
+
+### 🔑 新的权限类（两种用法）
+
+```python
+# 使用缓存（默认）
+class PermissionA(LazyPermissionMixin, MyBasePermission):
+    model = "ModelA"
+    data_options = {"only": ["id", "name"], "defer": ["big_field"]}
+
+    def has_permission(self, request, view):
+        data = self.get_lazy_data()
+        print("PermissionA 使用数据:", data)
+        return super().has_permission(request, view)
+
+
+# 不使用缓存（每次请求都加载）
+class PermissionB(LazyPermissionMixin, MyBasePermission):
+    model = "ModelB"
+    data_options = {"only": ["email"]}
+    use_cache = False   # 关闭缓存
+
+    def has_permission(self, request, view):
+        data = self.get_lazy_data()
+        print("PermissionB 使用数据:", data)
+        return super().has_permission(request, view)
+```
+
+------
+
+### 🔑 用法
+
+```python
+class MyView(APIView):
+    permission_classes = [PermissionA, PermissionB]
+```
+
+- 如果用 `PermissionA`：第一次请求会打印“加载 ModelA...”，后续请求直接用缓存。
+- 如果用 `PermissionB`：每次请求都会打印“加载 ModelB...”。
+
+------
+
+👌 好的，我们在 `LazyPermissionMixin` 上再加一个 **缓存过期时间（TTL）** 功能：
+
+- `use_cache = True` 时启用缓存；
+- `cache_ttl`（秒数，默认 `None` 表示永久缓存）；
+- 如果超过 TTL，会自动重新加载数据。
+
+------
+
+### 🔑 改造后的 `LazyPermissionMixin`
+
+```python
+import time
+
+def get_data(model, only=None, defer=None):
+    """模拟数据库取数"""
+    print(f"加载 {model} 数据, only={only}, defer={defer}")
+    return {"model": model, "only": only, "defer": defer, "loaded_at": time.time()}
+
+
+class LazyPermissionMixin:
+    """
+    给权限类增加懒加载能力
+    - 子类定义 model 和 data_options
+    - use_cache 控制是否启用缓存
+    - cache_ttl 缓存过期时间（秒），None 表示不过期
+    """
+    model = None
+    data_options = {}
+    use_cache = True
+    cache_ttl = None  # 缓存过期时间，单位秒
+
+    _data_cache = None
+    _cache_time = None
+
+    @classmethod
+    def get_lazy_data(cls):
+        if not cls.use_cache:
+            # 每次都重新加载
+            return get_data(cls.model, **cls.data_options)
+
+        now = time.time()
+        expired = (
+            cls.cache_ttl is not None
+            and cls._cache_time is not None
+            and now - cls._cache_time > cls.cache_ttl
+        )
+
+        if cls._data_cache is None or expired:
+            cls._data_cache = get_data(cls.model, **cls.data_options)
+            cls._cache_time = now
+
+        return cls._data_cache
+```
+
+------
+
+### 🔑 示例
+
+```python
+from rest_framework.permissions import BasePermission
+
+class MyBasePermission(BasePermission):
+    def has_permission(self, request, view):
+        return True
+
+
+# 使用永久缓存
+class PermissionA(LazyPermissionMixin, MyBasePermission):
+    model = "ModelA"
+    data_options = {"only": ["id", "name"]}
+    use_cache = True
+    cache_ttl = None  # 永久缓存
+
+
+# 使用缓存 + 30 秒过期
+class PermissionB(LazyPermissionMixin, MyBasePermission):
+    model = "ModelB"
+    data_options = {"only": ["email"]}
+    use_cache = True
+    cache_ttl = 30  # 30 秒过期
+
+
+# 不使用缓存
+class PermissionC(LazyPermissionMixin, MyBasePermission):
+    model = "ModelC"
+    data_options = {"defer": ["large_field"]}
+    use_cache = False
+```
+
+------
+
+### 🔑 行为
+
+- **PermissionA**
+   第一次请求加载一次，以后永远用缓存。
+- **PermissionB**
+   第一次请求加载，30 秒内的请求直接用缓存；
+   超过 30 秒后再次请求会重新加载。
+- **PermissionC**
+   每次请求都会重新加载。
+
+------
+
