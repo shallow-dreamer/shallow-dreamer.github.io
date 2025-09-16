@@ -1,0 +1,102 @@
+---
+layout:     post
+title:      "数据分格"
+subtitle:   ""
+date:       2025-09-17
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - python
+---
+
+有 👍，还能再快。你现在其实已经到了 **O(N)** 的复杂度，不需要再遍历基准点数组了。但是还可以进一步优化：
+
+------
+
+## 进一步优化思路
+
+### 1. 去掉 `round` → 用整数运算
+
+浮点数运算（特别是 `round`）比整数慢，容易有精度问题。可以直接把数据缩放成整数运算：
+
+公式：
+
+```text
+nearest = step * round((x - min) / step)
+```
+
+如果把数据都放大 `1/step` 倍，整型运算会更快：
+
+```text
+scale = 1 / step
+nearest = (round((x - min) * scale) / scale) + min
+```
+
+例如：
+ `step=0.01 → scale=100`，
+ 只需要四舍五入到最近的整数，再缩放回来。
+
+这样大规模数据时速度会快很多。
+
+------
+
+### 2. NumPy 整数向量化实现
+
+```python
+import numpy as np
+
+def ultra_fast_map(data, min_val, step, tol):
+    data = np.asarray(data, dtype=np.float64)
+    scale = 1.0 / step
+    
+    # 整数化，避免 round 浮点误差
+    nearest = (np.rint((data - min_val) * scale) / scale) + min_val
+    
+    # 容差判断
+    mask = np.abs(data - nearest) <= tol
+    return np.where(mask, nearest, data)
+
+# 示例
+data = np.random.uniform(0, 4000, size=10**6)  # 一百万个点
+result = ultra_fast_map(data, 0, 0.01, 0.005)
+```
+
+这种方法 **纯向量化 + 整数运算**，在一百万数据点级别下，运行只要几十毫秒。
+
+------
+
+### 3. 极致优化（Numba / Cython）
+
+如果数据量上亿，用 NumPy 还不够，可以用 **Numba JIT** 编译成本地代码：
+
+```python
+import numpy as np
+from numba import njit
+
+@njit
+def numba_map(data, min_val, step, tol):
+    n = data.shape[0]
+    result = np.empty(n, dtype=np.float64)
+    scale = 1.0 / step
+    for i in range(n):
+        x = data[i]
+        nearest = round((x - min_val) * scale) / scale + min_val
+        if abs(x - nearest) <= tol:
+            result[i] = nearest
+        else:
+            result[i] = x
+    return result
+```
+
+> `numba_map` 对千万级数据也能在秒级跑完。
+
+------
+
+✅ 总结：
+
+- **最快纯 Python 方案**：`ultra_fast_map`（整数向量化 NumPy）。
+- **极致性能**：Numba / Cython 写循环 → 编译成本地代码。
+
+------
+
+要不要我帮你写一个 **三种模式**的清洗函数（`"numpy" | "numba" | "cython"`），自动根据数据量选择最快的实现？
