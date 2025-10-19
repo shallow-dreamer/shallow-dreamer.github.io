@@ -1,0 +1,338 @@
+---
+layout:     post
+title:      "指南app测试"
+subtitle:   ""
+date:       2025-10-20
+author:     " Shallow Dreamer"
+header-img: "img/post-bg-js-version.jpg"
+tags:
+    - Django
+---
+
+```python
+from django.db import models
+
+
+class HelpCategory(models.Model):
+    """
+    分级分类表，支持无限层级的分类树。
+    """
+    name = models.CharField(max_length=100, verbose_name="分类名称")
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="children",
+        verbose_name="父分类",
+    )
+    description = models.TextField(blank=True, null=True, verbose_name="分类说明")
+
+    class Meta:
+        verbose_name = "帮助分类"
+        verbose_name_plural = "帮助分类"
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def level(self):
+        """返回当前分类的层级（根为1）"""
+        level = 1
+        parent = self.parent
+        while parent:
+            level += 1
+            parent = parent.parent
+        return level
+
+
+class HelpFile(models.Model):
+    """
+    帮助文件表，支持多分类关联。
+    """
+    title = models.CharField(max_length=200, verbose_name="文件标题")
+    description = models.TextField(blank=True, null=True, verbose_name="文件简介")
+    file = models.FileField(upload_to="help_files/", verbose_name="文件内容")
+    category = models.ForeignKey(
+        HelpCategory,
+        on_delete=models.CASCADE,
+        related_name="files",
+        verbose_name="所属分类",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "帮助文件"
+        verbose_name_plural = "帮助文件"
+        indexes = [
+            models.Index(fields=["category", "created_at"]),
+        ]
+
+    def __str__(self):
+        return self.title
+
+```
+
+```python
+from rest_framework import serializers
+from .models import HelpCategory, HelpFile
+
+class HelpFileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HelpFile
+        fields = ["id", "title", "file", "created_at"]
+
+class HelpCategoryNestedSerializer(serializers.ModelSerializer):
+    files = serializers.SerializerMethodField()
+    page = serializers.SerializerMethodField()
+    total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = HelpCategory
+        fields = ["id", "name", "parent", "files", "page", "total"]
+
+    def get_files(self, obj):
+        files = self.context.get("files")
+        if files is not None:
+            return HelpFileSerializer(files, many=True).data
+        return HelpFileSerializer(obj.files.all(), many=True).data
+
+    def get_page(self, obj):
+        return self.context.get("page", 1)
+
+    def get_total(self, obj):
+        return self.context.get("total", obj.files.count())
+
+```
+
+```python
+from django.test import TestCase
+from django.core.paginator import Paginator
+from .models import HelpCategory, HelpFile
+from django.core.files.base import ContentFile
+
+from lock_test_project.guide.serializers import HelpCategoryNestedSerializer
+
+
+class HelpCenterModelTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        # 创建分类结构（三级）
+        cls.root = HelpCategory.objects.create(name="用户指南")
+        cls.sub1 = HelpCategory.objects.create(name="安装教程", parent=cls.root)
+        cls.sub2 = HelpCategory.objects.create(name="使用教程", parent=cls.root)
+        cls.sub11 = HelpCategory.objects.create(name="Windows 安装", parent=cls.sub1)
+        cls.sub12 = HelpCategory.objects.create(name="Mac 安装", parent=cls.sub1)
+
+        # 为每个分类创建一些文件
+        for i in range(25):
+            file = HelpFile.objects.create(
+                category=cls.sub11,
+                title=f"Windows 安装文档 {i+1}",
+                file=ContentFile(b"Fake content", name=f"win_install_{i+1}.pdf"),
+            )
+        for i in range(8):
+            file = HelpFile.objects.create(
+                category=cls.sub12,
+                title=f"Mac 安装文档 {i+1}",
+                file=ContentFile(b"Fake content", name=f"mac_install_{i+1}.pdf"),
+            )
+        for i in range(10):
+            file = HelpFile.objects.create(
+                category=cls.sub2,
+                title=f"使用说明 {i+1}",
+                file=ContentFile(b"Fake content", name=f"use_tutorial_{i+1}.pdf"),
+            )
+
+    def test_category_hierarchy(self):
+        """测试分类的层级结构"""
+        all_objs = HelpCategory.objects.filter(parent__isnull=True).all()
+        data = HelpCategoryNestedSerializer(all_objs, many=True).data
+        print(data)
+        self.assertEqual(self.root.children.count(), 2)
+        self.assertEqual(self.sub1.children.count(), 2)
+        self.assertEqual(self.sub2.children.count(), 0)
+        self.assertEqual(self.sub11.parent.name, "安装教程")
+
+    def paginate_category_files(self, category, page=1, page_size=10):
+        """从分类发起的分页查询（推荐用法）"""
+        queryset = category.files.all().order_by("id")
+        paginator = Paginator(queryset, page_size)
+        page_obj = paginator.get_page(page)
+        return {
+            "category": category,
+            "page": page,
+            "page_size": page_size,
+            "total": paginator.count,
+            "total_pages": paginator.num_pages,
+            "files": page_obj.object_list,
+        }
+
+    def test_category_pagination_from_category_side(self):
+        """测试分页从分类侧发起"""
+        category = self.sub11
+
+        # 模拟前端请求第一页、第二页、第三页
+        for page in [1, 2, 3]:
+            data = self.paginate_category_files(category, page)
+            print(f"\n=== 第 {page} 页数据 ===")
+            print(f"总文件数：{data['total']}, 总页数：{data['total_pages']}")
+
+            # 使用分类序列化器输出（带分页文件）
+            serialized = HelpCategoryNestedSerializer(
+                data["category"],
+                context={"files": data["files"], "page": page, "total": data["total"]},
+            )
+            print(serialized.data)
+
+        # 验证分页逻辑
+        first_page = self.paginate_category_files(category, 1)
+        print(first_page)
+        self.assertEqual(first_page["total"], 25)
+        self.assertEqual(first_page["total_pages"], 3)
+        self.assertEqual(len(first_page["files"]), 10)
+
+    def test_fetch_all_subcategory_files(self):
+        """测试获取某分类下所有子分类的文件"""
+        def get_all_files(category):
+            # 递归取出所有子分类文件
+            files = list(category.files.all())
+            for sub in category.children.all():
+                files.extend(get_all_files(sub))
+            return files
+
+        all_files = get_all_files(self.root)
+        print(f"\n‘用户指南’下所有文件数：{len(all_files)}")
+        self.assertEqual(len(all_files), 43)  # 25 + 8 + 10
+
+    def test_performance(self):
+        """性能测试：批量查询"""
+        import time
+        start = time.time()
+        files = HelpFile.objects.select_related("category").all()
+        _ = [f.title for f in files]
+        end = time.time()
+        print(f"\n批量加载 {len(files)} 条文件耗时：{end - start:.4f}s")
+
+        self.assertTrue(end - start < 1.0)
+
+```
+
+非常好 👍，为“使用帮助（指南）”模块添加分类排序是一个非常自然的扩展需求。
+ 我们可以让同一层级下的分类拥有可控的显示顺序，这样前端展示或后台管理时就能灵活调整顺序。
+
+------
+
+## ✅ 一、模型修改（`models.py`）
+
+在 `HelpCategory` 模型中添加一个 `order` 字段，用于同级分类间排序：
+
+```python
+from django.db import models
+
+class HelpCategory(models.Model):
+    name = models.CharField(max_length=100, verbose_name="分类名称")
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        related_name="children",
+        on_delete=models.CASCADE,
+        verbose_name="父分类"
+    )
+    order = models.PositiveIntegerField(default=0, verbose_name="排序值")
+
+    class Meta:
+        verbose_name = "帮助分类"
+        verbose_name_plural = "帮助分类"
+        ordering = ["parent__id", "order", "id"]  # 默认按父级、排序值、ID 排序
+        unique_together = ("parent", "order")  # 同一层级排序值唯一（可选）
+
+    def __str__(self):
+        return f"{self.name} ({self.parent.name if self.parent else '根分类'})"
+```
+
+### ✅ 字段解释
+
+| 字段名            | 类型                   | 说明                                   |
+| ----------------- | ---------------------- | -------------------------------------- |
+| `order`           | `PositiveIntegerField` | 用于同级分类的排序（从小到大显示）     |
+| `unique_together` | `("parent", "order")`  | 防止同一层级下出现重复的排序号（可选） |
+| `ordering`        | Django Meta 排序       | 默认查询时自动按照父级→排序→id 排序    |
+
+------
+
+## ✅ 二、数据迁移命令
+
+执行以下命令应用字段更改：
+
+```bash
+python manage.py makemigrations
+python manage.py migrate
+```
+
+------
+
+## ✅ 三、使用示例（在测试或后台中）
+
+```python
+root = HelpCategory.objects.create(name="用户指南", order=1)
+install = HelpCategory.objects.create(name="安装教程", parent=root, order=2)
+config = HelpCategory.objects.create(name="配置指南", parent=root, order=1)
+
+# 查询时自动按 order 排序
+for cat in HelpCategory.objects.filter(parent=root):
+    print(cat.name)
+
+# 输出：
+# 配置指南
+# 安装教程
+```
+
+------
+
+## ✅ 四、序列化与排序输出（`serializers.py`）
+
+不需要修改原序列化逻辑，只要确保查询时使用默认排序即可：
+
+```python
+class HelpCategoryNestedSerializer(serializers.ModelSerializer):
+    children = serializers.SerializerMethodField()
+
+    class Meta:
+        model = HelpCategory
+        fields = ["id", "name", "order", "parent", "children"]
+
+    def get_children(self, obj):
+        children = obj.children.all().order_by("order", "id")
+        return HelpCategoryNestedSerializer(children, many=True).data
+```
+
+------
+
+## ✅ 五、测试用例中验证排序逻辑
+
+```python
+def test_category_ordering(self):
+    root = HelpCategory.objects.create(name="根分类")
+    cat_a = HelpCategory.objects.create(name="A类", parent=root, order=2)
+    cat_b = HelpCategory.objects.create(name="B类", parent=root, order=1)
+    cat_c = HelpCategory.objects.create(name="C类", parent=root, order=3)
+
+    ordered = list(HelpCategory.objects.filter(parent=root))
+    names = [c.name for c in ordered]
+    self.assertEqual(names, ["B类", "A类", "C类"])
+```
+
+------
+
+## ✅ 六、扩展建议
+
+你可以为后台管理界面或 API 添加排序功能：
+
+- **Django Admin**：
+   在 `admin.py` 中添加 `list_editable = ["order"]` 支持拖拽或直接编辑排序值。
+- **REST API**：
+   在视图中使用 `ordering_fields = ["order"]`，允许前端使用参数 `?ordering=order` 控制顺序。
+
