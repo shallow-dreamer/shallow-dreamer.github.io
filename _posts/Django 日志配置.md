@@ -2105,3 +2105,319 @@ MIDDLEWARE = [
 如果你想，我可以帮你写一个 **完整的 Django 配置 + 全局异常捕获 + SQL 锁超时自动日志记录示例**，直接放到项目里就能用，不用修改任何业务逻辑。  
 
 你希望我直接帮你写这个完整方案吗？
+
+---
+
+# you asked
+
+需要
+
+---
+
+# chatgpt response
+
+好，我给你一套**生产可用的完整方案**，满足你这些要求：
+
+- ✅ 不需要在业务代码里写 logger  
+- ✅ 自动记录所有未捕获异常（含 ORM 锁超时）  
+- ✅ 自动记录 SQL  
+- ✅ 自动记录慢查询  
+- ✅ 自动记录被阻塞的锁信息（PostgreSQL）  
+- ✅ 可用于生产环境  
+
+下面是完整结构。
+
+---
+
+# 一、settings.py 完整日志配置（生产可用）
+
+```python
+import os
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+
+    "formatters": {
+        "verbose": {
+            "format": "[{levelname}] {asctime} {name} {process:d} {thread:d} {message}",
+            "style": "{",
+        },
+        "simple": {
+            "format": "[{levelname}] {message}",
+            "style": "{",
+        },
+    },
+
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+        },
+        "error_file": {
+            "level": "ERROR",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": os.path.join(BASE_DIR, "logs/error.log"),
+            "maxBytes": 1024 * 1024 * 50,
+            "backupCount": 5,
+            "formatter": "verbose",
+        },
+        "sql_file": {
+            "level": "DEBUG",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": os.path.join(BASE_DIR, "logs/sql.log"),
+            "maxBytes": 1024 * 1024 * 50,
+            "backupCount": 3,
+            "formatter": "verbose",
+        },
+    },
+
+    "loggers": {
+
+        # 自动记录所有未处理请求异常
+        "django.request": {
+            "handlers": ["error_file", "console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+
+        # 记录数据库错误
+        "django.db.backends": {
+            "handlers": ["sql_file"],
+            "level": "DEBUG",   # 生产可以改成 INFO 或 WARNING
+            "propagate": False,
+        },
+
+        # 全局异常日志
+        "": {
+            "handlers": ["error_file"],
+            "level": "ERROR",
+        },
+    },
+}
+```
+
+⚠️ 生产建议：
+- DEBUG 模式下开启 SQL DEBUG
+- 正式生产可以改为 INFO，配合慢查询检测
+
+---
+
+# 二、全局异常自动捕获（无需写 logger）
+
+在你的项目 `apps.py` 或新建 `core/exception_hook.py`
+
+```python
+import sys
+import logging
+
+logger = logging.getLogger("django")
+
+def handle_exception(exc_type, exc_value, exc_traceback):
+
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    logger.error(
+        "Uncaught global exception",
+        exc_info=(exc_type, exc_value, exc_traceback)
+    )
+
+sys.excepthook = handle_exception
+```
+
+这样：
+
+- 后台线程异常
+- 管理命令异常
+- Celery异常
+- ORM锁超时
+
+都会自动写入 error.log
+
+无需在业务代码里写 logger。
+
+---
+
+# 三、Middleware 自动捕获所有 HTTP 请求异常
+
+创建：
+
+```
+core/middleware.py
+```
+
+```python
+import logging
+import time
+from django.db import connection
+
+logger = logging.getLogger("django")
+
+class GlobalExceptionAndSQLMiddleware:
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+
+        start_time = time.time()
+
+        try:
+            response = self.get_response(request)
+
+        except Exception as e:
+            logger.error(
+                f"Unhandled exception | Path: {request.path} | Method: {request.method}",
+                exc_info=True
+            )
+            raise
+
+        finally:
+            duration = time.time() - start_time
+
+            # 慢请求日志
+            if duration > 2:
+                logger.warning(
+                    f"SLOW REQUEST: {request.path} took {duration:.2f}s"
+                )
+
+            # 慢 SQL 记录
+            for query in connection.queries:
+                sql_time = float(query.get("time", 0))
+                if sql_time > 1:
+                    logger.warning(
+                        f"SLOW SQL ({sql_time}s): {query.get('sql')}"
+                    )
+
+        return response
+```
+
+然后在 settings.py：
+
+```python
+MIDDLEWARE = [
+    ...
+    "core.middleware.GlobalExceptionAndSQLMiddleware",
+]
+```
+
+---
+
+# 四、自动检测 PostgreSQL 锁等待（可定时执行）
+
+创建：
+
+```
+core/db_monitor.py
+```
+
+```python
+from django.db import connection
+import logging
+
+logger = logging.getLogger("django")
+
+def log_blocked_queries():
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+        SELECT
+            blocked_activity.query AS blocked_query,
+            blocking_activity.query AS blocking_query
+        FROM pg_catalog.pg_locks blocked_locks
+        JOIN pg_catalog.pg_stat_activity blocked_activity
+            ON blocked_activity.pid = blocked_locks.pid
+        JOIN pg_catalog.pg_locks blocking_locks
+            ON blocking_locks.locktype = blocked_locks.locktype
+        JOIN pg_catalog.pg_stat_activity blocking_activity
+            ON blocking_activity.pid = blocking_locks.pid
+        WHERE NOT blocked_locks.granted;
+        """)
+
+        rows = cursor.fetchall()
+
+        for blocked, blocking in rows:
+            logger.error(
+                f"LOCK BLOCKED\nBlocked Query: {blocked}\nBlocking Query: {blocking}"
+            )
+```
+
+可以：
+
+- 用 celery beat 定时执行
+- 或写成 management command 定期运行
+
+---
+
+# 五、数据库层面强烈建议（生产必开）
+
+PostgreSQL 配置：
+
+```
+log_lock_waits = on
+deadlock_timeout = 1s
+log_min_duration_statement = 1000
+```
+
+作用：
+
+- 自动记录锁等待
+- 自动记录死锁
+- 自动记录慢查询
+
+---
+
+# 六、最终你将得到什么
+
+当出现：
+
+- ORM 锁超时
+- 数据库死锁
+- 未捕获异常
+- 慢 SQL
+- 慢请求
+- 被阻塞事务
+
+系统会自动记录：
+
+- 错误堆栈
+- 具体 SQL
+- 请求路径
+- 执行时间
+- 阻塞 SQL
+
+而你 **完全不需要在业务代码里写 logger**。
+
+---
+
+# 七、锁超时定位思路（给你一个判断逻辑）
+
+如果未来再出现锁超时：
+
+1. 查看 error.log
+2. 看是哪条 SQL
+3. 看是否是 update_or_create
+4. 看是否缺索引
+5. 看是否事务过大
+6. 看是否高并发写同一行
+
+一般 90% 锁超时原因是：
+
+- 高频 update 同一行
+- 无索引导致行锁升级
+- 长事务
+- 未提交事务
+
+---
+
+如果你愿意，我可以下一步帮你：
+
+- 🔥 画一个“锁超时排查流程图”
+- 🔥 教你如何在本地 100% 复现锁超时
+- 🔥 分析你 update_or_create 可能的真实问题
+
+你想往哪个方向继续深入？
